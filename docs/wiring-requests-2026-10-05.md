@@ -129,3 +129,28 @@
 `verdict-ui-tabs-popup.md` 的 6 条（`FileColorManagerImpl.java` / `FileColorsConfigurable.kt` / `DetailController.java` / `ItemWrapperListRenderer.java` / `PopupPositionManager.java` / `PopupUpdateProcessor.java`）
 
 ⚠️ 注意 `pf/file-chooser` 已被**桶 7** 做完（族级判词），你不要重复。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+逐条复核（全部**已接线**，由先前的桶 8 / 大组件 lane 落地，本轮无需再改）：
+
+- A1 `QuickDocPopup`：`src/App.vue:2460` 已用 `<QuickDocPopup :layout :origin …>` 替换内联 div，`quickDoc.contents` 的 TS2339 已消失。
+- A2 `BreadcrumbsBar`：`src/App.vue:2198`（top）与 `:2225`（bottom）两处均已挂载，含 `:line="… + 1"`、`:show-members`、`@navigate="revealLocation"`。
+- A3 `RefactorPreviewDialog`：`src/App.vue:2453` 已挂载。
+- A4 `InspectionProfileSwitcher`：`src/App.vue:2361` 状态栏右侧已挂载。
+- A5 调试器终止/断点策略：`src/App.vue:276` 已 `watch(dapState.running)` → `applyDebuggerTermination(… hideDebuggerOnProcessTermination)`。
+- A6 `createEditorFileOps` 的两个 dep：`src/App.vue:1202-1203` 已补 `revealLocation` 与 `workspaceRoot`。
+- A7 `FileChooserDialog`：`src/App.vue:2452` 已挂载。
+- A8 `createStickyLines` 的 `language`：`src/App.vue:549` 已补 `language: () => associationOf(…)`。
+- A9 `RunAnythingDialog` 的 `payload.cwd`：`src/App.vue:2638` 已透传 `payload.cwd`，且 `:module-roots` 已传。
+- B1 `LspDiagnostic.code/tags`：`src/bridge.ts:118` 已有 `code?: string | number; tags?: number[]`。
+- B2 `ProblemRow.code`：`src/problems.ts:62` 已有 `code?: string`，`allProblems` 已透传。
+- C1 QuickDoc 12 类名样式：`src/style.css` 已含 `quickdoc*` 34 处命中。
+- C2 `.crumb-bg-*` 四档：`src/style.css` 已含 5 处命中。
+- D1 `RunConfig.type` 加 `'jar'`：`src/settingsModel.ts:31` 已有 `'jar'`。
+- D2 `showMembersInNavigationBar`：`src/settingsModel.ts:265/:344` 已登记并有默认值。
+- E 调试器悬停快速求值：`src/components/CodeEditor.vue:59/:65/:837` 已装配 `createQuickEvaluateHint`（宿主在 CodeEditor 名下，非本 lane 可改面，但已接）。
+- F `junitQuickFixActions`：`src/semanticActions.ts:37/:466` 已接入。
+- H1 `lspFeatureMatrix.ts:44` 文本更正：已照实改为「两条都在弹」。
+
+结论：本份 17 条**零待接**，未改任何文件。

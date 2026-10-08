@@ -30,7 +30,7 @@ import { ArrowLeft, ArrowRight, ExternalLink, MousePointer, RefreshCw, X } from 
 import { useBestPositionAnchor } from '../popupPlacement'
 import { iconSize } from '../uiIcons'
 import type { DocImage, DocLink, DocPart } from '../documentationView.ts'
-import { DOC_HOVER_LABELS, docHoverPolicy, toggleDocHoverPolicy, type DocHoverPolicy } from '../docHoverPolicy.ts'
+import { DOC_HOVER_LABELS, docHoverPolicy, toggleDocHoverPolicy, type DocHoverPolicy, type DocHoverSettingsPatch } from '../docHoverPolicy.ts'
 import type { QuickDocLayout } from '../quickDocLayout.ts'
 
 const props = defineProps<{
@@ -58,7 +58,7 @@ const emit = defineEmits<{
   (event: 'open-external'): void
   (event: 'follow', link: DocLink): void
   /** 齿轮改了一档：把要写回设置的补丁交给宿主持久化（`docHoverPolicyPatch()` 的形状）。 */
-  (event: 'policy-change', patch: Partial<Record<string, boolean>>): void
+  (event: 'policy-change', patch: DocHoverSettingsPatch): void
 }>()
 
 /**
@@ -189,7 +189,7 @@ watch(() => props.layout.images, async images => {
            已经内联的那些不在这行重复出现（`buildQuickDocLayout` 已按 `parts` 去掉）。 -->
       <div v-if="layout.links.length" class="quickdoc-links">
         <button v-for="(link, index) in layout.links" :key="`l${index}`" class="quickdoc-link" :class="`is-${link.kind}`" :title="link.target" @click="onLink(link)">
-          <span>{{ link.label }}</span><ExternalLink v-if="link.kind === 'external'" :size="iconSize.chip" />
+          <span>{{ link.label }}</span><ExternalLink aria-hidden="true" v-if="link.kind === 'external'" :size="iconSize.chip" />
         </button>
       </div>
       <figure v-for="(image, index) in layout.images" :key="`i${index}`" class="quickdoc-figure">
@@ -198,7 +198,7 @@ watch(() => props.layout.images, async images => {
       </figure>
       <div v-if="layout.external" class="quickdoc-bottom">
         <button class="quickdoc-link is-external" :title="layout.external.target" @click="emit('open-external')">
-          <span>{{ layout.external.label }}</span><ExternalLink :size="iconSize.chip" />
+          <span>{{ layout.external.label }}</span><ExternalLink aria-hidden="true" :size="iconSize.chip" />
         </button>
       </div>
     </div>

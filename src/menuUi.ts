@@ -66,6 +66,12 @@ export interface MenuUiDeps {
    */
   gearHostRows?: () => Record<string, MenuRow>
   /**
+   * **右侧**那条 dock 的齿轮宿主行（左右分栏后各有各的窗口，行内容跟着各自的视图走；
+   * 上游每个 ToolWindowEx 的齿轮是窗口自己的）。缺省回落到 `gearHostRows`（单测夹具
+   * 与只有左栏的旧世界一致）。
+   */
+  rightGearHostRows?: () => Record<string, MenuRow>
+  /**
    * 底部 dock 齿轮的宿主行（同一个机制，另一侧）：用法视图的「视图选项」组
    * （`UsageViewContentManagerImpl.java:114-116` 的 `additionalGearActions`）。
    */
@@ -82,7 +88,7 @@ export interface MenuUiDeps {
  * 但菜单树里没有对应行（IDEA 的键位面板就是按这个集合列出可改键的动作）。
  *
  * 键位动作是**每次按键**才注册进注册表的（`keymap.ts:418` 的 `registerKeymapActions`）。
- * `keymapBindings.ts` 的 30 个动作 id 里有 **21 个**在 `src/menus/*` 找不到对应行 ——
+ * `keymapBindings.ts` 的 31 个动作 id 里有 **21 个**在 `src/menus/*` 找不到对应行 ——
  * 转到行 / 快速文档 / 提取方法 / 按名字运行检查 / 打开设置 / 追溯 / 关闭标签页…，
  * 也就是说这些动作原先在「查找操作」与 Search Everywhere 里**一个都搜不到**。
  * （两个数字都由 `tests/keymap-bindings.test.mjs` 的「menuUi 的计数注释与键位表同步」现算，
@@ -118,7 +124,7 @@ addActionListener({ beforeActionPerformed: recordActionStep })
 export function createMenuUi(deps: MenuUiDeps) {
   const { notify, isDesktop, editorSettings, menu, workspace, menus, windowMenuRows, layoutMenuRows, toolsMenuRows,
           pluginList, mnemonics, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working, openWorkspace,
-          popupExtras, gearHostRows = () => ({}), bottomGearHostRows = () => ({}), fileColorRows = () => [] } = deps
+          popupExtras, gearHostRows = () => ({}), rightGearHostRows, bottomGearHostRows = () => ({}), fileColorRows = () => [] } = deps
 // 插件命令的执行：在动作表里按 id 找（IDEA 的 `ActionManager.getAction(id).actionPerformed`）。
 // 先记宏再执行，与其它菜单行同一条链 —— 所以走 `runAction` 而不是直接 `entry.run()`。
 function runPluginCommand(action: string) {
@@ -186,7 +192,7 @@ function pickMenuRow(row: MenuRow) {
 const projectWidgetOpen = ref(false)
 const projectWidgetQuery = ref('')
 const projectWidgetGroups = computed(() => groupProjects(
-  filterProjects(recentProjects.value, projectWidgetQuery.value),
+  filterProjects(recentProjects.value, projectWidgetQuery.value, workspace.value?.root ?? ''),
   workspace.value?.root,
 ))
 function toggleProjectWidget() {
@@ -333,6 +339,8 @@ const editorPopupRows = computed(() => editorPopupLayout(findMenuRow))
 // 工具窗口齿轮菜单里"属于工具窗口自己"的那几项（引用表见 src/menus/toolWindowGear.ts）。
 // 两条分开算：内容条（Close All / 标签形态）挂在**底部 dock**上，侧栏齿轮只拿"调整大小"那条。
 const toolWindowGearRows = computed(() => toolWindowGearLayout(findMenuRow, undefined, false, gearHostRows()))
+// 右侧那条 dock 的齿轮（同一个布局，宿主行跟着右栏自己的视图算 —— 左右分栏后不能再共用左栏那份）。
+const rightToolWindowGearRows = computed(() => toolWindowGearLayout(findMenuRow, undefined, false, (rightGearHostRows ?? gearHostRows)()))
 // 底部 dock 的齿轮同样收宿主行：用法视图（引用）的「视图选项」组挂在这一层，
 // 由宿主按"当前内容是哪一个"给（`src/usageViewGear.ts`）。
 const bottomGearRows = computed(() => toolWindowGearLayout(findMenuRow, undefined, true, bottomGearHostRows()))
@@ -362,6 +370,6 @@ watch(actionQuery, () => { actionIndex.value = 0 })
     branchOfProject, openRecentProject,
     actionSearch, actionQuery, actionIndex, actionInput, actionList, actionResults,
     openActionSearch, moveAction, runAction, runActionResult, refreshActionRegistryIndex,
-    editorPopup, editorPopupRows, openEditorPopup, closeEditorPopup, pickEditorPopup, findMenuRow, toolWindowGearRows, bottomGearRows,
+    editorPopup, editorPopupRows, openEditorPopup, closeEditorPopup, pickEditorPopup, findMenuRow, toolWindowGearRows, rightToolWindowGearRows, bottomGearRows,
   }
 }

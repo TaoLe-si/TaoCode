@@ -8,6 +8,8 @@
 //
 // 关键区别（这一条最容易做错）：**移除 ≠ 隐藏**。隐藏只收面板，按钮留在侧条上；
 // 移除是把按钮摘掉。所以判据要盯住"stripeOrder 里没有它了"，而不只是"面板收起了"。
+// 反向同理（2026-10-06 补齐）：移除**包含**隐藏 —— 上游是同一次 `hideToolWindow(removeFromStripe = true)`
+// 里的两半，只盯第 ② 半会把"面板还开着"那一半漏掉，见下面「移除的**第 ① 半**」那三条。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -31,7 +33,7 @@ function withStorage(run) {
   try { return run(store) } finally { globalThis.localStorage = previous }
 }
 
-function makeStripes() {
+function makeStripes(overrides = {}) {
   return createToolWindowStripes({
     isDesktop: true,
     workspace: { value: { root: 'D:/p', name: 'p', entries: [] } },
@@ -39,6 +41,7 @@ function makeStripes() {
     gradleAvailable: { value: true },
     explorer: { value: true },
     activeView: { value: 'files' },
+    ...overrides,
   })
 }
 
@@ -61,6 +64,65 @@ test('停靠在底部的窗口被移除后，底部那一排 tab 也不再列它
   })
 })
 
+// ── 移除的**第 ① 半**（收面板）：stripefix 2026-10-06 补的判据 ────────────────────────────
+// 上游这"两半"是**同一次调用**：`ToolWindowImpl.kt:923-925` 的 `actionPerformed` →
+// `ToolWindowManagerImpl.kt:833-868` 的 `hideToolWindow(…, removeFromStripe = true)`，
+// 里面先 `setHiddenState`（`:712-719`，`info.isVisible = false` 在 `:716`）收面板，
+// 再由 `mutation`（`:849-853`）写 `isShowStripeButton = false` + `entry.removeStripeButton()` 摘按钮。
+// 上面那些判据只盯住了第 ② 半（"侧条上没有它了"），于是第 ① 半退回成"按钮没了、面板还开着"
+// 那一格孤儿态 —— 上游 `ToolWindowManagerImpl.kt:1626-1627` 那句
+// "A safety check: if the tool window is visible, we ignore isShowStripeButton" 防的就是它。
+//
+// 夹具说明：宿主那边是 `watch([explorer, bottom, bottomTab, activeView], saveVisibility)`
+// （`src/toolWindowStripes.ts:767`）在维持"记录里的 visible = 此刻开着的那些"。单测里那几个 dep
+// 是普通对象、没有响应式，所以每条用例先显式 `saveVisibility()` 打一次底 —— 之后记录里那一位的
+// 变化就只能由**被清算的那次调用**产生，判据才有牙。
+test('移除正在显示的那一格：面板跟着收起，visible 与 showStripeButton 同批落盘', () => {
+  withStorage(store => {
+    const explorer = { value: true }
+    const stripes = makeStripes({ explorer, activeView: { value: 'outline' } })
+    stripes.saveVisibility()
+    assert.ok(stripes.stripeOrder.value('left').includes('outline'), '前提：结构视图在左侧条上')
+    assert.equal(JSON.parse(store.get('taocode.toolLayout:D:/p')).windows.outline.visible, true,
+      '前提：它此刻就是侧栏开着的那个')
+    stripes.removeStripeButton('outline')
+    assert.equal(explorer.value, false, '第 ① 半：面板必须收起（上游 setHiddenState，:712-719）')
+    const record = JSON.parse(store.get('taocode.toolLayout:D:/p')).windows.outline
+    assert.equal(record.showStripeButton, false, '第 ② 半：按钮摘掉')
+    assert.equal(record.visible, false, '同一条记录里两半必须一致，否则就是"看得见却没有入口"')
+  })
+})
+
+test('底部那一侧同理：移除当前选中的底部 tab 才收底部 dock', () => {
+  withStorage(store => {
+    const bottom = { value: true }
+    const bottomTab = { value: 'todo' }
+    const stripes = makeStripes({ bottom, bottomTab })
+    stripes.saveVisibility()
+    assert.ok(stripes.bottomAnchoredIds.value.includes('todo'), '前提：TODO 默认停在底部')
+    assert.equal(JSON.parse(store.get('taocode.toolLayout:D:/p')).windows.todo.visible, true, '前提：底部开着它')
+    stripes.removeStripeButton('todo')
+    assert.equal(bottom.value, false, '底部 dock 开着且显示的就是它 ⇒ 一起收（同一条 setHiddenState）')
+    assert.equal(JSON.parse(store.get('taocode.toolLayout:D:/p')).windows.todo.visible, false)
+  })
+})
+
+test('只收它自己那一格：移除没在显示的窗口不许把别的窗口带下去', () => {
+  withStorage(store => {
+    const explorer = { value: true }
+    const bottom = { value: true }
+    const stripes = makeStripes({ explorer, activeView: { value: 'files' }, bottom, bottomTab: { value: 'todo' } })
+    stripes.saveVisibility()
+    stripes.removeStripeButton('outline')
+    assert.equal(explorer.value, true, '侧栏此刻显示的是 files，outline 被移除不该收掉它')
+    assert.equal(bottom.value, true, '底部同理')
+    const windows = JSON.parse(store.get('taocode.toolLayout:D:/p')).windows
+    assert.equal(windows.files.visible, true, 'files 仍开着')
+    assert.equal(windows.todo.visible, true, 'todo 仍开着')
+    assert.equal(windows.outline.showStripeButton, false, '被移除的那个仍然摘掉按钮')
+  })
+})
+
 test('再激活就回来（showToolWindowImpl 的 isShowStripeButton = true）', () => {
   withStorage(() => {
     const stripes = makeStripes()
@@ -69,7 +131,6 @@ test('再激活就回来（showToolWindowImpl 的 isShowStripeButton = true）',
     assert.ok(stripes.stripeOrder.value('left').includes('outline'), '激活路径要把它放回侧条')
   })
 })
-
 test('移除是持久化的（机器偏好，与锚点/顺序同类）', () => {
   withStorage(store => {
     makeStripes().removeStripeButton('bookmarks')

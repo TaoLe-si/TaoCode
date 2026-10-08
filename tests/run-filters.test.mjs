@@ -70,7 +70,7 @@ test('异常分类徽标与栈帧解析、复制文本', () => {
   assert.equal(stackFrameCopyText('  at a.b(c.java:1)  '), 'at a.b(c.java:1)')
 })
 
-test('Java 栈帧折叠：长栈折叠中间、保留首尾；展开时原样', () => {
+test('Java 栈帧折叠：保留阈值内帧并将其余帧合并到占位行；展开时原样', () => {
   const lines = [
     { text: 'Exception in thread "main" java.lang.RuntimeException: boom' },
     { text: '\tat a.A.a(A.java:1)' },
@@ -84,13 +84,13 @@ test('Java 栈帧折叠：长栈折叠中间、保留首尾；展开时原样', 
     'Exception in thread "main" java.lang.RuntimeException: boom',
     '\tat a.A.a(A.java:1)',
     '\tat b.B.b(B.java:2)',
-    '\tat e.E.e(E.java:5)',
+    '\t<3 个折叠帧>',
   ])
-  assert.equal(folded[3].foldedFrames, 2, '中间去掉的 2 行标在被保留的最后一行上')
+  assert.equal(folded[3].foldedFrames, 3, '占位行记录阈值之后折叠的 3 行')
   assert.equal(folded[2].foldedFrames, undefined)
   assert.equal(foldJavaStackFrames(lines, true).length, 6, '展开时一行不少')
 
-  // 短栈（<= keep+1）不折叠。
+  // 阈值内的栈帧不折叠。
   const short = foldJavaStackFrames(lines.slice(0, 3), false)
   assert.equal(short.length, 3)
   assert.ok(short.every(line => line.foldedFrames === undefined))
@@ -118,7 +118,10 @@ test('接线：runIssues 收集全部链接、RunConsole 渲染片段与异常�
   assert.match(console, /foldJavaStackFrames\(/)
   assert.match(console, /splitRunLine\(text, links\)/)
   assert.match(console, /describeExceptionKind\(line\.exception\.kind\)/)
-  assert.match(console, /aria-label="暂停输出"|aria-label="继续输出"|runOutputPaused \? '继续输出' : '暂停输出'/)
+  // 暂停输出那颗钮的标签随暂停态翻转。读的是 `consolePaused`（`runOutputPausedState()`：
+  // EP `com.intellij.execution.consolePauseStateProvider` 的贡献，内建那条就是运行控制台自己的
+  // 暂停位），不是直接读 `runOutputPaused` —— 判据守**意图**（标签跟着暂停态翻），不锁死中间那一层。
+  assert.match(console, /:aria-label="consolePaused \? '继续输出' : '暂停输出'"/)
   assert.match(console, /@click="copyLine\(line\)"/)
   assert.match(console, /jumpLink\(segment\.link\)/)
 })

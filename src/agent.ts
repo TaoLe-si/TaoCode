@@ -1,14 +1,4 @@
-// TaoCode's in-IDE agent core (ROADMAP S5): pure decision and bookkeeping logic,
-// separated from the panel so every rule (permissions, plans, diffs, usage) is
-// unit-testable without a model. The only built-in provider is a deterministic
-// local fake — a real model requires separate authorization per the roadmap.
-//
-// NOT WIRED YET (deliberate): nothing in src/ imports this module, because phase 1 of
-// this project is a full IDE and the Agent panel is phase 2. The About dialog says the
-// same thing ("尚无 AI Agent / 模型执行"). Until the panel exists, this file is verified
-// only by tests/agent.test.mjs — treat changes here as library work, not as UI.
-
-export type AgentToolName = 'read_file' | 'write_file' | 'run_command' | 'fetch_network'
+export type AgentToolName = 'read_file' | 'write_file' | 'run_command' | 'fetch_network' | 'mcp_call'
 
 export interface AgentToolCall {
   id: number
@@ -33,6 +23,7 @@ export type PermissionVerdict = 'allow' | 'ask' | 'deny'
 
 // AG-04: every tool call passes through this gate before anything executes.
 export function decidePermission(tool: AgentToolName, settings: AgentPermissionSettings): PermissionVerdict {
+  if (tool === 'mcp_call') return 'ask'
   const level = settings[tool === 'read_file' ? 'read' : tool === 'write_file' ? 'write' : tool === 'run_command' ? 'run' : 'network']
   return level === 'allow' ? 'allow' : level === 'ask' ? 'ask' : 'deny'
 }
@@ -135,6 +126,14 @@ export interface AgentTranscriptEntry {
   params?: Record<string, unknown>
   result?: string
   approved?: boolean
+  modelToolCall?: {
+    providerCallId: string
+    name: string
+    input: Record<string, unknown>
+    agentCallId: number
+    result?: string
+    isError?: boolean
+  }
 }
 
 export function exportTranscript(entries: readonly AgentTranscriptEntry[], header: { model: string; started: string }): string {

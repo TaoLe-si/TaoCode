@@ -15,7 +15,7 @@ import { EditorSelection } from '@codemirror/state'
 import { isolateHistory } from '@codemirror/commands'
 import { DEFAULT_SEARCH_OPTIONS, buildSearchRegex, findStatusText, regexMatchAt, type SearchOptions } from './editorSearch.ts'
 import { goToMatch, matchesIn, searchStateOf, setSearchState } from './editorSearchExtension.ts'
-import { replaceWithCaseRespect } from './preserveCase.ts'
+import { preserveCaseReplacement } from './preserveCase.ts'
 import { replacementFromMatch } from './regexReplacement.ts'
 
 const OPTIONS_KEY = 'taocode.findOptions'
@@ -204,6 +204,8 @@ export function createFindController(getView: () => EditorView | undefined, noti
    *   ① 正则档先按这一处的匹配器展开 `$1` / `$0` / `${name}` 与 `\n`/`\xNNNN`/`\L…\E`
    *      （`RegExReplacementBuilder`，本仓 `src/regexReplacement.ts`）；
    *   ② 再按需套「保留大小写」—— `PreserveCaseUtil` 吃的是**命中文本**与**展开后的替换文本**。
+   *      默认档是逐词的 `applyCase(found, …)`（上游注册表项 `ide.find.word.based.preserve.case=true`，
+   *      `platform/util/resources/misc/registry.properties:1414`），选档在 `src/preserveCase.ts` 的入口函数里。
    * 反过来的话 `$1` 会被当成普通字符参与大小写形态判断，替换结果就错了。
    *
    * 模板非法（`$` 后面不是组号、`\` 后面没字符…）时返回 null 并报一次错 ——
@@ -226,7 +228,7 @@ export function createFindController(getView: () => EditorView | undefined, noti
         }
       }
     }
-    return state.preserveCase ? replaceWithCaseRespect(text, found) : text
+    return state.preserveCase ? preserveCaseReplacement(found, text) : text
   }
 
   function move(backwards: boolean) {

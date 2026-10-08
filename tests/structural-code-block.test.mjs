@@ -5,6 +5,10 @@
 //   · `platform/lang-impl/src/com/intellij/codeInsight/editorActions/CodeBlockUtil.java:108-120`（块尾 min）、
 //     `:176-188`（块首 max）
 //   · `platform/lang-impl/src/com/intellij/codeInsight/highlighting/CodeBlockSupportHandler.java:57-66`
+//   · `platform/analysis-impl/src/com/intellij/codeInsight/TargetElementUtilBase.java:56-74`
+//     （`adjustOffset`：`:60-62` 文件尾 clamp 到 len-1、`:63-65` 不是标识符字符先退一格、`:66-73` 那两个字符才认）
+//   · `python/python-parser/src/com/jetbrains/python/lexer/Python.flex:73-75`（串内 `\\` + 换行仍算同一条）与
+//     `:175`（单个反斜杠是 BACKSLASH token）—— 物理续行属于同一条逻辑行的词法凭证
 //   · `python/python-psi-impl/src/com/jetbrains/python/codeInsight/highlighting/PyControlFlowKeywordMatcher.kt`
 //     `:48-59`（关键字表）、`:88-90`（offset 或 offset-1）、`:119-128`（标记区间与语句区间）、
 //     `:130-137`（部件归属）、`:139-151`（同一条语句的部件收集）
@@ -202,3 +206,88 @@ test('块尾取 min、块首取 max；某一半没有时不合并（CodeBlockUti
   assert.equal(mergeBlockStart(20, null), 20, ':179-181')
   assert.equal(mergeBlockEnd(null, null), null, '两边都没有 ⇒ 本仓的「不吞键」那一档（上游 -1）')
 })
+
+// ── C. 块边界的缺项（ss4）：物理续行 / CRLF / 文件首尾 / 空文本 / 只有注释 / 单行块 ──
+// 上游的区间是 PSI 节点的 textRange（`AbstractCodeBlockSupportHandler.java:79-83` → `:81`），
+// 一条语句占几条**物理**行与它无关：括号没关上、行尾反斜杠、三引号串跨行都属于同一条逻辑行
+// （词法层凭证：`python/python-parser/src/com/jetbrains/python/lexer/Python.flex:73-75`
+// 的 `QUOTED_LITERAL` 允许 `\\` + 换行、`:175` 把单个反斜杠切成 BACKSLASH token）。
+// 所以「把物理续行另起一行」会把 if/elif/else 的部件链从中间截断 —— 下面四条钉住这一档。
+
+test('顶格的括号续行不截断部件链：闭合括号回到第 0 列时 else 仍属于同一条 if', () => {
+  const text = ['if a:', '    x = foo(', 'bar,', ')', 'else:', '    y = 2'].join('\n')
+  const onElse = text.indexOf('else') + 1
+  assert.deepEqual(pythonCompoundKeywordRanges(text, onElse).map(r => text.slice(r.from, r.to)), ['if', 'else'],
+    '续行不许被当成「第 0 列的一条非关键字语句」把链切断')
+  assert.deepEqual(findCodeBlockRange(text, onElse, 'python'), { from: 0, to: text.length })
+  assert.deepEqual(findCodeBlockRange(text, 1, 'python'), { from: 0, to: text.length }, '光标压头部关键字 ⇒ 拿到的是同一条语句')
+})
+
+test('行尾反斜杠的显式续行也并进上一条逻辑行（奇数个才算；偶数那一档是本仓文本层约定）', () => {
+  const joined = ['if a:', '    x = 1 \\', '+ 2', 'else:', '    y = 2'].join('\n')
+  assert.deepEqual(pythonCompoundKeywordRanges(joined, 1).map(r => joined.slice(r.from, r.to)), ['if', 'else'])
+  assert.deepEqual(findCodeBlockRange(joined, 1, 'python'), { from: 0, to: joined.length }, '块尾不许停在被反斜杠接走的那一行之前')
+  assert.deepEqual(findCodeBlockRange(joined, joined.indexOf('else') + 1, 'python'), { from: 0, to: joined.length })
+  // 偶数个反斜杠 = 转义出来的反斜杠本身，不续行：后面那条顶格的行按「上一条语句之外」处理。
+  const escaped = ['if a:', '    x = 1 \\\\', '+ 2'].join('\n')
+  const tail = escaped.indexOf('x = 1') + 'x = 1 \\\\'.length
+  assert.equal(escaped[tail], '\n', '前提：tail 就是这一行末尾那个换行的下标')
+  assert.deepEqual(findCodeBlockRange(escaped, 1, 'python'), { from: 0, to: tail },
+    '无法核实：JetBrains 的解析器怎么接「两条反斜杠结尾」的物理行不在这棵社区树里（`Python.flex:175` 只给 BACKSLASH token），这里钉的是本仓奇/偶约定')
+})
+
+test('跨行三引号串：部件链完整、块尾算到闭合那一行；串里的 if 依旧不是关键字', () => {
+  const text = ['if a:', '    x = """', '  text', '"""', 'else:', '    y = 1'].join('\n')
+  assert.deepEqual(pythonCompoundKeywordRanges(text, text.indexOf('else') + 1).map(r => text.slice(r.from, r.to)), ['if', 'else'])
+  assert.deepEqual(findCodeBlockRange(text, 1, 'python'), { from: 0, to: text.length }, '块尾要含到串闭合的那一行')
+  const docstring = ['"""', 'if a:', '"""', 'x = 1'].join('\n')
+  assert.equal(findCodeBlockRange(docstring, docstring.indexOf('if a:') + 1, 'python'), null,
+    '整段是文档字符串的正文 ⇒ 上游取到的叶子不是关键字 token ⇒ EMPTY_RANGE')
+})
+
+test('CRLF：行尾的 \\r 不算正文，空行照样不打断链，块尾不含 \\r\\n', () => {
+  const text = ['if a:', '', '    x = 1', 'else:', '    y = 2'].join('\r\n')
+  assert.deepEqual(pythonCompoundKeywordRanges(text, text.indexOf('else') + 1).map(r => text.slice(r.from, r.to)),
+    ['if', 'else'], '只剩 \\r 的那一行是空行，不是「第 0 列的一条语句」')
+  assert.deepEqual(findCodeBlockRange(text, 1, 'python'), { from: 0, to: text.length })
+  const trailing = ['if a:', '    x = 1'].join('\r\n') + '\r\n'
+  assert.deepEqual(findCodeBlockRange(trailing, 1, 'python'), { from: 0, to: trailing.length - 2 },
+    '上游的 textRange 到语句最后一个 token 为止：行尾换行（\\r\\n 那两个字符）都不许带进块尾')
+})
+
+test('空文本 / 光标越界 / 只有注释的文件 ⇒ null，不抛', () => {
+  assert.equal(findCodeBlockRange('', 0, 'python'), null)
+  assert.equal(findCodeBlockRange('', 7, 'python'), null, '空文本上光标写在长度之外（选中整个空文档再按 Ctrl+] 那种形状）')
+  const text = ['if a:', '    x = 1'].join('\n')
+  assert.equal(findCodeBlockRange(text, -3, 'python'), null, '负偏移不是任何一个字符')
+  assert.equal(findCodeBlockRange(text, text.length + 50, 'python'), null, '超出文件尾同理')
+  assert.equal(findCodeBlockRange(['# if a:', '#     x = 1'].join('\n'), 2, 'python'), null, '只有注释的文件里没有语句')
+})
+
+test('单行块与「光标正好压在块首行/块尾行的行尾」：区间只到关键字那一段算', () => {
+  assert.deepEqual(findCodeBlockRange('if a: x = 1', 1, 'python'), { from: 0, to: 11 }, '一条物理行的复合语句 = 整行')
+  assert.equal(findCodeBlockRange('if a: x = 1', 11, 'python'), null, '光标已经离开关键字 ⇒ EMPTY_RANGE')
+  const text = ['if a:', '    x = 1'].join('\n')
+  assert.equal(findCodeBlockRange(text, text.indexOf('\n'), 'python'), null, '块首行的行尾（那个换行）不是关键字叶子')
+  assert.equal(findCodeBlockRange(text, text.length, 'python'), null, '块尾行的行尾同理')
+  assert.deepEqual(findCodeBlockRange(text, 0, 'python'), { from: 0, to: text.length }, '文件首第 0 个字符就压在头部关键字上')
+})
+
+test('文件尾：TargetElementUtilBase.java:56-74 的 clamp 决定命中与否', () => {
+  const text = ['if a:', '    x = 1', 'else'].join('\n')
+  // `:60-62` offset >= 文本长度 ⇒ 先退到 len-1，`:66-71` 那一个字符是标识符字符 ⇒ 就用它 ⇒ 叶子是 `else`
+  assert.deepEqual(findCodeBlockRange(text, text.length, 'python'), { from: 0, to: text.length })
+  // 文件尾是换行 ⇒ clamp 到 len-1 落在换行符上，`:68-69` 不认 ⇒ 回原 offset ⇒ findElementAt(len) = null ⇒ EMPTY_RANGE
+  assert.equal(findCodeBlockRange(text + '\n', text.length + 1, 'python'), null)
+  assert.deepEqual(findCodeBlockRange(text + '\n', text.length, 'python'), { from: 0, to: text.length },
+    '光标压在紧邻关键字的那个换行上：`:63-65` 先减一，`:67-70` 见前一个字符是标识符字符 ⇒ 取到的叶子还是 `else`')
+})
+
+test('语言档那一条只认本仓的小写 id（Python 未进 EDITOR_LANGUAGES ⇒ 落差已登记）', () => {
+  const text = ['if a:', '    x = 1', 'else:', '    y = 2'].join('\n')
+  assert.equal(findCodeBlockRange(text, text.indexOf('else') + 1, 'py')?.from, 0)
+  for (const language of ['java', 'cpp', 'typescript', 'other', '', 'Python', 'python3']) {
+    assert.equal(findCodeBlockRange(text, text.indexOf('else') + 1, language), null, `${language} ⇒ 上游没有注册 handler / 本仓 id 不认`)
+  }
+})
+

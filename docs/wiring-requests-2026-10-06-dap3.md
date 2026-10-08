@@ -82,3 +82,15 @@
 3. 本轮**没有重算**锚点快照：`docs/inventory/citation-anchors.json` 一字未动，
    `src/components/DebugConsolePane.vue:5` 那条 `PauseOutputAction.java:18` 保持原样（新写的
    `tests/debug-console-freeze.test.mjs` 会拦任何把它改回去的动作）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **T1 已接线**：`src/bridge.ts:236` 的 `DapBreakpoint` 已含 `logMessage?: string`（见 dapfix R1 / 12c X3）。
+- **T2** —— 口径定夺项，非挂载。
+
+结论：T1 已接线，未改任何文件。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「T1 已接线，未改任何文件。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

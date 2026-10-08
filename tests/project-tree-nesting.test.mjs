@@ -63,7 +63,10 @@ test('nestedChildrenOf：模型判断一行有没有展开箭头', () => {
 
 test('模型与组件接上嵌套：父行可展开、子行缩进一级', () => {
   const model = read('../src/projectTreeModel.ts')
-  assert.match(model, /nestSiblings\(entries, nestingRules\(\)\)/)
+  // 2026-10-07 epclose2：折叠前先过 `com.intellij.treeStructureProvider` EP（无 provider 时恒等），
+  // 内建嵌套仍是 `nestSiblings` 那一步。
+  assert.match(model, /const providers = modifyProjectTreeChildren\(null, entries\.map\(toProviderNode\), \{/)
+  assert.match(model, /return nestSiblings\(providers\.map\(fromProviderNode\), nestingRules\(\)\)/)
   assert.match(model, /const hasNested = /)
   assert.match(model, /children !== undefined/)
   assert.match(model, /nestingParentPath\(path, entries\)/)

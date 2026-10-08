@@ -115,19 +115,19 @@ onBeforeUnmount(() => { dialog.value?.close(); if (previousFocus?.isConnected) p
       <div class="recent" v-if="readRecentColors().length"><button v-for="color in readRecentColors()" :key="color" type="button" :title="`最近使用 ${color}`" :aria-label="`最近使用 ${color}`" :style="{ background: color }" @click="selectRecent(color)" /></div>
       <label v-if="enableOpacity" class="alpha">Alpha<input type="range" min="0" max="255" :value="alpha" @input="setAlpha" /></label>
       <p>{{ enableOpacity ? 'RGB / RGBA 十六进制。' : 'RGB 十六进制；输入 Alpha 时按不透明 RGB 保存。' }}</p><p v-if="!normalized" class="error">请输入有效颜色。</p>
-      <footer><button type="button" @click="close">取消</button><button type="submit" :disabled="!normalized">确定</button></footer>
+      <footer><button type="submit" :disabled="!normalized">确定</button><button type="button" @click="close">取消</button></footer>
     </form>
   </dialog>
 </template>
 
 <style scoped>
-.color-chooser { width: 360px; max-width: calc(100vw - 32px); padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+.color-chooser { width: 360px; max-width: calc(100vw - 32px); padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--panel); color: var(--text); }
 /* 遮罩走 --backdrop 令牌（IDEA DialogWrapper 的 dim 层同理），原先写死 #0005 换主题不跟随。
    下面 .preview 的棋盘格**保留固定双色**：它是 alpha 通道的数据可视化，不是主题色 ——
    IDEA 同样用两个固定色画（AlphaSliderComponent.kt:61 paintCheckeredBackground）。 */
 .color-chooser::backdrop { background: var(--backdrop); } form { display: flex; flex-direction: column; gap: 9px; } h3, p { margin: 0; } p { color: var(--muted); font-size: 11px; }
 .preview { height: 28px; background: repeating-conic-gradient(#bbb 0 25%, #fff 0 50%) 0 / 12px 12px; border: 1px solid var(--line); } .preview span { display: block; height: 100%; }
-.color-fields { display: flex; align-items: end; gap: 5px; } .color-fields label, .hex-row label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; } .color-fields input { width: 54px; } .color-fields select { height: 24px; }
-.hex-row input { width: 100%; box-sizing: border-box; } .picker-row { display: flex; justify-content: center; } canvas { cursor: crosshair; border-radius: 50%; } .brightness, .alpha { display: flex; gap: 8px; align-items: center; } .brightness input, .alpha input { flex: 1; }
-.swatches, .recent { display: flex; gap: 5px; flex-wrap: wrap; } .swatches button, .recent button { width: 24px; height: 20px; border: 1px solid var(--line); } .recent button { border-radius: 50%; } .error { color: var(--error); } footer { display: flex; justify-content: flex-end; gap: 8px; }
+.color-fields { display: flex; align-items: end; gap: 5px; } .color-fields label, .hex-row label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; } .color-fields input { width: 54px; } .color-fields select { height: var(--ctrl-height-sm); }
+.hex-row input { width: 100%; box-sizing: border-box; } .picker-row { display: flex; justify-content: center; } canvas { cursor: crosshair; border-radius: 50%; } .brightness, .alpha { display: flex; gap: var(--space-2); align-items: center; } .brightness input, .alpha input { flex: 1; }
+.swatches, .recent { display: flex; gap: 5px; flex-wrap: wrap; } .swatches button, .recent button { width: 24px; height: 20px; border: 1px solid var(--line); } .recent button { border-radius: 50%; } .error { color: var(--error); } footer { display: flex; justify-content: flex-end; gap: var(--space-2); }
 </style>

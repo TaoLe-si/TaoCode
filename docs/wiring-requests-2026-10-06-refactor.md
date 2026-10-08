@@ -211,3 +211,16 @@ import { createUnwrapApplyCommand, findUnwrapCandidates, unwrapChooserItems, unw
 5. **本地 `Block`/`Spacing`/`Alignment` 块模型**（`csi/formatter` ①②、`cs/formatting-api` 块那一族）、
    **按列对齐**（`AlignmentInColumnsHelper.java:7-9` 依赖 `TreeUtil`/`IElementType`）、**CLI 批处理**、
    **逐方法生成**：判词与本片复核一致，理由写在 `docs/batch-2026-10-06-refactor.md` §2.2-§2.5 与 §7。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（树侧删除三选一）** —— 目标 `src/treeActions.ts`（本 lane）+ `src/App.vue`。登记为待办（与 format W1 同一条）。
+- **R2（Unwrap 多候选 chooser）** —— 目标 `src/components/CodeEditor.vue`（禁改）。需 CodeEditor owner。
+- **R3（Ctrl+Alt+I 自动缩进）** —— 目标 `src/components/CodeEditor.vue`（禁改）+ 桶 5。需对应 owner。
+
+结论：零接线（R1 登记，R2/R3 转 owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（R1 登记，R2/R3 转 owner）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

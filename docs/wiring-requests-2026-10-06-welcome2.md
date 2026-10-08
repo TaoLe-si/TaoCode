@@ -232,3 +232,15 @@ else await request('shell.openUrl', { url })                          // 策略 
   `selectionProblem`）；`src/components/FileChooserDialog.vue` 的 `picking` 换成选区
   （裸点清空 / Shift 段选 / Ctrl toggle，现成口径 `src/welcomeRowSelection.ts` 的 `selectionAfterClick`）。
   上游：`FileChooserDialogImpl.java:452`（`getSelectedFiles()` 返回数组）、`:552`（`VIRTUAL_FILE_ARRAY`）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R0** —— 已落登记。**R1（光标补列）已接线**：`src/App.vue:225` 已带 `character`。
+- **R2（外部链接判定）已接线**：`openExternalUrl`（见 welcome/bucket14c）。
+
+结论：R1/R2 已接线。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「R1/R2 已接线。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

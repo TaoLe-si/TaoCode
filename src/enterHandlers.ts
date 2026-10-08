@@ -29,8 +29,10 @@
 // `:140` `AUTOINSERT_PAIR_QUOTE` 把关引号那一族（消费方在 `src/editorTyping.ts`，不在这里）。
 // **订正**：`src/editorEnterBlockComment.ts` 与本文件之前的注释都写「本仓 `EditorSettings` 里没有这一条对应项」——
 // 实际是**有键**（`src/settingsModel.ts:427-431`，默认值 `:223`）**有界面**（`src/components/EditorEnterKeysFields.vue:29-33`）
-// **没有消费方**，也就是派单第 3 节禁的假控件。本批把消费链路写在模块侧（`EnterOptions`，不传时按上游默认值 true 走 ⇒
-// 现有行为一格不变），宿主把 `props.settings` 递进来的那一行在保留文件里 ⇒ `docs/wiring-requests-2026-10-06-editorinput.md` R1。
+// **没有消费方**，也就是派单第 3 节禁的假控件。本批把消费链路写在模块侧（`EnterLanguage` 的那两个字段，不传时按上游
+// 默认值 true 走 ⇒ 现有行为一格不变）；宿主那一行已经落地（`src/components/CodeEditor.vue:117` 把 `props.settings`
+// 交给 `smartEnterLanguageForView`，接线请求 W-1 已闭环）。关掉两把键各自的可见差别由
+// `tests/editor-enter-switches.test.mjs` 端到端钉住（判决第②条）。
 //
 // 每条的上游坐标（2026-10-06 逐行核对；此前这份头注释里 `:38-46`/`:64-75`/`:68-82` 那几处行号
 // 是上一任手抄的，与上游对不上的已就地订正，订正依据都写在下面的行号里）：
@@ -98,6 +100,12 @@ import { stringConcatFor } from './editorTyping.ts'
 import {
   ENTER_HANDLER_ORDER, enterInsertsNewline, preprocessEnter, type EnterBranch, type EnterHit,
 } from './enterHandlerOrder.ts'
+// 扩展点 `com.intellij.enterHandlerDelegate` 的分派（第三方按 id 挂的回车委托在这里被真实问到，
+// 排在既有次序表**之前**；bundled 的 passthrough 恒返回 Continue ⇒ 既有行为不变）。
+import { dispatchEnterDelegate, notifyEnterPostProcess, type EnterInput } from './editorActionExtensionPoints.ts'
+// 编辑器当前语言的 id（`com.intellij.enterHandlerDelegate` 按语言过滤用）。挂载点见
+// `src/editorMatchBrace.ts:51`；facet 没挂时读到 undefined ⇒ 委托按「任意语言」档处理。
+import { editorLanguageId } from './editorMatchBrace.ts'
 
 /** 这门语言的注释词法（上游 `Commenter.getLineCommentPrefix` 的一半，由调用方给）。 */
 export interface EnterLanguage {
@@ -552,7 +560,24 @@ export function smartEnterCommand(language: () => EnterLanguage): Command {
       lineFrom: line.from, lexicon, lex,
     }
     // 循环体与 break 语义 = `EnterHandler.java:136-153`（表驱动的等价物，见那模块的注释）。
+    // 扩展点 `com.intellij.enterHandlerDelegate` 排在表之前：任一委托给出非 `Continue` 的档就由它
+    // 说了算（`Stop` = 连默认回车都不跑）；都不接管（bundled passthrough）才走本仓的次序表。
+    const languageId = state.facet(editorLanguageId) ?? 'other'
+    const enterInput: EnterInput = {
+      path: '', language: languageId, text: docText,
+      offset: selection.head, line: line.number - 1, character: selection.head - line.from,
+    }
+    const delegated = dispatchEnterDelegate(enterInput)
+    if (delegated) {
+      if (delegated.result === 'Stop') return true
+      const indented = insertNewlineAndIndent(view)
+      if (delegated.caretAdvance > 0) view.dispatch({ selection: { anchor: view.state.selection.main.head + delegated.caretAdvance } })
+      notifyEnterPostProcess({ ...enterInput, text: view.state.doc.toString() })
+      return indented || delegated.caretAdvance > 0
+    }
     const hit = preprocessEnter(ENTER_HANDLER_ORDER, step => ENTER_IMPLS[step.id]?.(ctx) ?? null)
-    return hit ? applyEnterHit(view, hit) : false
+    const applied = hit ? applyEnterHit(view, hit) : false
+    if (applied) notifyEnterPostProcess({ ...enterInput, text: view.state.doc.toString() })
+    return applied
   }
 }

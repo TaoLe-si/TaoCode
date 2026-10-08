@@ -135,7 +135,7 @@ test('All 档含 text 供给者（上游 All = 除被关掉外的全部供给者
     path: 'src/a.ts', open: () => undefined,
   }
   assert.deepEqual(searchEverywhereResults([item], 'foo', 'all').map(each => each.id), ['text:src/a.ts:3:5'])
-  assert.deepEqual(searchEverywhereResults([item], 'foo', 'project'), [], '文本命中不进 Project 档')
+  assert.deepEqual(searchEverywhereResults([item], 'foo', 'files'), [], '文本命中不进 Files 档')
   assert.equal(searchEverywhereSourceLabel('text'), 'Text', '标签不能掉回 Run Configuration')
 })
 

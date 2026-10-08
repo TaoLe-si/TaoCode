@@ -79,7 +79,7 @@ function submit() {
     </button>
     <form v-if="open" class="popup" @submit.prevent="submit">
       <label class="prompt" for="vcslog-go-to-ref">{{ GO_TO_REF_PROMPT }}</label>
-      <input id="vcslog-go-to-ref" v-model="text" :placeholder="GO_TO_REF_TITLE" autocomplete="off" spellcheck="false" />
+      <input id="vcslog-go-to-ref" class="vcslog-go-to-ref-input" v-model="text" :placeholder="GO_TO_REF_TITLE" autocomplete="off" spellcheck="false" />
       <ul v-if="matches.length" class="matches" role="listbox" aria-label="引用补全">
         <li v-for="name in matches" :key="name">
           <button type="button" role="option" :aria-selected="false" @click="choose(name)">{{ name }}</button>
@@ -96,13 +96,13 @@ function submit() {
 
 <style scoped>
 .go-to-ref { position: relative; flex-shrink: 0; }
-.popup { position: absolute; top: 29px; right: 0; z-index: 6; width: min(320px, calc(100vw - 40px)); padding: 12px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow-3); }
+.popup { position: absolute; top: 29px; right: 0; z-index: 6; width: min(320px, calc(100vw - 40px)); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .prompt { color: var(--muted); font-size: 11px; }
-input { min-width: 0; padding: 2px 4px; min-height: 22px; background: var(--editor); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-xs); font: 11px/1.5 var(--font-ui); }
+.vcslog-go-to-ref-input { min-width: 0; padding: 2px var(--space-1); min-height: var(--ctrl-height-sm); background: var(--editor); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-xs); font: 11px/1.5 var(--font-ui); }
 .matches { margin: 0; padding: 0; max-height: 160px; overflow: auto; list-style: none; border: 1px solid var(--line); }
 .matches button { display: block; width: 100%; padding: 3px 6px; text-align: left; color: var(--text); background: none; border: 0; font-size: 11px; }
 .matches button:hover { background: var(--hover); }
 .problem { margin: 0; color: var(--error); font-size: 11px; overflow-wrap: anywhere; }
 .actions { display: flex; justify-content: space-between; }
-.actions button { background: var(--editor); color: var(--text); border: 1px solid var(--line); padding: 3px 8px; font-size: 11px; }
+.actions button { background: var(--editor); color: var(--text); border: 1px solid var(--line); padding: 3px var(--space-2); font-size: 11px; }
 </style>

@@ -105,12 +105,17 @@ test('四档算术与页脚一致', () => {
 // `src/changesMenuActions.ts:67` 入口 + `src/components/SourceControl.vue:227`，判据 `tests/merge-resolve.test.mjs`；
 // 上游 `platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt:31`/`:35` 逐行核过），
 // `[~]` → `[x]`（32 + 351）。
+// 2026-10-06 b1b7verdict lane 再改判 `HighlightPolicy`（行内高亮五档全落 + 三条正交派生语义，
+// 判据 `tests/diff-policy-combo.test.mjs`），`[~]` → `[x]`（33 + 350）。
+// 同批再复判查找栏九个叶子动作（Add/Remove/Next/PrevOccurrenceAction、SwitchToFind/SwitchToReplace、
+// ToggleMatchCase/ToggleWholeWordsOnlyAction/ToggleFindInSelectionAction）：上游都只是 session 转发，
+// 本仓命令/键位/菜单/行为四层同果、原判词无缺口记录，`[~]` → `[x]`（42 + 341）。
 // 这组数是此刻的账。以后改判必然要动这里 —— 这正是这条断言存在的意义：改判是动作，不是漂移。
 test('本轮清扫后的四档计数已冻结', () => {
   const count = v => rows.filter(r => r.verdict === v).length
   assert.deepEqual(
     [count('[x]'), count('[~]'), count('[ ]'), count('[-]')],
-    [32, 351, 0, 247],
+    [42, 341, 0, 247],
     '四档与清扫结果不一致：改了判决就把这组数与页脚一起改'
   )
 })

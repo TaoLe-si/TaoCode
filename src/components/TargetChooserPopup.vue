@@ -26,10 +26,16 @@ const list = ref<HTMLElement>()
 const visible = computed(() => filterChooseTargets(props.rows, filter.value))
 // 打开时选中第一条（弹层里的列表都带一个当前项，Enter 才有落点）。
 const selected = ref(0)
+function scrollSelectedIntoView() {
+  if (selected.value < 0) return
+  list.value?.querySelectorAll<HTMLElement>('.choose-target-row')[selected.value]?.scrollIntoView({ block: 'nearest' })
+}
 watch(visible, rows => {
   if (selected.value >= rows.length) selected.value = rows.length ? 0 : -1
+  void nextTick(scrollSelectedIntoView)
 })
-void nextTick(() => list.value?.focus())
+watch(selected, () => { void nextTick(scrollSelectedIntoView) })
+void nextTick(() => { list.value?.focus(); scrollSelectedIntoView() })
 
 function pick(row: ChooseTargetRow | undefined) { if (row) emit('pick', row) }
 function onKeydown(event: KeyboardEvent) {
@@ -74,3 +80,7 @@ onUnmounted(() => window.removeEventListener('pointerdown', onPointerDown, true)
     <p v-if="!visible.length" class="choose-target-empty">没有匹配的目标。</p>
   </div>
 </template>
+
+<style scoped>
+.choose-target { max-height: calc(100vh - 8px); overflow-y: auto; }
+</style>

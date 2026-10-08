@@ -566,6 +566,143 @@ int main() {
                   "re-read shows LF-only lines");
         });
 
+        // The third tier: `LineSeparator.java:17-20` is LF/CRLF/**CR**, the CR entry being
+        // `ConvertToMacLineSeparatorsAction.java:14` and listed in the ChangeLineSeparators
+        // group at `PlatformActions.xml:405-408`. Before it existed, write() matched the
+        // buffer against "\r\n" only, so a classic-Mac file — which contains no CRLF at all
+        // — was reported as LF and had every line ending rewritten on the first save.
+        run("classic Mac CR is a real tier on read, save and convert", [&] {
+            put(root / "mac-cr.txt", "a\rb\rc\r");
+            const auto doc = workspace.read("mac-cr.txt");
+            check(doc.at("content").get<std::string>() == "a\rb\rc\r", "read keeps the lone CR bytes");
+            const auto kept = workspace.write("mac-cr.txt", doc.at("content").get<std::string>(), doc.at("version").get<std::string>());
+            check(get(root / "mac-cr.txt") == "a\rb\rc\r", "saving an untouched CR buffer keeps every CR");
+            check(kept.at("version").get<std::string>() == doc.at("version").get<std::string>(), "the CR no-op save keeps the fingerprint");
+            check(kept.at("bytes").get<std::size_t>() == 6, "the CR save writes the same six bytes");
+
+            // Counted, not matched (`LoadTextUtil.java:801-813`): CRLF wins over both other
+            // tallies, so a mixed buffer is rejoined as CRLF and never degrades to LF. The
+            // document itself is separator-agnostic upstream too — every break collapses on
+            // load and the detected tier is what a save writes back.
+            put(root / "mixed-cr.txt", "a\r\nb\rc\r\n");
+            const auto mixed = workspace.read("mixed-cr.txt");
+            workspace.write("mixed-cr.txt", mixed.at("content").get<std::string>(), mixed.at("version").get<std::string>());
+            check(get(root / "mixed-cr.txt") == "a\r\nb\r\nc\r\n", "a CRLF-majority buffer saves back as CRLF, stray CR included");
+            // And the else-if chain stays: LF beats a CR that does not outnumber it.
+            put(root / "tie-cr.txt", "a\rb\nc\n");
+            const auto tie = workspace.read("tie-cr.txt");
+            workspace.write("tie-cr.txt", tie.at("content").get<std::string>(), tie.at("version").get<std::string>());
+            check(get(root / "tie-cr.txt") == "a\nb\nc\n", "an LF-majority buffer normalizes its lone CR to LF");
+            put(root / "even-cr.txt", "x\ry\n");
+            const auto even = workspace.read("even-cr.txt");
+            workspace.write("even-cr.txt", even.at("content").get<std::string>(), even.at("version").get<std::string>());
+            check(get(root / "even-cr.txt") == "x\ny\n", "a CR/LF tie goes to LF, as upstream's chain does");
+
+            // Conversion reaches CR from either tier and is a no-op once it is there.
+            put(root / "to-cr.txt", "x\r\ny\r\n");
+            const auto crlf = workspace.read("to-cr.txt");
+            const auto to_cr = workspace.convert_line_separators("to-cr.txt", "cr", "x\ny\n", crlf.at("version").get<std::string>());
+            check(to_cr.at("changed").get<bool>() == true, "crlf -> cr reports a change");
+            check(get(root / "to-cr.txt") == "x\ry\r", "the file now uses classic Mac CR");
+            const auto cr_doc = workspace.read("to-cr.txt");
+            check(cr_doc.at("content").get<std::string>() == "x\ry\r", "the CR file reads back as CR");
+            check(workspace.convert_line_separators("to-cr.txt", "cr", "x\ry\r", cr_doc.at("version").get<std::string>())
+                      .at("changed").get<bool>() == false, "an already-CR file changes nothing");
+            const auto lf_back = workspace.convert_line_separators("to-cr.txt", "lf", "x\ry\r", cr_doc.at("version").get<std::string>());
+            check(lf_back.at("changed").get<bool>() == true, "cr -> lf reports a change");
+            check(get(root / "to-cr.txt") == "x\ny\n", "CR converts back to LF");
+            const auto cr_again = workspace.convert_line_separators("to-cr.txt", "cr", "x\ny\n", lf_back.at("version").get<std::string>());
+            check(cr_again.at("changed").get<bool>() == true, "lf -> cr reports a change");
+            check(get(root / "to-cr.txt") == "x\ry\r", "and LF converts back to CR");
+            // The guards the other two tiers already had apply to CR too.
+            expect_error("CONFLICT", [&] { workspace.convert_line_separators("to-cr.txt", "cr", "x\ny\n", "stale"); });
+            workspace.set_read_only("to-cr.txt", true);
+            expect_error("READ_ONLY", [&] { workspace.convert_line_separators("to-cr.txt", "cr", "x\ny\n",
+                                                                              workspace.read("to-cr.txt").at("version").get<std::string>()); });
+            workspace.set_read_only("to-cr.txt", false);
+            // Nothing falls through to a default byte sequence any more: an unknown token
+            // fails here (ahead of even the version check) and does not touch the file.
+            const auto untouched = get(root / "to-cr.txt");
+            for (const char* rejected : {"mac", "", "CRLF", "CR", "\r", "lf ", "cr lf", "none"}) {
+                expect_error("INVALID_SETTINGS", [&] { workspace.convert_line_separators("to-cr.txt", rejected, "x\ny\n", "stale-on-purpose"); });
+            }
+            check(get(root / "to-cr.txt") == untouched, "a refused token leaves the bytes alone");
+        });
+
+        // UTF-32 in both directions. `CharsetToolkit.java:424-429` tests the marks in the
+        // order UTF-8, UTF-32BE, UTF-32LE, UTF-16LE, UTF-16BE — and the order is the
+        // semantics: the UTF-32LE mark FF FE 00 00 *starts with* the UTF-16LE mark FF FE,
+        // so sniffing UTF-16 first turns every UTF-32LE file into mojibake UTF-16.
+        run("UTF-32 byte-order marks decode as UTF-32, never as UTF-16", [&] {
+            // 'A', U+4E2D 中, U+1F600 — the last one is a surrogate pair for any 16-bit
+            // codec, which is what makes the UTF-32 path worth exercising.
+            const std::string le_body = std::string{"\x41\x00\x00\x00", 4} + std::string{"\x2D\x4E\x00\x00", 4} +
+                                        std::string{"\x00\xF6\x01\x00", 4};
+            const std::string be_body = std::string{"\x00\x00\x00\x41", 4} + std::string{"\x00\x00\x4E\x2D", 4} +
+                                        std::string{"\x00\x01\xF6\x00", 4};
+            const std::string expected = std::string("A") + std::string{"\xE4\xB8\xAD", 3} + std::string{"\xF0\x9F\x98\x80", 4};
+            const std::string le_mark{"\xFF\xFE\x00\x00", 4}, be_mark{"\x00\x00\xFE\xFF", 4};
+
+            put(root / "u32le.txt", le_mark + le_body);
+            const auto le = workspace.read("u32le.txt");
+            check(le.at("encoding") == "utf-32le", "FF FE 00 00 is the UTF-32LE mark, not UTF-16LE");
+            check(le.at("bom") == true, "the UTF-32LE mark is reported as a byte-order mark");
+            check(le.at("content") == expected, "UTF-32LE decodes to UTF-8, astral plane included");
+            const auto le_saved = workspace.write("u32le.txt", expected, le.at("version").get<std::string>(), "utf-32le", true);
+            check(get(root / "u32le.txt") == le_mark + le_body, "saving as UTF-32LE reproduces the exact bytes");
+            check(le_saved.at("encoding") == "utf-32le" && le_saved.at("bom") == true, "the save echoes the encoding pair");
+            check(workspace.read("u32le.txt").at("content") == expected, "the UTF-32LE round trip re-reads the same characters");
+
+            // UTF-32BE's mark starts with a NUL, so a strlen()-based table would have
+            // measured it as zero bytes long and never matched it.
+            put(root / "u32be.txt", be_mark + be_body);
+            const auto be = workspace.read("u32be.txt");
+            check(be.at("encoding") == "utf-32be", "00 00 FE FF is the UTF-32BE mark");
+            check(be.at("content") == expected, "UTF-32BE decodes big-endian units");
+            workspace.write("u32be.txt", expected, be.at("version").get<std::string>(), "utf-32be", true);
+            check(get(root / "u32be.txt") == be_mark + be_body, "saving as UTF-32BE reproduces the exact bytes");
+
+            // An explicit choice needs no mark; auto-detection must not mistake the same
+            // NUL-bearing bytes for text (UTF-8 without a mark stays binary).
+            put(root / "u32-bare.txt", le_body);
+            const auto bare = workspace.read("u32-bare.txt", "utf-32le");
+            check(bare.at("encoding") == "utf-32le" && bare.at("bom") == false, "an explicit choice needs no mark");
+            check(bare.at("content") == expected, "the bare UTF-32LE body decodes");
+            expect_error("BINARY_FILE", [&] { workspace.read("u32-bare.txt"); });
+
+            // Strict, like every other codec here: a unit that is not a Unicode scalar,
+            // and a truncated tail, are refused instead of decoded into nonsense.
+            // (Little-endian byte order here: 00 D8 00 00 *is* U+D800, while D8 00 00 00 is
+            // the harmless U+00D8 — a fixture that misses the branch is a free pass.)
+            put(root / "u32-surrogate.txt", le_mark + std::string{"\x00\xD8\x00\x00", 4});
+            expect_error("ENCODING_MISMATCH", [&] { workspace.read("u32-surrogate.txt"); });
+            put(root / "u32-surrogate-low.txt", le_mark + std::string{"\x00\xDC\x00\x00", 4});
+            expect_error("ENCODING_MISMATCH", [&] { workspace.read("u32-surrogate-low.txt"); });
+            put(root / "u32-surrogate-be.txt", be_mark + std::string{"\x00\x00\xD8\x00", 4});
+            expect_error("ENCODING_MISMATCH", [&] { workspace.read("u32-surrogate-be.txt"); });
+            put(root / "u32-over.txt", le_mark + std::string{"\x00\x00\x11\x00", 4});  // U+110000
+            expect_error("ENCODING_MISMATCH", [&] { workspace.read("u32-over.txt"); });
+            put(root / "u32-over-be.txt", be_mark + std::string{"\x00\x11\x00\x00", 4});  // U+110000
+            expect_error("ENCODING_MISMATCH", [&] { workspace.read("u32-over-be.txt"); });
+            put(root / "u32-short.txt", le_mark + std::string("abc", 3));
+            expect_error("ENCODING_MISMATCH", [&] { workspace.read("u32-short.txt"); });
+
+            // Positive control: the new UTF-32 test must not swallow real UTF-16LE files.
+            put(root / "u16le-control.txt", std::string{"\xFF\xFE", 2} + std::string{"A\x00\x2D\x4E", 4});
+            const auto u16 = workspace.read("u16le-control.txt");
+            check(u16.at("encoding") == "utf-16le", "FF FE followed by a non-NUL unit is still UTF-16LE");
+            check(u16.at("content") == std::string("A") + std::string{"\xE4\xB8\xAD", 3}, "UTF-16LE decodes as before");
+
+            // The two new tiers compose: a CR buffer inside a UTF-32LE file keeps both.
+            const std::string cr_units = std::string{"a\x00\x00\x00", 4} + std::string{"\r\x00\x00\x00", 4} +
+                                         std::string{"b\x00\x00\x00", 4};
+            put(root / "u32-cr.txt", le_mark + cr_units);
+            const auto cr_le = workspace.read("u32-cr.txt");
+            check(cr_le.at("content") == "a\rb", "a UTF-32LE CR file reads as a CR buffer");
+            workspace.write("u32-cr.txt", cr_le.at("content").get<std::string>(), cr_le.at("version").get<std::string>(), "utf-32le", true);
+            check(get(root / "u32-cr.txt") == le_mark + cr_units, "the CR survives a UTF-32LE save byte-for-byte");
+        });
+
         // RevealProjectDirAction (welcomeScreen/projectActions/RevealProjectDirAction.kt:25-33):
         // the welcome screen reveals an absolute path with no workspace open. Only the guards are
         // exercised here — a successful call spawns Explorer, which a test must not do.

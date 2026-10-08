@@ -91,3 +91,14 @@
   `docs/wiring-requests-2026-10-06-bucket14c.md` 各一条「参考树里没有这个文件」；
   `node .tools/find-orphan-modules.mjs --gate` 红在 `src/rootsJarEntries.ts`（桶 15）。
 - 只是登记归属，方便你分派；我一行都没碰。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1 已接线**：`src/components/CodeEditor.vue:853` 已有 `smartQuotes(() => props.language, () => props.settings.autoInsertPairQuote), angleBraceHighlight(() => props.language)`。
+- **W-2 已接线**：`src/App.vue:2223` sticky 行已是 `role="button" tabindex="0" :title="…" @click="revealLocation(stickyRevealTarget(symbol, groupActive(pane)!.path))"`，`aria-hidden` 已去。
+- **W-3（EditorMatchBrace 键位）跳过** —— 目标 `src/actionRegistry.ts` + `src/keymapBindings.ts`/`src/keymap.ts`（保留文件，非本 lane）。需 keymap/action owner。
+- **W-4 已接线**：`src/settingsModel.ts:469/:471/:473` 三字段 + `:265` 默认值；`CodeEditor.vue:853` 已消费 `autoInsertPairQuote`。
+- **W-5 未接** —— 目标 `src/components/CodeEditor.vue`（禁改清单）需先 emit 可视区首行，`src/App.vue:559` 的 `createStickyLines` 才能补 `firstVisibleLine`。需 CodeEditor owner。
+- **W-6** —— 登记项，非接线。
+
+结论：W-1/W-2/W-4 已接线；W-3/W-5 转给对应 owner。

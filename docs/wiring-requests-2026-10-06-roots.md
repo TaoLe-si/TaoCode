@@ -42,3 +42,15 @@ roots2 轮（本文件续批）把 R1 的**模块侧全部落完**、R2 的两�
 - 结论：**这条不需要主代理再裁决**；本仓现在只剩 R1 的 App.vue 那一行。
   （留痕：本文件原写「两条请求的前端侧已就绪、等的是这两处保留文件的口子」—— 实际两处口子都已开，
   本行按现状改成作废。核对方式：直接 grep 那两个文件的现树内容。）
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1 已接线**：与 roots2 N1 / roots3 A1 同一条 —— `src/App.vue:1914` 的 `addRunConfiguration` 已收第三参 `env`（本 lane 落，见 roots2 处理结果）。
+- **R2** —— 请求原文自述「作废」。
+
+结论：R1 已接线，未改本份点名的其他文件。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「R1 已接线，未改本份点名的其他文件。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

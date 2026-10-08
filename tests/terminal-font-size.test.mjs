@@ -10,6 +10,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { loadSetup } from './vue-sfc-loader.mjs'
 
 import {
   FONT_SIZE_STEP_DOWN, FONT_SIZE_STEP_UP, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE,
@@ -238,3 +239,74 @@ test('六处成对 + 缺省值：false / 13 在两把键的每一张表里都同
     assert.equal(previewSettingsError('terminalBaseFontSize', good, languages), null, `边界值 ${good} 应当收`)
   }
 })
+
+/**
+ * 判据（b10judge 新增，2026-10-06）：**成对的第七处 = 宿主挂载**。
+ * 上面那些判据把两把键钉成了「存得下 + 面板读得到」：`src/settingsModel.ts`（接口与缺省）、
+ * `native/settings_schema.hpp` 白名单、`native/settings_schema.cpp` 默认值、
+ * `native/settings_editor_keys.hpp` 值域、`src/previewSettings.ts` 预览档、面板那六个取数点、
+ * `src/components/SettingsDialog.vue` 的两格设置页行 —— 一处不缺也照样可能整条链是死的：
+ * `src/components/TerminalPanel.vue` 的 `settings` prop 是**可选**的，宿主挂载少写
+ * `:settings="editorSettings"` 时 `vue-tsc` 不报（可选 prop 缺省合法）、上面每一条都仍绿，
+ * 界面上「终端基准字号 / 按 Ctrl+鼠标滚轮改变字号」那两格却永远停在内置档（13 / 关）。
+ * 这条正是 `docs/wiring-requests-2026-10-06-b10audit.md` 第 2 条由主代理落地
+ * （`docs/batch-2026-10-06-main.md` §11.2）之后**没有任何测试覆盖**的那一行。
+ *
+ * 上游依据（本代理逐行打开过，坐标为实测）：
+ *   · 总闸默认关：`platform/ide-core-impl/src/com/intellij/openapi/editor/ex/EditorSettingsExternalizable.java:124`
+ *     = `    public boolean IS_WHEEL_FONTCHANGE_ENABLED = false;`（getter 同文件 `:1043`、setter `:1047`）；
+ *   · 两道条件的那扇门：`platform/execution-impl/src/com/intellij/terminal/JBTerminalPanel.java:382`
+ *     = `if (EditorSettingsExternalizable.getInstance().isWheelFontChangeEnabled() && EditorUtil.isChangeFontSize(e)) {`
+ *     （`:383` 新字号 = 当前 - wheelRotation、`:384` 界内才写、`:386` `return` ⇒ 缩放时不滚缓冲区）；
+ *   · 界 4..40：`platform/editor-ui-ex/src/com/intellij/application/options/EditorFontsConstants.java:11-13`
+ *     （`getMinEditorFontSize()` = `JBUIScale.scale(4)`）与 `:15-17`（`ide.editor.max.font.size` 默认 40）；
+ *   · 基准字号上游没有那一格，只有现算的那一档：`platform/execution-impl/src/com/intellij/terminal/`
+ *     `TerminalUiSettingsManager.kt:123-128` 的 `detectFontSize()`（`resetFontSize()` `:130-132` 交回它）。
+ */
+const PANEL = 'src/components/TerminalPanel.vue'
+
+/** `loadSetup` 里没有组件实例，`onMounted`/`onBeforeUnmount` 会各打一条 dev 警告 —— 与本判据无关，消音。 */
+function quiet(fn) {
+  const error = console.error
+  console.error = () => {}
+  try { return fn() } finally { console.error = error }
+}
+
+test('宿主把 :settings 交给终端面板：没接 ⇒ 面板按内置档，接了 ⇒ 界面那一格跟着用户那一档走', () => {
+  const app = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
+  const mounts = [...app.matchAll(/<TerminalPanel\b[^>]*>/g)].map(match => match[0])
+  assert.ok(mounts.length >= 1, 'src/App.vue 里找不到终端面板的挂载 ⇒ 面板根本没上树')
+  for (const tag of mounts) {
+    assert.match(tag, /:settings="editorSettings"/,
+      '终端面板挂载少传 :settings ⇒ 设置页那两格改了没反应（prop 可选，vue-tsc 与上面那些判据都不会报）')
+    assert.equal(/:settings="\s*\{/.test(tag), false,
+      '不许在挂载处现抄一份字面量 —— 抄来的那份不随 settings.update 的回包更新')
+  }
+  // 传进去的必须是那本活账：初值取 defaultEditorSettings，保存回包整体替换。
+  assert.match(app, /const editorSettings = ref<EditorSettings>\(\{ \.\.\.defaultEditorSettings \}\)/,
+    '宿主侧那本编辑器账的初值就是设置缺省（wheelFontChangeEnabled:false / terminalBaseFontSize:13）')
+  assert.match(app, /editorSettings\.value = await request<EditorSettings>\('settings\.update'/,
+    '保存回包要换掉整本账，否则传给面板的是快照')
+
+  // ── 两侧都真跑一遍：调的是组件自己那份 setup 源码，不是重写一遍规则 ──
+  const wired = quiet(() => loadSetup(PANEL, { active: true, settings: { wheelFontChangeEnabled: true, terminalBaseFontSize: 18 } }))
+  assert.equal(wired.bindings.baseFontSize.value, 18, '接了 ⇒ 基准字号 = 用户那一档')
+  assert.equal(wired.bindings.fontSizeShown.value, 18, '工具条那一格显示的是 18px')
+  assert.equal(wired.bindings.wheelFontZoomEnabled.value, true, '接了 ⇒ 总闸跟着设置开')
+  assert.equal(terminalWheelZoomApplies({ ctrlKey: true }, wired.bindings.wheelFontZoomEnabled.value), true,
+    '开着时 Ctrl+滚轮这一档才走缩放（JBTerminalPanel.java:382 的前半个条件）')
+
+  const unwired = quiet(() => loadSetup(PANEL, { active: true }))
+  assert.equal(unwired.bindings.baseFontSize.value, TERMINAL_BASE_FONT_SIZE,
+    '宿主没接 ⇒ 面板退回内置 13，用户在设置页改的那一档在界面上不出现')
+  assert.equal(unwired.bindings.fontSizeShown.value, TERMINAL_BASE_FONT_SIZE)
+  assert.equal(unwired.bindings.wheelFontZoomEnabled.value, false, '没接时总闸关（EditorSettingsExternalizable.java:124 的 false）')
+  assert.equal(terminalWheelZoomApplies({ ctrlKey: true }, unwired.bindings.wheelFontZoomEnabled.value), false)
+
+  // 越界与坏值都不采纳：宿主传什么都不把复位打到 xterm 不接受的那一档。
+  const outOfRange = quiet(() => loadSetup(PANEL, { active: true, settings: { terminalBaseFontSize: 41 } }))
+  assert.equal(outOfRange.bindings.baseFontSize.value, TERMINAL_BASE_FONT_SIZE, '41 越界（EditorFontsConstants.java:15-17）⇒ 不采纳')
+  const notAnInteger = quiet(() => loadSetup(PANEL, { active: true, settings: { terminalBaseFontSize: 13.5 } }))
+  assert.equal(notAnInteger.bindings.baseFontSize.value, TERMINAL_BASE_FONT_SIZE, '非整数 ⇒ 不采纳（Number.isInteger 那道守卫）')
+})
+

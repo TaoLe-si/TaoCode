@@ -145,3 +145,17 @@ const pickHierScope = (event: Event) => setHierarchyScope((event.target as HTMLS
 所以 `getType`/逐引用读写**给不出**，标题只能取"文件名或符号名"这一档。
 建议改法（**由那两个文件的归属代理落**）：把 `payload.path` 那一段换成"根元素所在文件的文件名"，
 即 `${baseName(payload.path)}#${symbol}` 的形状，其余一字不动；本批不越界去改。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **N-1 已接线**（落点迁移）：引用面板渲染在 `src/components/ToolWindowView.vue:222` 的 `<ReferencePanel :rows="ctx.referenceRows" …>`，数据源 `src/toolViewContext.ts:202`。App.vue 的 `:2319-2321` 现为 `<ToolWindowView view="references">`。
+- **N-2 已接线**：`src/menus/toolWindowGear.ts:67` 已含 `{ action: 'usage.groupBy', fromHost: true, contentsScoped: true }`（在 `:63` 的 `usage.viewOptions` 之后）；判据 `tests/usage-view-gear.test.mjs:97` 期望值已含它。
+- **N-3 已接线**：`src/App.vue:2335` 的层级行已消费 `row`（本 lane 落）。
+- **N-4 已接线**：层级范围下拉已在（`App.vue:2329-2330`）。
+
+结论：N-1/N-2/N-3/N-4 均已在真实链路。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「N-1/N-2/N-3/N-4 均已在真实链路。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

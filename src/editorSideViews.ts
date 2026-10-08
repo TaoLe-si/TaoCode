@@ -17,7 +17,8 @@ import { shouldSelectInTree, type ProjectViewBehavior } from './projectViewBehav
 import { navBarCrumbs } from './navBarModel.ts'
 import { getProjectTreeState } from './projectTreeState.ts'
 import type { Tab } from './editorTab'
-import { planSelectIn, type SelectInRow, type SelectInTargetSpec } from './selectIn.ts'
+import type { SelectInRow } from './selectIn.ts'
+import { selectInTargetById, selectInTargetRows, type SelectInContext } from './selectInTargets.ts'
 
 export interface EditorSideViewsDeps {
   notify: (message: string, error?: boolean) => void
@@ -150,37 +151,38 @@ function revealBreadcrumbPath(path: string) {
   // `StandardTargetWeights.java:6` 的 BOOKMARKS_WEIGHT = 1.001，落在项目视图与文件结构之间）。
   const selectInOpen = ref(false)
   const selectInAt = ref<{ x: number; y: number } | null>(null)
-  const selectInRows = computed<SelectInRow[]>(() => {
+  // 目标表**不再写死在这里** —— 六个内置目标是 `com.intellij.selectInTarget` EP 的 bundled 贡献
+  // （`src/selectInTargets.ts`），第三方可按同一个 EP id 挂自己的目标。这里只把宿主当前上下文
+  // 折成 `SelectInContext`（事实 + 副作用回调），弹层行与派发都走那一份。
+  function selectInContext(): SelectInContext {
     const path = active.value?.path ?? ''
-    // 合成条目（`\u0000` 前缀：jar 条目、临时缓冲）在磁盘上不存在 ——
-    // 上游对这类条目的判据是 `RevealFileAction.findLocalFile` 非空（在资源管理器那一行），
-    // 项目视图那一行则是 `ProjectViewSelectInTarget.canSelect`
-    // （`platform/lang-impl/src/com/intellij/ide/impl/ProjectViewSelectInTarget.java:143-157`：
-    // 拿不到 VirtualFile ⇒ false，拿到了但 `!isValid()` ⇒ false）。
-    // ⇒ 两条共用同一个"这一格是真的文件"谓词：合成条目在**两行**里都置灰，而不是点下去没反应。
+    // 合成条目（`\u0000` 前缀：jar 条目、临时缓冲）在磁盘上不存在 —— 上游对这类条目的判据是
+    // `RevealFileAction.findLocalFile` 非空（explorer 那一行），项目视图那一行则是
+    // `ProjectViewSelectInTarget.canSelect`（false）。两条共用同一个"这一格是真的文件"谓词。
     const inTree = Boolean(workspace.value) && !!path && !path.startsWith('\u0000')
-    const local = isDesktop && inTree
-    const targets: SelectInTargetSpec[] = [
-      // ProjectViewSelectInGroupTarget.java:58-60 → ProjectConceptBundle.properties:12 "Project View"；
-      // 权重是接口的默认值 0（platform/platform-api/src/com/intellij/ide/SelectInTarget.java:49-51）。
-      { id: 'project', label: '项目视图', weight: 0, selectable: Boolean(active.value) && inTree },
-      // StructureViewSelectInTarget.java:35-41 → IdeBundle.properties:305 "File Structure"，
-      // canSelect = 有文件编辑器（`getFileEditorProvider() != null`）。权重 4。
-      { id: 'structure', label: '文件结构', weight: 4, selectable: Boolean(active.value) },
-      // SelectInNavBarTarget.java:41-43 → IdeBundle.properties:261 "Navigation Bar"，
-      // canSelect = `UISettings.getShowNavigationBar()`（这里是面包屑的两层开关）。权重 8。
-      { id: 'navbar', label: '导航栏', weight: 8, selectable: Boolean(path) && Boolean(breadcrumbsVisible?.(path)) },
-      // SelectInChangesViewTarget.java:29-38 → 名称取本地更改工具窗口的标题
-      // （ChangesViewManager.kt:360-368：启用 Commit 窗口时是 "Commit"），权重 9。
-      { id: 'commit', label: '提交', weight: 9, selectable: Boolean(active.value) && Boolean(changeOf?.(path)) },
-      // ProjectViewSelectInExplorerTarget.java:29-37 → RevealFileAction.getActionName()
-      // = ActionsBundle.properties:1937 "Show in {0}" + IdeBundle.properties:3209 "Explorer"。权重 9.5。
-      { id: 'explorer', label: '在资源管理器中显示', weight: 9.5, selectable: local },
-      // ProjectStructureSelectInTarget → JavaUiBundle.properties:25 "Project Structure"。权重 10。
-      { id: 'settings', label: '项目结构', weight: 10, selectable: Boolean(workspace.value) },
-    ]
-    return planSelectIn(targets)
-  })
+    return {
+      hasActiveFile: Boolean(active.value),
+      hasPath: !!path,
+      inTree,
+      isDesktop,
+      hasBreadcrumbs: Boolean(path) && Boolean(breadcrumbsVisible?.(path)),
+      hasChange: Boolean(active.value) && Boolean(changeOf?.(path)),
+      hasWorkspace: Boolean(workspace.value),
+      selectProjectView: () => selectInTree(),
+      showNavBar: () => showNavBar(),
+      focusToolWindow: id => focusToolWindow?.(id),
+      openProjectStructure: () => openProjectStructure?.(),
+      revealInExplorer: async () => {
+        // 编辑器路径可能是绝对路径（LSP 位置），也可能带工作区根相对形式：两条通道分别对应
+        // `Workspace::reveal`（相对）与 `shell.reveal`（绝对 = RevealFileAction.openFile）。
+        const root = workspace.value?.root ?? ''
+        const absolute = absolutePath(root, path)
+        if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) await request('shell.reveal', { path: absolute })
+        else await request('file.reveal', { path })
+      },
+    }
+  }
+  const selectInRows = computed<SelectInRow[]>(() => selectInTargetRows(selectInContext()))
   /** IDEA 用 `showInBestPositionFor` 把弹窗钉在**光标**处（编辑器有焦点时）。 */
   function openSelectIn() {
     if (!active.value) { notify('Select In 需要一个打开的文件。', true); return }
@@ -191,21 +193,12 @@ function revealBreadcrumbPath(path: string) {
   function closeSelectIn() { selectInOpen.value = false }
   async function pickSelectIn(id: string) {
     selectInOpen.value = false
-    const path = active.value?.path
-    if (!path) return
-    if (id === 'project') { selectInTree(); return }
-    if (id === 'navbar') { showNavBar(); return }
-    if (id === 'settings') { openProjectStructure?.(); return }
-    if (id === 'structure') { focusToolWindow?.('outline'); return }
-    if (id === 'commit') { focusToolWindow?.('git'); return }
-    try {
-      // 编辑器路径可能是绝对路径（LSP 位置），也可能带工作区根相对形式：两条通道分别对应
-      // `Workspace::reveal`（相对）与 `shell.reveal`（绝对 = RevealFileAction.openFile）。
-      const root = workspace.value?.root ?? ''
-      const absolute = absolutePath(root, path)
-      if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) await request('shell.reveal', { path: absolute })
-      else await request('file.reveal', { path })
-    } catch (error) { notify(errorMessage(error), true) }
+    if (!active.value?.path) return
+    const context = selectInContext()
+    // 置灰/不存在都拿不到目标（`selectInTargetById` 复判 `canSelect`）—— 点了没反应好过半个动作。
+    const target = selectInTargetById(context, id)
+    if (!target) return
+    try { await target.selectIn(context) } catch (error) { notify(errorMessage(error), true) }
   }
   return {
     cancelMarkdownRefresh, refreshMarkdownNow, refreshMarkdownSoon, toggleMarkdownPreview,

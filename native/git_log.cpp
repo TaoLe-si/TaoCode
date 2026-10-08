@@ -179,7 +179,7 @@ Json log_full(const fs::path& repo, const Json& params) {
     const bool no_merges = params.value("noMerges", false);
     std::vector<std::string> args = {"--literal-pathspecs", "log", "--no-color", "-z",
         "--encoding=UTF-8", "--no-show-signature", "--decorate=full",
-        "--format=%H%x00%h%x00%an%x00%aI%x00%s%x00%P%x00%D",
+        "--format=%H%x00%h%x00%an%x00%aI%x00%cI%x00%s%x00%P%x00%D",
         "--skip=" + std::to_string(offset), "--max-count=" + std::to_string(limit + 1)};
     if (sort == "topological") args.push_back("--topo-order");
     if (first_parent) args.push_back("--first-parent");
@@ -213,15 +213,15 @@ Json log_full(const fs::path& repo, const Json& params) {
         args.push_back(path);
     }
     const auto fields = split(log_command(repo, args), '\0');
-    if (fields.size() % 7 != 0) throw WorkspaceError("GIT_PARSE", "提交列表格式无效。");
+    if (fields.size() % 8 != 0) throw WorkspaceError("GIT_PARSE", "提交列表格式无效。");
     Json commits = Json::array();
-    for (std::size_t i = 0; i < fields.size() && commits.size() < static_cast<std::size_t>(limit); i += 7) {
+    for (std::size_t i = 0; i < fields.size() && commits.size() < static_cast<std::size_t>(limit); i += 8) {
         commits.push_back({{"hash", fields[i]}, {"shortHash", fields[i + 1]}, {"author", fields[i + 2]},
-            {"date", fields[i + 3]}, {"subject", fields[i + 4]}, {"parents", parents(fields[i + 5])},
-            {"refs", decorations(fields[i + 6])}});
+            {"date", fields[i + 3]}, {"committerDate", fields[i + 4]}, {"subject", fields[i + 5]},
+            {"parents", parents(fields[i + 6])}, {"refs", decorations(fields[i + 7])}});
     }
     return {{"commits", std::move(commits)}, {"offset", offset}, {"limit", limit},
-            {"hasMore", fields.size() / 7 > static_cast<std::size_t>(limit)}};
+            {"hasMore", fields.size() / 8 > static_cast<std::size_t>(limit)}};
 }
 
 Json commit_details(const fs::path& repo, const std::string& revision) {

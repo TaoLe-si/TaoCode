@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { EditorSelection, EditorState } from '@codemirror/state'
 import { blockEndOffset, blockStartOffset, codeBlockTarget, structuralBraceTokens } from '../src/editorCodeBlock.ts'
 import { editorLanguageId } from '../src/editorMatchBrace.ts'
-import { findCodeBlockRange } from '../src/structuralCodeBlock.ts'
+import { findCodeBlockRange, mergeBlockEnd, mergeBlockStart } from '../src/structuralCodeBlock.ts'
 import { editingCommands } from '../src/editorCommands.ts'
 
 function run(name, doc, spec) {
@@ -96,19 +96,21 @@ test('命令：没有块时不动也不吞键', () => {
 // （:111-113 / :114-116、:179-181 / :182-184）。本仓的结构那半在 src/structuralCodeBlock.ts。
 // 下面四组数值都是 codeBlockTarget/blockEndOffset/blockStartOffset 实测出来的，不是估的。
 test('合并块尾取 min(结构, 括号)（CodeBlockUtil.java:118）', () => {
-  const text = '(if a:\n    x = 1\n)\n'
-  const caret = text.indexOf('if a') + 1
-  // 括号那半会把块尾算到最外层那个右括号（17），结构那半收在复合语句末尾（16）⇒ 取 16。
-  assert.equal(blockEndOffset(text, caret), 17, '括号那半实测值（本条是前提，不是结论）')
-  assert.equal(codeBlockTarget(text, caret, true, 'python'), 16)
+  // 直接钉合并规则：两支都给数时取 `Math.min`，且**两侧不对称**（交换就变红）。
+  assert.equal(mergeBlockEnd(17, { from: 0, to: 16 }), 16, '块尾取 min（:118）')
+  assert.equal(mergeBlockEnd(16, { from: 0, to: 17 }), 16, '结构那半更远时留在括号那半')
+  // 为什么不能再用 `(if a:\n    x = 1\n)\n` 走端到端：`(if` 不是语句位置的 `if`
+  // （上游 PSI 里那是语法错误，`CodeBlockSupportHandler` 给 EMPTY_RANGE；本仓同判据 =
+  // `src/structuralCodeBlock.ts` 的逻辑行归并）， ⇒ 结构那半是 null，min 那一支根本没被走过，
+  // 断言会"绿得没有意义"。合并本身只在下面那条"某一支为空"的路径上端到端可见。
+  assert.equal(findCodeBlockRange('(if a:\n    x = 1\n)\n', 2, 'python'), null,
+    '括号续行里的 if 不算复合语句（这条是上面那两个直钉的前提）')
 })
 
 test('合并块首取 max(结构, 括号)（CodeBlockUtil.java:186）', () => {
-  const text = '(if a:\n    x = 1\n)\n'
-  const caret = text.indexOf('if a') + 1
-  // 同一份文本反过来：括号那半给 1，结构那半给 0 ⇒ max 取 1（不跳到 0）。
-  assert.equal(blockStartOffset(text, caret), 1, '括号那半实测值（本条是前提，不是结论）')
-  assert.equal(codeBlockTarget(text, caret, false, 'python'), 1)
+  assert.equal(mergeBlockStart(1, { from: 0, to: 16 }), 1, '块首取 max（:186）：不跳到 0')
+  assert.equal(mergeBlockStart(3, { from: 5, to: 16 }), 5, '结构那半更靠后时取结构')
+  assert.equal(findCodeBlockRange('(if a:\n    x = 1\n)\n', 2, 'python'), null, '同上：那份 fixture 给不出两支都有数')
 })
 
 test('括号那半扫不到 ⇒ 用结构那半（:114-116 / :182-184）', () => {

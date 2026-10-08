@@ -60,9 +60,11 @@ const custom = () => ({
   anchors: {
     files: 'right', git: 'left', search: 'left', outline: 'left', bookmarks: 'left',
     vcslog: 'bottom', todo: 'bottom', debug: 'bottom', gradle: 'left', notifications: 'bottom',
+    // `agent` = 本仓的 Agent 对话窗口（上游对标 `AIAssistant`，右锚、非 side tool）。
+    agent: 'right',
   },
   order: {
-    left: ['gradle', 'git', 'search', 'outline', 'bookmarks'], right: ['files'],
+    left: ['gradle', 'git', 'search', 'outline', 'bookmarks'], right: ['files', 'agent'],
     bottom: ['notifications', 'debug', 'todo', 'vcslog'],
   },
   sizes: { explorer: 350, trace: 310, output: 260 },
@@ -198,7 +200,9 @@ test('restore repairs incomplete saved orders on their actual anchors and ignore
   snapshot.view = 'removed'
   snapshot.tab = 'removed'
   h.applyToolLayout(snapshot)
-  assert.deepEqual(h.stripeOrder.value('right'), ['files', 'gradle', 'notifications'])
+  // 右侧：files 被写进 right（order 2），gradle/agent 用出厂默认接在后面同组，
+  // notifications 是 side tool（EP `secondary="true"`）⇒ 排最后（`AbstractDroppableStripe.kt:59-62`）。
+  assert.deepEqual(h.stripeOrder.value('right'), ['files', 'gradle', 'agent', 'notifications'])
   assert.deepEqual(h.stripeOrder.value('bottom'), ['vcslog', 'search', 'todo', 'debug'])
   assert.deepEqual(h.stripeOrder.value('left'), ['git', 'outline', 'bookmarks'])
   assert.equal(h.deps.leftView.value, 'files')
@@ -215,7 +219,7 @@ test('loading a partial named snapshot normalizes it before applying bottom plac
   assert.equal(h.toolAnchors.files, 'bottom')
   assert.equal(h.deps.bottomTab.value, 'files')
   assert.ok(h.stripeOrder.value('bottom').includes('files'))
-  assert.deepEqual(h.stripeOrder.value('right'), ['gradle', 'notifications'])
+  assert.deepEqual(h.stripeOrder.value('right'), ['gradle', 'agent', 'notifications'])
 })
 
 test('saving live changes keeps bottom tools and does not change after later moves', t => {

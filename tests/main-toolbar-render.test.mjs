@@ -33,6 +33,13 @@ const require = name => {
       if (error?.code !== 'MODULE_NOT_FOUND') throw error
     }
   }
+  // 组件目录内的相对依赖（`./icons/toolWindowIcons.ts` 这类）：编译产物里的相对路径以**组件**为基准，
+  // 而 `require_` 的基准是本测试文件 —— 按 `src/components/` 再解析一次。
+  if (name.startsWith('./') && name.endsWith('.ts')) {
+    try { return require_('../src/components/' + name.slice(2)) } catch (error) {
+      if (error?.code !== 'MODULE_NOT_FOUND') throw error
+    }
+  }
   return require_(name)
 }
 const source = readFileSync(new URL('../src/components/MainToolbar.vue', import.meta.url), 'utf8')
@@ -107,10 +114,13 @@ function mountToolbar(ctx) {
   const root = node('root')
   const app = renderer.createApp(MainToolbar, { ctx })
   app.mount(root)
-  function find(label, target = root) {
-    if (target.props['aria-label'] === label) return target
+  // `aria-label` 不是唯一键：运行/停止那一对在 running 时**都叫「停止」**（上游是同一个
+  // Play/Square 切换钮，`aria-pressed` 表状态）。所以允许按别的 prop 定位 —— 运行切换钮用
+  // `title="运行"`、独立停止钮用 `title="停止 (Ctrl+F2)"`（两者模板里各自唯一）。
+  function find(label, target = root, prop = 'aria-label') {
+    if (target.props[prop] === label) return target
     for (const child of target.children) {
-      const match = find(label, child)
+      const match = find(label, child, prop)
       if (match) return match
     }
   }
@@ -164,15 +174,16 @@ test('rendered run controls retain their real context handlers and running-state
     assert.deepEqual(calls, [
       ['openConfigChooser', false], ['startBuild', false], ['runSelectedConfig', false], ['runSelectedConfig', true],
     ])
-    assert.equal(toolbar.find('停止').props.disabled, true)
+    assert.equal(toolbar.find('停止 (Ctrl+F2)', undefined, 'title').props.disabled, true)
     ctx.runState.running = true
     ctx.dapState.running = true
     await nextTick()
     assert.equal(toolbar.find('构建项目').props.disabled, true)
     assert.equal(toolbar.find('调试').props.disabled, true)
-    assert.equal(toolbar.find('停止').props.disabled, false)
-    toolbar.find('运行').props.onClick()
-    toolbar.find('停止').props.onClick()
+    assert.equal(toolbar.find('停止 (Ctrl+F2)', undefined, 'title').props.disabled, false)
+    // 运行切换钮（running 时 aria-label 也变成「停止」）—— 按 title 取它，点击走 stopRun。
+    toolbar.find('运行', undefined, 'title').props.onClick()
+    toolbar.find('停止 (Ctrl+F2)', undefined, 'title').props.onClick()
     assert.deepEqual(calls.slice(-2), [['stopRun'], ['stopAnyProcess']])
   } finally { toolbar.unmount() }
 })

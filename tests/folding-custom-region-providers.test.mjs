@@ -13,7 +13,7 @@
 //     中文取 `localization-zh.jar` 的 `messages/LangBundle.properties:113-114`；
 //   · 生成用的标记串 `getStartString`/`getEndString`：`NetBeansCustomFoldingProvider.java:36-43`、
 //     `VisualStudioCustomFoldingProvider.java:36-43`，`?` → `Description` 见
-//     `CustomFoldingSurroundDescriptor.java:51`；
+//     `CustomFoldingSurroundDescriptor.java:47`（`DEFAULT_DESC_TEXT`）与 `:300-304`（替换并把那段选上）；
 //   · 默认折叠 `NetBeansCustomFoldingProvider.java:46-48`（`defaultstate="collapsed"`）。
 import test from 'node:test'
 import assert from 'node:assert/strict'

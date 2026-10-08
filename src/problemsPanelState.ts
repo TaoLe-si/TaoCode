@@ -17,8 +17,15 @@
 //   · `collapsedGroups`    → **本仓多出来的**：上游的展开态是 `JTree` 的运行时对象
 //     （`ProblemsViewPanel.java:212` `new Tree(new AsyncTreeModel(...))`）没有落进 `ProblemsViewState`，
 //     本仓的树要能跨会话记住谁折着，就得给它一个可序列化的家。
-// 没有承接的上游字段（详见 docs 判词「做不到」一节）：`showPreview` / `autoscrollToSource`
-// （预览窗格与编辑器↔树联动在本仓没有消费面）、`proportion`（分隔比例归 App.vue 的布局）、`selectedTabId`（只有一个面板）。
+// 没有承接的上游字段：`showPreview`（预览窗格在本仓没有消费面）、`proportion`（分隔比例归 App.vue
+// 的布局）、`selectedTabId`（只有一个面板），以及 **`autoscrollToSource`**（`:25` 默认 false；消息窗口
+// 同族的 `impl/ErrorTreeViewConfiguration.java:16,24,28` 是同一格的另一份）。这一条不是"做不到"而是
+// **还接不动**：上游那格的触发点是**树的选中在行之间移动**（`ProblemsViewPanel.java:106-110` 的
+// `mySelectionAlarm` → `:465-477 updateAutoscroll()`，书签那一族在本仓已经有可照抄的形态：
+// `src/bookmarksView.ts:80` 的"键盘上下移动选中" + `src/components/BookmarksPanel.vue:184` 的跳转），
+// 而问题面板的行只有 `tabindex="0"`（Tab 逐行走），没有 ↑/↓ 光标 —— 先给一个开关就会让"Tab 过一行
+// 就把编辑器跳一次"，那是自造的语义。⇒ 要接就得连 ↑/↓ 导航一起接，见
+// `docs/wiring-requests-2026-10-06-errtree.md` E1（含 `ProblemsPanel.vue` 的余量账）。
 //
 // 非法/损坏的存档逐字段回默认，不让一个坏字符串把面板卡死；旧版存档里的单选 `severity`
 // 会在解析时迁移成隐藏集合（单选「只看警告」= 除警告外全藏）。

@@ -40,6 +40,10 @@
 // 反过来用本模块的 `presentableMatcher` —— 所以账本必须是**懒建**的（见 `FileTypeManager.removedMappings()`），
 // 否则从 `fileTypeRemovedMappings.ts` 先入口时类绑定还在 TDZ 里，单例会构造失败。
 import { RemovedMappingTracker, type RemovedMapping } from './fileTypeRemovedMappings.ts'
+// 文件类型的**插件贡献面**：上游 `<fileType …>` 是 EP `com.intellij.fileType` 的贡献
+// （`FileTypeManagerImpl.java:132` 的 `EP_NAME`）。本仓改由扩展点宿主承载：进程内单例把标准类型按
+// bundled 贡献登记，第三方的 `FileTypeDescriptor` 按同一 id 挂进来即被 `adoptFromExtensions()` 收编。
+import { APPLICATION_SCOPE, EXTENSIONS, FILE_TYPE_EP } from './extensionPoints.ts'
 
 /** 一条文件名匹配器（`FileNameMatcher` 的可判别联合）。 */
 export type FileNameMatcher =
@@ -282,9 +286,37 @@ export class FileTypeManager {
   private readonly conflicts: FileTypeConflict[] = []
   /** 懒建（见文件头「循环依赖的注意」）。 */
   private removedTracker: RemovedMappingTracker | null = null
+  /**
+   * 是否把类型登记同步到扩展点宿主。**只有进程内单例开着**（`new FileTypeManager(STANDARD_FILE_TYPES,
+   * { extensions: true })`）：判据/临时用的实例是纯本地的，`register()` 不该把它们的类型灌进全局 EP
+   * （那会让单例的 listener 把测试类型收编进去，跨用例串味）。
+   */
+  private readonly extensionsIntegrated: boolean
+  /** 收编过程中抑制 EP 回写（否则 `register` 会再发一次变更、listener 又触发一轮收编）。 */
+  private adopting = false
 
-  constructor(initial: readonly FileTypeDescriptor[] = []) {
+  constructor(initial: readonly FileTypeDescriptor[] = [], options: { extensions?: boolean } = {}) {
+    this.extensionsIntegrated = options.extensions === true
     for (const type of initial) this.register(type)
+  }
+
+  /**
+   * 从扩展点宿主 `com.intellij.fileType` 收编文件类型（上游 `FileTypeManagerImpl` 自己实现
+   * `ExtensionPointListener<FileTypeBean>`，`FileTypeManagerImpl.java:280-300` 的 `extensionAdded`
+   * 在 EP 加进来时当场建匹配器、`:294-300` 的 `extensionRemoved` 收回）。返回新收编的条数；
+   * 已在表里且是同一个对象的跳过（bundled 贡献与构造时那份是同一批引用 ⇒ 启动期收编为 0）。
+   */
+  adoptFromExtensions(scope: string = APPLICATION_SCOPE): number {
+    this.adopting = true
+    try {
+      let adopted = 0
+      for (const descriptor of EXTENSIONS.extensionsOf<FileTypeDescriptor>(FILE_TYPE_EP, scope)) {
+        if (!descriptor?.id || !descriptor.name || this.types.get(descriptor.id) === descriptor) continue
+        this.register(descriptor)
+        adopted += 1
+      }
+      return adopted
+    } finally { this.adopting = false }
   }
 
   addFileTypeListener(listener: FileTypeListener): () => void {
@@ -371,6 +403,10 @@ export class FileTypeManager {
     const previous = this.types.get(type.id) ?? null
     if (previous) this.remove(type.id, false)
     this.types.set(type.id, type)
+    // 登记即挂进 EP（只有单例开着集成、且不是收编回写那一轮）：这样「改判一个类型」与
+    // 「第三方按 `<fileType>` 挂一个类型」在宿主里是同一份事实（上游两条路都汇进 FileTypeManagerImpl）。
+    if (this.extensionsIntegrated && !this.adopting && type.id && EXTENSIONS.hasExtensionPoint(FILE_TYPE_EP))
+      EXTENSIONS.registerExtension(FILE_TYPE_EP, type.id, type, { source: type.bundled ? 'bundled' : 'user' })
     // 关联先落表再广播 before/after：冲突判定要看到"自己已经不在表里"的旧归属，
     // 否则同 id 重注册会被自己的旧关联判成冲突。
     const conflicts: FileTypeConflict[] = []
@@ -835,9 +871,13 @@ export const STANDARD_FILE_TYPES: readonly FileTypeDescriptor[] = [
   nativeFileType(),
 ]
 
+/** 进程内单例（上游 `FileTypeManager.getInstance()`）。`{ extensions: true }` = 与 EP `com.intellij.fileType` 互通。 */
+export const fileTypeManager = new FileTypeManager(STANDARD_FILE_TYPES, { extensions: true })
 
-/** 进程内单例（上游 `FileTypeManager.getInstance()`）。 */
-export const fileTypeManager = new FileTypeManager(STANDARD_FILE_TYPES)
+// 消费链路：EP 上的第三方文件类型收编进单例，EP 上新增一条就当场认领（上游 `FileTypeManagerImpl`
+// 的 `extensionAdded`），这样第三方按 `<fileType>` 挂的扩展名能被 `detectFileType`/`resolveEditorLanguage` 认出来。
+fileTypeManager.adoptFromExtensions()
+EXTENSIONS.addListener(id => { if (id === FILE_TYPE_EP) fileTypeManager.adoptFromExtensions() })
 
 // 平台自带的 hashbang 模式（装载期灌入，见 `seedHashBang` 的注释）。三条都有出处：
 //   · `java` ← `java/java-frontback-psi-impl/resources/intellij.java.frontback.psi.impl.xml:21`

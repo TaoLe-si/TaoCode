@@ -140259,7 +140259,7 @@
    "module": "platform-impl",
    "lines": 0,
    "in_code": false,
-   "in_comment_only": false,
+   "in_comment_only": true,
    "test": false,
    "swing": false,
    "platform": false
@@ -164041,7 +164041,7 @@
    "module": "progress",
    "lines": 0,
    "in_code": false,
-   "in_comment_only": false,
+   "in_comment_only": true,
    "test": false,
    "swing": false,
    "platform": false
@@ -164074,7 +164074,7 @@
    "module": "progress",
    "lines": 0,
    "in_code": false,
-   "in_comment_only": false,
+   "in_comment_only": true,
    "test": false,
    "swing": false,
    "platform": false
@@ -164085,7 +164085,7 @@
    "module": "progress",
    "lines": 0,
    "in_code": false,
-   "in_comment_only": false,
+   "in_comment_only": true,
    "test": false,
    "swing": false,
    "platform": false
@@ -164173,7 +164173,7 @@
    "module": "progress",
    "lines": 0,
    "in_code": false,
-   "in_comment_only": false,
+   "in_comment_only": true,
    "test": false,
    "swing": false,
    "platform": false

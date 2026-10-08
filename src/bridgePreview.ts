@@ -34,12 +34,12 @@ import type { Entry, Method } from './bridge.ts'
 
 const previewRoot = '内存示例 / 不访问本地磁盘'
 const samples = new Map<string, string>([
-  ['src/main.cpp', '#include <iostream>\n#include "workspace.hpp"\n\nint main() {\n    taocode::Workspace workspace;\n\n    // 浏览器示例：编辑仅保存在内存，不会写入磁盘。\n    std::cout << "Welcome to TaoCode" << std::endl;\n    return 0;\n}\n'],
+  ['src/main.cpp', '#include <iostream>\n#include "workspace.hpp"\n\nint main() {\n    taocode::Workspace workspace;\n\n    std::cout << "Welcome to TaoCode" << std::endl;\n    return 0;\n}\n'],
   ['src/workspace.hpp', '#pragma once\n\nnamespace taocode {\n\nclass Workspace {\npublic:\n    void open();\n};\n\n}\n'],
   ['CMakeLists.txt', 'cmake_minimum_required(VERSION 3.24)\nproject(taocode_preview LANGUAGES CXX)\n\nset(CMAKE_CXX_STANDARD 20)\nadd_executable(preview src/main.cpp)\n'],
 ])
 const versions = new Map([...samples.keys()].map(path => [path, 1]))
-const previewState: AppState = { recentProjects: [{ name: 'TaoCode 内存示例', path: previewRoot, lastOpened: '', available: true }], settings: { ...defaultEditorSettings }, general: { ...defaultGeneralSettings }, lastProject: null, gitAvailable: false, defaultParent: '' }
+const previewState: AppState = { recentProjects: [{ name: 'taocode-preview', path: previewRoot, lastOpened: '', available: true }], settings: { ...defaultEditorSettings }, general: { ...defaultGeneralSettings }, lastProject: null, gitAvailable: false, defaultParent: '' }
 let previewProjectSettings: ProjectSettings = structuredClone(defaultProjectSettings)
 function previewEntries(path: string): Entry[] {
   const prefix = path ? `${path}/` : ''
@@ -63,8 +63,9 @@ export async function previewRequest(method: Method, params: Record<string, unkn
   if (method.startsWith('history.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览没有本地历史，请在桌面端使用。')
   if (method.startsWith('plugin.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能读写本机插件目录，请在桌面端使用。')
   if (method.startsWith('gradle.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能运行 Gradle 同步，请在桌面端使用。')
+  if (method.startsWith('http.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能代替宿主取远程内容（本仓 CSP 拦跨源 fetch），请在桌面端使用。')
   if (method === 'dialog.pickFile' || method === 'dialog.saveFile' || method === 'app.exportSettings' || method === 'app.readSettingsArchive' || method === 'app.importSettings' || method === 'app.resetSettings' || method === 'app.writeExportFiles') throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能打开系统文件对话框、读写设置归档或导出文件，请在桌面端使用。')
-  if (method === 'file.create' || method === 'file.rename' || method === 'file.delete' || method === 'file.copy' || method === 'file.reveal' || method === 'shell.reveal' || method === 'file.readOnly' || method === 'file.lineSeparators' || method.startsWith('session.'))
+  if (method === 'file.create' || method === 'file.writeNew' || method === 'file.rename' || method === 'file.delete' || method === 'file.copy' || method === 'file.reveal' || method === 'shell.reveal' || method === 'file.readOnly' || method === 'file.lineSeparators' || method.startsWith('session.'))
     throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能改动磁盘文件树，请在桌面端使用。')
   const path = String(params.path ?? '')
   switch (method) {
@@ -72,7 +73,7 @@ export async function previewRequest(method: Method, params: Record<string, unkn
     case 'workspace.open': {
       if (path && path !== previewRoot) throw new BridgeError('DESKTOP_REQUIRED', '浏览器只能打开内存示例；请使用桌面端访问本地项目。')
       previewState.lastProject = previewRoot
-      previewState.recentProjects = [{ name: 'TaoCode 内存示例', path: previewRoot, lastOpened: new Date().toISOString(), available: true }]
+      previewState.recentProjects = [{ name: 'taocode-preview', path: previewRoot, lastOpened: new Date().toISOString(), available: true }]
       return { name: 'taocode-preview', root: previewRoot, entries: previewEntries('') }
     }
     case 'workspace.close': previewState.lastProject = null; return { closed: true }
@@ -85,6 +86,11 @@ export async function previewRequest(method: Method, params: Record<string, unkn
         !file.split('/').slice(0, -1).some(part => previewProjectSettings.excludedDirs.includes(part))).sort()
       return { files, truncated: false }
     }
+    case 'workspace.searchFiles': {
+      const entries = [...samples.keys()].sort().map(path => ({ path, type: 'file' as const }))
+      return { entries, cancelled: false }
+    }
+    case 'workspace.searchFiles.cancel': return { requested: false }
     case 'projects.forget': previewState.recentProjects = previewState.recentProjects.filter(project => project.path !== path); return structuredClone(previewState)
     case 'projects.forgetMany': {
       const set = new Set(Array.isArray(params?.paths) ? params.paths as string[] : [])

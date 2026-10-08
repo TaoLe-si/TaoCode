@@ -129,10 +129,8 @@ function apply() {
     <section class="help-dialog te-dialog" role="dialog" aria-modal="true" aria-label="运行目标">
       <header class="te-head">
         <h2>运行目标</h2>
-        <button type="button" class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
+        <button type="button" class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
       </header>
-      <p class="section-description">对应 IDEA Settings › Build, Execution, Deployment › Run Targets（上游 <code>TargetEnvironmentsConfigurable</code>，显示名 <code>configurable.name.runtime.targets</code>）。目标决定「运行于」下拉里有哪些选项：每个目标至少要配一个语言运行时。</p>
-
       <div class="te-body">
         <!-- 左：目标清单（上游 master 树）。行 = 显示名 + 灰色已配语言；校验不过的行挂告警图标
              （上游 TargetEnvironmentsMasterDetails.kt:336-346 的 InvalidRunConfigurationIcon）。 -->
@@ -150,27 +148,26 @@ function apply() {
               >
                 <span class="te-name">{{ target.displayName || '（未命名）' }}</span>
                 <span v-if="runtimeSummary(target.runtimes)" class="te-runtimes">{{ runtimeSummary(target.runtimes) }}</span>
-                <AlertTriangle v-if="validateTargetEnvironment(target)" :size="iconSize.dense" class="te-bad" :title="validateTargetEnvironment(target) ?? ''" aria-label="目标未配好运行时" />
+                <AlertTriangle aria-hidden="true" v-if="validateTargetEnvironment(target)" :size="iconSize.dense" class="te-bad" :title="validateTargetEnvironment(target) ?? ''" aria-label="目标未配好运行时" />
               </button>
             </li>
           </ul>
           <!-- 工具条：新增 / 移除 / 复制（上游 MasterDetails.kt:176-180 的三个动作）。
                「添加」没有类型下拉：本仓只有本机一种目标类型。 -->
           <div class="te-toolbar" role="toolbar" aria-label="目标工具条">
-            <button type="button" class="icon-button" title="添加目标于 本机" aria-label="添加目标于 本机" :disabled="busy" @click="addTarget"><Plus :size="iconSize.control" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" title="移除" aria-label="移除" :disabled="busy || !selected" @click="removeTarget"><Minus :size="iconSize.toolbar" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" title="复制" aria-label="复制" :disabled="busy || !selected" @click="copyTarget"><Copy :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="添加目标于 本机" :disabled="busy" @click="addTarget"><Plus :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="移除" :disabled="busy || !selected" @click="removeTarget"><Minus :size="iconSize.toolbar" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="复制" :disabled="busy || !selected" @click="copyTarget"><Copy :size="iconSize.control" aria-hidden="true" /></button>
           </div>
         </div>
 
         <!-- 右：目标详情（上游 TargetEnvironmentDetailsConfigurable + TargetEnvironmentLanguagesPanel）。 -->
         <div class="te-detail">
-          <p v-if="!selected" class="field-hint">先在左边选一个目标，或新建一个。上游对应的空态文案是「选择目标以配置」。</p>
+          <p v-if="!selected" class="field-hint">选择目标以配置</p>
           <template v-else>
             <label class="field-row"><span>名称</span><input v-model="selected.displayName" aria-label="目标名称" :placeholder="LOCAL_TARGET_TYPE_NAME" /></label>
             <label class="field-row"><span>类型</span><input :value="LOCAL_TARGET_TYPE_NAME" readonly aria-label="目标类型" /></label>
             <label class="field-row"><span>目标上根</span><input v-model="selected.projectRootOnTarget" aria-label="目标上的项目根" :placeholder="projectRoot" /></label>
-            <p class="field-hint">对应上游 <code>TargetEnvironmentConfiguration.projectRootOnTarget</code>：运行配置里的相对路径以它为基准。</p>
 
             <fieldset class="te-runtimes-block">
               <legend>语言运行时</legend>
@@ -178,7 +175,7 @@ function apply() {
               <div v-for="(entry, index) in selected.runtimes" :key="entry.typeId" class="te-runtime">
                 <div class="te-runtime-head">
                   <span class="te-runtime-name">{{ languageRuntimeType(entry.typeId)?.displayName ?? entry.typeId }}</span>
-                  <button type="button" class="icon-button" title="移除运行时" :aria-label="`移除运行时 ${languageRuntimeType(entry.typeId)?.displayName ?? entry.typeId}`" :disabled="busy" @click="removeRuntime(index)"><Minus :size="iconSize.dense" aria-hidden="true" /></button>
+                  <button type="button" class="icon-button" :aria-label="`移除运行时 ${languageRuntimeType(entry.typeId)?.displayName ?? entry.typeId}`" :disabled="busy" @click="removeRuntime(index)"><Minus :size="iconSize.dense" aria-hidden="true" /></button>
                 </div>
                 <label class="field-row"><span>{{ languageRuntimeType(entry.typeId)?.homeLabel ?? '主路径:' }}</span>
                   <input :value="entry.homePath" :aria-label="`${languageRuntimeType(entry.typeId)?.displayName ?? entry.typeId} 主路径`" :placeholder="entry.typeId === 'JavaLanguageRuntime' ? 'D:\\Java\\jbr' : 'C:\\Program Files\\…'" @input="setRuntimeField(entry.typeId, 'homePath', ($event.target as HTMLInputElement).value)" />
@@ -212,7 +209,6 @@ function apply() {
             <option v-for="target in targets" :key="target.uuid" :value="target.uuid">{{ target.displayName || '（未命名）' }}</option>
           </select>
         </label>
-        <p class="field-hint">对应上游 <code>TargetEnvironmentsManager.defaultTarget</code>：新建配置时「运行于」默认选它（空 = 本地机器）。</p>
       </div>
 
       <footer class="te-footer">
@@ -230,29 +226,28 @@ function apply() {
 .te-dialog { width: min(760px, 94vw); }
 .te-head { display: flex; align-items: center; gap: var(--space-2); }
 .te-head h2 { flex: 1; margin: 0; }
-.section-description { margin: 0 0 var(--space-2); color: var(--muted); font-size: 11px; line-height: 1.7; }
 .te-body { display: grid; grid-template-columns: minmax(0, 240px) minmax(0, 1fr); min-height: 300px; }
 .te-list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
-.te-rows { flex: 1; min-height: 0; margin: 0; padding: 4px; overflow: auto; list-style: none; }
-.te-row { display: flex; align-items: center; gap: var(--space-1); width: 100%; border: 0; padding: 3px 4px; border-radius: var(--radius-xs); background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; }
+.te-rows { flex: 1; min-height: 0; margin: 0; padding: var(--space-1); overflow: auto; list-style: none; }
+.te-row { display: flex; align-items: center; gap: var(--space-1); width: 100%; border: 0; padding: 3px var(--space-1); border-radius: var(--radius-xs); background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; }
 .te-row.is-selected { background: var(--selected); color: var(--bright); }
 .te-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .te-runtimes { color: var(--muted); font-size: 11px; }
 .te-bad { flex-shrink: 0; color: var(--error); }
 .te-empty { margin: 0; padding: var(--space-3); color: var(--muted); font-size: 11px; }
-.te-toolbar { display: flex; align-items: center; gap: 2px; padding: 4px; border-top: 1px solid var(--line); }
+.te-toolbar { display: flex; align-items: center; gap: 2px; padding: var(--space-1); border-top: 1px solid var(--line); }
 .te-detail { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: var(--space-2) 0 0 var(--space-3); overflow: auto; }
 .field-row { display: flex; align-items: center; gap: var(--space-2); }
 .field-row > span { flex-shrink: 0; width: 88px; color: var(--muted); font-size: 11px; }
-.field-row input, .field-row select { flex: 1; min-width: 0; padding: 4px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: inherit; font-size: 12px; }
+.field-row input, .field-row select { flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: inherit; font-size: 12px; }
 .field-hint { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .te-runtimes-block { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); }
-.te-runtimes-block legend { padding: 0 4px; color: var(--muted); font-size: 11px; }
+.te-runtimes-block legend { padding: 0 var(--space-1); color: var(--muted); font-size: 11px; }
 .te-runtime { display: flex; flex-direction: column; gap: var(--space-1); }
 .te-runtime-head { display: flex; align-items: center; gap: var(--space-1); }
 .te-runtime-name { flex: 1; font-size: 12px; }
 .te-add-runtime { display: flex; align-items: center; gap: var(--space-2); }
-.te-add-runtime select { flex: 1; padding: 4px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: inherit; font-size: 12px; }
+.te-add-runtime select { flex: 1; padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: inherit; font-size: 12px; }
 .te-problem { display: flex; align-items: center; gap: var(--space-1); margin: 0; color: var(--error); font-size: 11px; }
 .te-default { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line); }
 .te-footer { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }

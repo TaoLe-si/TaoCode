@@ -11,8 +11,10 @@
 // 动作与原生命令的对应在 src/branchPopup.ts 里（纯数据，可测）；组件只负责渲染与派发。
 import { computed, nextTick, ref, watch } from 'vue'
 import { ChevronRight, GitBranch, Plus, Trash2, X } from 'lucide-vue-next'
-import { Check } from 'lucide-vue-next'
+import {  } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 import { BRANCH_ROW_ACTIONS, BRANCH_TOP_ACTIONS, filterBranches, sortBranches, validateBranchName } from '../branchPopup'
 import { popupCancelKeyAction } from '../popupCancel'
 
@@ -89,7 +91,7 @@ function onKeydown(event: KeyboardEvent) {
 
     <div class="bp-list" role="listbox" aria-label="分支列表">
       <p v-if="current" class="bp-current" role="option" :aria-selected="true">
-        <span class="bp-check" aria-hidden="true"><Check :size="iconSize.menu" /></span>
+        <span class="bp-check" aria-hidden="true"><IdeaCheckedIcon :size="iconSize.menu" /></span>
         <span class="bp-name">{{ current }}</span>
         <span class="bp-tag">当前</span>
       </p>
@@ -97,7 +99,7 @@ function onKeydown(event: KeyboardEvent) {
         <span class="bp-check" aria-hidden="true" />
         <span class="bp-name">{{ branch }}</span>
         <span class="bp-actions">
-          <button type="button" class="icon-button" :aria-expanded="expanded === branch" :title="`${branch} 的动作`" :aria-label="`${branch} 的动作`" @click.stop="expanded = expanded === branch ? '' : branch"><ChevronRight :size="iconSize.dense" /></button>
+          <button type="button" class="icon-button" :aria-expanded="expanded === branch" :title="`${branch} 的动作`" :aria-label="`${branch} 的动作`" @click.stop="expanded = expanded === branch ? '' : branch"><ChevronRight aria-hidden="true" :size="iconSize.dense" /></button>
         </span>
       </button>
       <p v-if="!visible.length" class="bp-empty">没有匹配的分支。</p>
@@ -107,14 +109,14 @@ function onKeydown(event: KeyboardEvent) {
     <div v-if="expanded" class="bp-menu" role="menu" :aria-label="`${expanded} 的分支动作`">
       <p class="bp-menu-title">{{ expanded }}</p>
       <button v-for="action in BRANCH_ROW_ACTIONS" :key="action.id" type="button" role="menuitem" :disabled="busy" :title="action.ideaAction" @click="run(action.id, expanded)">
-        <Trash2 v-if="action.id === 'delete'" :size="iconSize.menu" /><Plus v-else :size="iconSize.menu" /><span>{{ action.title }}</span>
+        <Trash2 aria-hidden="true" v-if="action.id === 'delete'" :size="iconSize.menu" /><Plus aria-hidden="true" v-else :size="iconSize.menu" /><span>{{ action.title }}</span>
       </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.branch-popup { position: absolute; top: calc(100% + 4px); right: 0; z-index: 40; display: flex; flex-direction: column; gap: var(--space-1); width: 340px; max-height: 60vh; padding: var(--space-2); overflow: auto; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.branch-popup { position: absolute; top: calc(100% + 4px); right: 0; z-index: 40; display: flex; flex-direction: column; gap: var(--space-1); width: 340px; max-height: 60vh; padding: var(--space-2); overflow: auto; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .bp-search { display: flex; align-items: center; gap: var(--space-1); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--muted); }
 .bp-search input, .bp-input input { flex: 1; min-width: 0; padding: 3px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: inherit; font-size: 12px; }
 .bp-input { display: flex; align-items: center; gap: var(--space-1); }

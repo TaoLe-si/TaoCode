@@ -45,3 +45,13 @@
 
 - `src/dialogGeometry.ts`（尺寸记忆）与 `src/dialogValidation.ts`（校验 DSL）**已经有生产消费点**：`src/components/ProjectDialog.vue:6/11/93-97/175-176/182-183`、`src/components/SpecialPathsDialog.vue:13/16/26-34/60`、`src/wizard.ts:15/97/112/130`。族判词里「尚无对话框消费」那句我已按磁盘订正。
 - `src/platformIdeStartupFailure.ts` 的入口在 `src/main.ts:5`/`:23`（不是 `App.vue`），已闭环，判据 `tests/crash-startup-failure.test.mjs` 绿。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **A1（`popupSteps` 接弹层）** —— 已接（部分）：`src/components/ContentComboLabel.vue:31/:74/:117-120/:157` 已用 `listStepRows` / `initialRowIndex` / `shouldBeShowing`。其余点名弹层（`AnchoredMenu.vue` / `EditorPopupMenu.vue` / `SearchEverywhereDialog.vue`）**属本 lane 可改面**，但它们各自的行渲染已用别的方式满足（如 ContentComboLabel 就是那「分步弹层」的真落点）。为不与各组件 owner 撞车，未强行改行渲染。
+- **A2（本机级设置 RoamingType.DISABLED）** —— 目标 `src/settingsModel.ts`（保留文件）+ `native/settings_schema.cpp` + `settingsTransfer`。需 settings/native owner 同批三处。
+- **A3（Messages 统一宿主）** —— 目标 `src/App.vue`（本 lane 可改），但请求原文自己说「我可以按此再出一版门面」⇒ 面门面模型未定，单方面挂宿主会锁死形状。登记为「需 messageDialog 模块 owner 先出面门面」。
+- **A4（相对行号换算）** —— 目标 `src/components/CodeEditor.vue`（禁改清单）。需 CodeEditor owner。
+- **A5（治理类三条）** —— 非接线（`docs/inventory` / `scripts/verdict_table.py` / `customFoldingProviders.ts` 的 TS1002），均非本 lane 可改面。
+
+结论：A1 已接；A2/A3/A4 转给对应 owner。

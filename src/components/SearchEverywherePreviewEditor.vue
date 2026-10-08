@@ -39,7 +39,7 @@ async function render() {
       lineNumbers(), syntaxHighlighting(defaultHighlightStyle), language.of([]),
       EditorView.decorations.of(Decoration.set(ranges, true)),
       EditorView.theme({
-        '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--text)' },
+        '&': { height: '100%', backgroundColor: 'var(--editor)', color: 'var(--text)' },
         '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--font-mono, monospace)', fontSize: '12px' },
         '.cm-gutters': { backgroundColor: 'var(--panel)', color: 'var(--muted)', border: 'none' },
         '.se-target-line': { backgroundColor: 'var(--hover, rgba(127,127,127,.15))' },

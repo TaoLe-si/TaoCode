@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-  IMPORT_HISTORY_SIZE_KEY, IMPORT_TESTS_NAME, historyPresentableText, importedEventLines, importedHistorySize,
+  IMPORT_HISTORY_SIZE_KEY, IMPORT_TESTS_NAME, historyPresentableText, importedEventLines, importedFailedNames, importedHistorySize,
   importedSessionList, importTestResults, recordImportedSession, rootElementName,
 } from '../src/testImport.ts'
 import { formatTestEvent } from '../src/testEventChannel.ts'
@@ -136,4 +136,23 @@ test('接线：面板有真的导入入口并读文件（不是死模块）', ()
   assert.match(source, /from '\.\.\/testImport'/, '面板没有引用导入模块')
   assert.match(source, /dialog\.pickFile/, '面板没有走系统文件选择框')
   assert.match(source, /IMPORT_TESTS_NAME/, '面板没有用上游的动作文案')
+})
+
+test('导入会话里失败的用例能重跑（ImportedTestRunnableState:67-78 给导入结果挂 rerun action）', () => {
+  const xml = `<testrun name="MathTest" footerText="x">
+  <suite name="MathTest" status="failed">
+    <test name="adds" status="passed" duration="12"/>
+    <test name="divides" status="failed" duration="3"/>
+    <test name="divides" status="failed"/>
+    <test name="boom" status="failed"/>
+  </suite>
+</testrun>`
+  const imported = importTestResults(xml)
+  assert.equal(imported.error, null)
+  assert.deepEqual(importedFailedNames(imported.events), ['divides', 'boom'], '去重保序，只取失败')
+  assert.deepEqual(importedFailedNames([]), [])
+  const source = readFileSync(new URL('../src/components/TestRunnerPanel.vue', import.meta.url), 'utf8')
+  assert.match(source, /importedFailedNames\(imported\.events\)/, '面板要从导入的事件里抽失败名')
+  assert.match(source, /rerunImportedFailures/, '面板要有重跑入口')
+  assert.match(source, /importedFailures\.value\)/, '失败名交给同一份 rerunCommand 拼命令')
 })

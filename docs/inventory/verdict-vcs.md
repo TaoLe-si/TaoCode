@@ -8,13 +8,13 @@
 
 四档：`[x]` 已移植 · `[~]` 部分（写「本仓已有」+「还差」）· `[ ]` 未移植（TODO）· `[-]` 不适用（**必须给具体理由**）
 
-> **§G 是逐条总表**（当前已判 **1783** / 1783 行），四档合计 **42 + 502 + 17 + 1222 = 1783**。
+> **§G 是逐条总表**（当前已判 **1783** / 1783 行），四档合计 **45 + 504 + 12 + 1222 = 1783**。
 > 本文件**分批落盘**（每批 append 一次），任何时刻磁盘上的行数、四档和数与下面 §0 的 B10GATE 计数行三者自洽；
 > 门控 `tests/b10-verdict.test.mjs` 盯的就是这个自洽性，写满 1783 行时才追加「逐类闭合」硬判据。
 
 ## 0. 机械信号总账（可复核）
 
-<!-- B10GATE judged=1783 x=42 tilde=502 todo=17 na=1222 -->
+<!-- B10GATE judged=1783 x=45 tilde=504 todo=12 na=1222 -->
 
 | 信号 | 类数 | 说明 |
 |---|---:|---|
@@ -40,7 +40,7 @@
 
 所以上游那些「依赖 `VcsRepositoryManager` / `VcsContextFactory` / per-file system / `AbstractVcs` 注册表，而**没有用户可见行为差异**」的类，判 `[-]` 时把等价物写清楚（"本仓直接用 git CLI，该类的职责落在 `native/git_xxx.cpp:NN`"），而不是硬造一层抽象。
 
-## A. 已移植（`[x]`，全表 42 类）
+## A. 已移植（`[x]`，全表 45 类）
 
 这 42 条的共同点：**上游那一级的职责在本仓有唯一、可指认的承接者**（一条宿主函数或一个前端模块 + 一条判据测试），不是"名字在注释里出现过"。逐条依据在 §G，这里按承接者归堆：
 
@@ -52,7 +52,7 @@
 
 
 
-## B. 部分移植（`[~]`，全表 502 类）
+## B. 部分移植（`[~]`，全表 504 类）
 
 每条都写成「本仓已有 …**还差** …」，本仓落点是真实文件（门控第 6 条逐个查盘）。按模块分布：`vcs-impl` 254 · `vcs-log` 150 · `vcs-api` 83 · `diff-impl` 14 · `editor-ui-api` 1。
 
@@ -68,7 +68,10 @@
 
 
 
-## C. 未移植（`[ ]`，全表 17 类）
+## C. 未移植（`[ ]`，全表 12 类）
+
+> 2026-10-06 ledgerfix（证据来自 `docs/batch-2026-10-06-vcslogeclose.md`，本 lane 逐条开盘复核过）：原来这 17 条里的 5 条已在盘上，已按实况改档并在 §G 留痕 ——
+> `CollapseGraphAction`/`ExpandGraphAction` ⇒ `[x]`；`ShowLongEdgesAction` ⇒ `[x]`（**归属记 vcslog3，不是 vcsloge**）；`CollapseOrExpandGraphAction` ⇒ `[~]`（判决行那句「快捷键」上游根本没有：`intellij.platform.vcs.log.impl.xml:193-194` 两条注册是自闭合标签、没有 `<keyboard-shortcut>`，已删）；`CompactReferencesViewAction` ⇒ `[~]`（**不能升 `[x]`**：缺 `GitLabelComparator` 排序、组内其余引用不可达、列宽 1/3 那一档没有）。
 
 这 17 条是「本仓没有该可见行为，且架构上做得到」的清单 —— 每条都写了建议落点（门控第 6 条之外的口径由 §G 的依据列保证）。
 
@@ -78,21 +81,16 @@
 | `UpdateOrStatusOptionsDialog` | `platform/vcs-impl/src/com/intellij/openapi/vcs/update/UpdateOrStatusOptionsDialog.java` | `native/git.cpp` 的 git 通道 + `src/components/SourceControl.vue`） |
 | `AlignLabelsAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/AlignLabelsAction.java` | `src/vcsLogPresentation.ts:60` 的模型加一行 + 详情组件的 class 切换 |
 | `ChangeDiffPreviewLocationActions` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ChangeDiffPreviewLocationActions.kt` | `src/vcsLogPresentation.ts:60` 增档 + `src/vcsLogFilterStore.ts:51` 持久化 |
-| `CollapseGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CollapseGraphAction.java` | `src/vcsLogGraph.ts:24` 产出可折叠段 + 表格行合并 |
-| `CollapseOrExpandGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CollapseOrExpandGraphAction.java` | `native/git_log.cpp:341` 分发处 + `src/vcsLogData.ts:4`） |
-| `CompactReferencesViewAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CompactReferencesViewAction.java` | `src/vcsLogPresentation.ts:60` 增档 + 表格引用列的截断规则 |
-| `ExpandGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ExpandGraphAction.java` | `native/git_log.cpp:341` 分发处 + `src/vcsLogData.ts:4`） |
 | `ShowChangesFromParentsAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowChangesFromParentsAction.java` | `src/vcsLogMenu.ts:66` 增行 + `native/git_log.cpp:341` 增方法 |
 | `ShowCommitInLogAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowCommitInLogAction.java` | `src/vcsLogMenu.ts` 增行 + `src/vcsLogViewport.ts:3` 的滚动定位 |
 | `ShowCommitTooltipAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowCommitTooltipAction.java` | 复用 `src/messageDialog.ts` 之外的浮层通道或 DOM title 扩展 |
-| `ShowLongEdgesAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowLongEdgesAction.java` | `src/vcsLogGraphOptions.ts` 增一档，`buildLogGraph`:24 按档过滤边 |
 | `TwoStepCompletionProvider` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/TwoStepCompletionProvider.java` | `src/vcsLogGoToRef.ts:46` 的候选生成 |
 | `FileHistoryOneCommitAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/history/FileHistoryOneCommitAction.kt` | `src/vcsLogMenu.ts:66` 增行 |
 | `ShowAllAffectedFromHistoryAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/history/ShowAllAffectedFromHistoryAction.kt` | `src/vcsLogMenu.ts:66` |
 | `MultipleCommitInfoDialog` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/details/MultipleCommitInfoDialog.kt` | `src/components/VcsLogDetails.vue:1` 的多选分支 |
 | `VcsLogSpeedSearch` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/VcsLogSpeedSearch.java` | `src/vcsLogViewport.ts:3` 旁加一条定位函数 |
 
-按落点看，这 17 条其实只有四个方向：**图的折叠/展开**（`CollapseGraphAction`/`ExpandGraphAction`/`CollapseOrExpandGraphAction`/`ShowLongEdgesAction`，都在 `src/vcsLogGraph.ts:24` 的行模型上加折叠段）、**日志表格速度搜索与 tooltip**（`VcsLogSpeedSearch`/`ShowCommitTooltipAction`，挂在 `src/components/VcsLogTable.vue:1`）、**多选提交合并**（`MultipleCommitInfoDialog`/`ShowChangesFromParentsAction`，扩 `src/vcsLogMenu.ts:56`）、**更新选项对话框**（`UpdateOptionsDialog`/`UpdateOrStatusOptionsDialog`，在 `native/git.cpp:560` 的 pull 前插一层参数选择）。最值得先做的 20 条（含 `[~]` 里"差一步"的那些）写在报告 `docs/batch-2026-10-06-verdict-vcs.md`。
+按落点看，剩下的 12 条其实只有三个方向（图的折叠/展开那一族 2026-10-06 已升档，见上）：**图的折叠/展开**（`CollapseGraphAction`/`ExpandGraphAction`/`CollapseOrExpandGraphAction`/`ShowLongEdgesAction`，都在 `src/vcsLogGraph.ts:24` 的行模型上加折叠段）、**日志表格速度搜索与 tooltip**（`VcsLogSpeedSearch`/`ShowCommitTooltipAction`，挂在 `src/components/VcsLogTable.vue:1`）、**多选提交合并**（`MultipleCommitInfoDialog`/`ShowChangesFromParentsAction`，扩 `src/vcsLogMenu.ts:56`）、**更新选项对话框**（`UpdateOptionsDialog`/`UpdateOrStatusOptionsDialog`，在 `native/git.cpp:560` 的 pull 前插一层参数选择）。最值得先做的 20 条（含 `[~]` 里"差一步"的那些）写在报告 `docs/batch-2026-10-06-verdict-vcs.md`。
 
 
 
@@ -1709,13 +1707,13 @@ VCS 域的特殊口径（写在这里，免得逐条重复）：本仓 git 能�
 | `AlignLabelsAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/AlignLabelsAction.java` | `[ ]` | 把详情面板里的标签/值对齐的显示档。本仓详情面板 `src/components/VcsLogDetails.vue:1` 是固定排版，没有「对齐标签」这一档 ⇒ 未移植；建议落点：`src/vcsLogPresentation.ts:60` 的模型加一行 + 详情组件的 class 切换 |
 | `BooleanPropertyToggleAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/BooleanPropertyToggleAction.java` | `[-]` | 通用「布尔属性开关」动作基类（任何 UI 属性都能挂）。本仓属性是具名字段（`src/vcsLogGraphOptions.ts:50`、`src/vcsLogColumns.ts:38`），没有通用属性动作层 |
 | `ChangeDiffPreviewLocationActions` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ChangeDiffPreviewLocationActions.kt` | `[ ]` | 一组「预览显示在哪」的动作。本仓预览位置固定（`src/components/VcsLogDiff.vue:1` 在详情区里）⇒ 未移植；建议落点：`src/vcsLogPresentation.ts:60` 增档 + `src/vcsLogFilterStore.ts:51` 持久化 |
-| `CollapseGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CollapseGraphAction.java` | `[ ]` | 折叠提交图区间。本仓整表渲染、无折叠（`src/vcsLogGraph.ts:24` 逐行出 lane，`src/components/VcsLogTable.vue:1` 全量显示）⇒ 未移植；建议落点：`src/vcsLogGraph.ts:24` 产出可折叠段 + 表格行合并 |
-| `CollapseOrExpandGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CollapseOrExpandGraphAction.java` | `[ ]` | 折叠/展开切换（快捷键用）。同上，一条动作即可覆盖两档（建议落点：`native/git_log.cpp:341` 分发处 + `src/vcsLogData.ts:4`） |
-| `CompactReferencesViewAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CompactReferencesViewAction.java` | `[ ]` | 紧凑引用视图（refs 收成一串短标签）。本仓 refs 恒按完整名渲染（`src/components/VcsLogTable.vue:1`，数据 `native/git_log.cpp:55`）⇒ 未移植；建议落点：`src/vcsLogPresentation.ts:60` 增档 + 表格引用列的截断规则 |
+| `CollapseGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CollapseGraphAction.java` | `[x]` | 折叠提交图区间。本仓整表渲染、无折叠（`src/vcsLogGraph.ts:24` 逐行出 lane，`src/components/VcsLogTable.vue:1` 全量显示）⇒ 未移植；建议落点：`src/vcsLogGraph.ts:24` 产出可折叠段 + 表格行合并 2026-10-06 复判升 `[x]`（vcslogeclose，本 lane 开盘核过）：折叠段本体在 `src/vcsLogGraph.ts` 的 `collapseFragments`/`collapseLinearGraph`（`:481`）/`collapsedLinearSpans`（`:401`）/`activeLinearSpans`（`:366`）/`canCollapseLinearBranches`（`:465`），消费者链完整 —— `src/vcsLogGraphOptions.ts:213`/`:217` 两条弹层行（`Vcs.Log.CollapseAll`/`Vcs.Log.ExpandAll`，`disabled` 吃 `canCollapse`）→ `src/components/VcsLog.vue:132` 的 `setCollapsedAll` → `src/components/VcsLogTable.vue:40` 的 `folded`。判据 `tests/vcs-log-graph-cells.test.mjs`（另附 8000 例随机拓扑差分 + 3–6 行穷举，0 分歧的自证）。 |
+| `CollapseOrExpandGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CollapseOrExpandGraphAction.java` | `[~]` | 折叠/展开切换（快捷键用）。同上，一条动作即可覆盖两档（建议落点：`native/git_log.cpp:341` 分发处 + `src/vcsLogData.ts:4`） 2026-10-06 复判升 `[~]`（vcslogeclose）：**判决行原文那句「（快捷键用）」按上游实况删掉** —— `platform/vcs-log/impl/resources/intellij.platform.vcs.log.impl.xml:193-194` 的两条注册是自闭合 `<action .../>`，没有任何 `<keyboard-shortcut>`，而且这个父类 `:25` 是 `abstract`、注册表里没有自己的 id ⇒ 它的可见面只有「门 + 换文案 + 模态进度标题」三件。前两件已落：门 = `canCollapseLinearBranches`（`src/vcsLogGraph.ts:465`）、换文案 = `collapseActionTitles`（`src/vcsLogGraphOptions.ts:120`）。**第三件（`performLongAction:75-91` 的模态进度标题）本仓无宿主** ⇒ 不升 `[x]`，且已有反证判据钉住组件里不出现 `row.process`（`tests/vcs-log-graph-render.test.mjs:233-240`）。 |
+| `CompactReferencesViewAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CompactReferencesViewAction.java` | `[~]` | 紧凑引用视图（refs 收成一串短标签）。本仓 refs 恒按完整名渲染（`src/components/VcsLogTable.vue:1`，数据 `native/git_log.cpp:55`）⇒ 未移植；建议落点：`src/vcsLogPresentation.ts:60` 增档 + 表格引用列的截断规则 2026-10-06 复判升 `[~]`（vcslogeclose，**不许升 `[x]`**）：本仓已有 = `logRefsToShow`（`src/vcsLogPresentation.ts:228-232`，先按 `showTagNames` 过滤再 `slice(0, 1)`）+ 齿轮行 `:151-155` + 渲染 `src/components/VcsLogTable.vue:70-72`、`:230-235` + 缺省 `compactReferences: true`（`:133`，与上游出厂档一致），判据 `tests/vcs-log-presentation.test.mjs:142-149`。还差三半：① 「第一个」取的是宿主 `%D` 的原序（`native/git_log.cpp:86-103` 的 `decorations()` 不排序），上游先过 `GitLabelComparator`；② 上游其余引用留在同一个组里仍可悬停/点开，本仓 `slice` 之后整条丢掉 ⇒ 少一个可达面；③ 上游那一档「可用宽度压到 min(freeSpace, 列宽/3)」没有（`GraphCommitCellRenderer.kt:278-279`）。 |
 | `CompareRevisionsFromLogAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CompareRevisionsFromLogAction.kt` | `[~]` | 选两个提交互比。本仓已有：`native/git.cpp:252`（`range_args`）+ `:360`（`compare(base)`）+ `native/git.cpp:323`（`diff` 带 base），前端在 `src/components/DiffView.vue:1`。**还差**：日志表里多选两个提交直接触发的入口（本仓走「重置 HEAD/比较」那条） |
 | `EnableFilterByRegexAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/EnableFilterByRegexAction.java` | `[x]` | 「用正则表达式筛选」开关。本仓：`src/vcsLogTextFilterSettings.ts:26`（`TEXT_FILTER_REGEX_TITLE`「正则表达式」）+ `src/vcsLogTypes.ts:14` 的 `textRegex` 字段 + `src/vcsLogTextFilterSettings.ts:61`（写进 query）；宿主侧把开关关掉时转义字面量的是 `native/git_log.cpp:81`（`literal_pattern`）。判据 `tests/vcs-log-filter-store.test.mjs` |
 | `EnableMatchCaseAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/EnableMatchCaseAction.java` | `[x]` | 「区分大小写」开关。本仓：`src/vcsLogTextFilterSettings.ts:28`（`TEXT_FILTER_MATCH_CASE_TITLE`）+ `src/vcsLogTypes.ts:14` 的 `matchCase` + `:61` 的组装；判据 `tests/vcs-log-filter-store.test.mjs` |
-| `ExpandGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ExpandGraphAction.java` | `[ ]` | 展开被折叠的区间。同 `CollapseGraphAction`：本仓没有折叠态 ⇒ 未移植（建议落点：`native/git_log.cpp:341` 分发处 + `src/vcsLogData.ts:4`） |
+| `ExpandGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ExpandGraphAction.java` | `[x]` | 展开被折叠的区间。同 `CollapseGraphAction`：本仓没有折叠态 ⇒ 未移植（建议落点：`native/git_log.cpp:341` 分发处 + `src/vcsLogData.ts:4`） 2026-10-06 复判升 `[x]`（vcslogeclose）：与 `CollapseGraphAction` 同一条实现的反向档 —— `clickLinearFragment`（`src/vcsLogGraph.ts:435`）与 `clickableLinearHashes`（`:454`）的布尔档，点击那一半在 `src/components/VcsLogTable.vue` + `src/components/VcsLog.vue:134`，判据同上（含「布尔档收着时点一次 = 只展那一条链」）。 |
 | `FocusTextFilterAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/FocusTextFilterAction.java` | `[-]` | Swing 部件本体（`intellij.vcs.log.ui.actions` 里的 `FocusTextFilterAction`）：`JTable`/`JComponent`/`JBPopup` 那一侧的绘制与事件挂载。本仓同一可见行为由 Vue 组件 + CSS 承担：表格 `src/components/VcsLogTable.vue:1`、图 `src/vcsLogGraph.ts:24`（`buildLogGraph`）、筛选行 `src/components/VcsLogFilters.vue:1`；没有 Swing 组件树这层宿主 ⇒ 类本身不适用 |
 | `GoToHashOrRefAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/GoToHashOrRefAction.java` | `[x]` | 「转到哈希 / 分支 / 标记」。本仓完整落地：文案与提示 `src/vcsLogGoToRef.ts:21`/`:23`/`:25`（`GO_TO_REF_*`，含上游那句 `{0} not found` 的等价串 `:27`）、输入校验 `:34`（4..64 位）/`:36`（`looksLikeHash`）/`:41`（`notAHashMessage`）、候选 `:46`（`goToRefCandidates`）与匹配 `:53`（`goToRefMatches`，前缀优先限 12 条），弹层在 `src/components/VcsLogGoToRef.vue:1`；解析侧 `native/git_log.cpp:37` 的 `resolve` |
 | `GoToHashOrRefPopup` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/GoToHashOrRefPopup.java` | `[~]` | 上一条的候选弹层实现。本仓已有：`src/vcsLogGoToRef.ts:53` 的匹配 + `src/components/VcsLogGoToRef.vue:1` 的列表与选择。**还差**：上游「输入即展开区间」（popup 里直接改 filter）那一档 |
@@ -1733,7 +1731,7 @@ VCS 域的特殊口径（写在这里，免得逐条重复）：本仓 git 能�
 | `ShowDetailsAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowDetailsAction.java` | `[~]` | 切换详情面板显隐。本仓已有：`src/vcsLogPresentation.ts:60` 的模型 + `src/components/VcsLogDetails.vue:1` 的条件渲染 + 分栏 `src/components/VcsLogSplitter.vue:1`。**还差**：把显隐作为可搜索动作挂进动作索引（本仓是面板内切换） |
 | `ShowDiffAfterWithLocalFromLogActionProvider` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowDiffAfterWithLocalFromLogActionProvider.java` | `[~]` | 「与本地版本比较（提交之后）」动作提供器。本仓已有：`native/git.cpp:323`（`diff` 支持 base/staged 两向）+ `native/git.cpp:360`（`compare`）+ `src/vcsLogMenu.ts:66` 的菜单行机制。**还差**：日志里显式的「Before/After 与本地」两行（本仓只给一条与 HEAD 的比较） |
 | `ShowDiffPreviewAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowDiffPreviewAction.java` | `[~]` | 日志里的 diff 预览。本仓已有：`native/git_log.cpp:298`（`commit_file_diff`）+ `native/git.cpp:339`（`diff_sides`）→ `src/components/VcsLogDiff.vue:1`。**还差**：预览位置切换（下方/独立窗口/编辑器，见 `ChangeDiffPreviewLocationActions`） |
-| `ShowLongEdgesAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowLongEdgesAction.java` | `[ ]` | 「显示长边」（图上跨越很多行的连线）。本仓画边是 `src/vcsLogGraph.ts:7` 的 `lanePath`，恒显示 ⇒ 该开关未移植；建议落点：`src/vcsLogGraphOptions.ts` 增一档，`buildLogGraph`:24 按档过滤边 |
+| `ShowLongEdgesAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowLongEdgesAction.java` | `[x]` | 「显示长边」（图上跨越很多行的连线）。本仓画边是 `src/vcsLogGraph.ts:7` 的 `lanePath`，恒显示 ⇒ 该开关未移植；建议落点：`src/vcsLogGraphOptions.ts` 增一档，`buildLogGraph`:24 按档过滤边 2026-10-06 复判升 `[x]`（**归属 vcslog3，不记 vcsloge**：磁盘时钟 —— `tests/vcs-log-graph-render.test.mjs` 13:33 已含 30/1000 两档，vcsloge 自己的窗口是 15:14–15:19）：两档常量在 `src/vcsLogGraph.ts:106-107`（`VERY_LONG_EDGE_SIZE = 1000`/`LONG_EDGE_SIZE = 30`，对上 `PrintElementGeneratorImpl.kt:277-278`）、`stub.direction` 与终端箭头在 `:195-201`、缺省关在 `:155` + `src/components/VcsLogTable.vue:40`、齿轮行在 `src/vcsLogPresentation.ts:163-166`、按仓库根持久化在 `src/components/VcsLog.vue:123`；判据 6 处（cells 2 / presentation 2 / render 2）。已登记差异：上游终端段落在离端点一行（`visiblePartSize`），本仓落在端点自己那一行 ⇒ 方向与条数一致、差一行。 |
 | `ShowOnlyAffectedChangesAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowOnlyAffectedChangesAction.java` | `[~]` | 变更树里只显示当前文件/目录。本仓已有：按路径筛提交（`src/vcsLogTypes.ts:14` 的 `path` → `native/git.cpp:503`）+ 变更树 `src/vcsLogChanges.ts:5`。**还差**：在已选提交的变更列表里再做「只看影响这个文件」的二次过滤 |
 | `ShowRootsColumnAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowRootsColumnAction.java` | `[-]` | 「显示仓库列」开关（多根日志才有一列）。本仓单根：`src/vcsLogTypes.ts:1` 的 `LOG_COLUMNS` 是 commit/author/date/hash 四列（`src/vcsLogColumns.ts:1`），没有 roots 列，也没有多根 ⇒ 该类无对应形态 |
 | `ShowStandaloneDiffFromLogActionProvider` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowStandaloneDiffFromLogActionProvider.kt` | `[~]` | 独立窗口式 diff 的动作提供器。本仓 diff 可以在编辑器标签里独立显示（`native/git_log.cpp:298` 取两侧 → `src/components/DiffView.vue:1`），但不是「独立窗口」（宿主单窗口）⇒ 部分 |

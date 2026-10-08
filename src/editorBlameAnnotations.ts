@@ -2,6 +2,7 @@ import { EditorView, GutterMarker, gutter } from '@codemirror/view'
 import type { Extension, Range } from '@codemirror/state'
 import { RangeSet, StateEffect, StateField } from '@codemirror/state'
 import type { BlameAnnotation } from './blameAnnotations.ts'
+import { blameAuthorColors, blameColorFor, blameThemeFromDocument, type BlameAuthorColor } from './blameAuthorColors.ts'
 
 export type { BlameAnnotation } from './blameAnnotations'
 
@@ -13,19 +14,23 @@ function aspectText(annotation: BlameAnnotation, aspect: Aspect): string {
 class BlameMarker extends GutterMarker {
   private readonly text: string
   private readonly tooltip: string
-  constructor(annotation: BlameAnnotation, aspect: Aspect) {
+  private readonly color: string | undefined
+  constructor(annotation: BlameAnnotation, aspect: Aspect, colors: readonly BlameAuthorColor[]) {
     super()
     this.text = aspectText(annotation, aspect)
     this.tooltip = annotation.tooltip
+    // 作者色只上在作者那一列（上游 `AnnotateToggleAction.computeBgColors` 按作者给颜色）。
+    this.color = aspect === 'author' ? blameColorFor(annotation.author, colors) : undefined
   }
   eq(other: GutterMarker) {
-    return other instanceof BlameMarker && other.text === this.text && other.tooltip === this.tooltip
+    return other instanceof BlameMarker && other.text === this.text && other.tooltip === this.tooltip && other.color === this.color
   }
   toDOM() {
     const node = document.createElement('span')
     node.className = 'cm-blame-annotation'
     node.textContent = this.text
     node.title = this.tooltip
+    if (this.color) node.style.color = this.color
     return node
   }
 }
@@ -87,8 +92,13 @@ export function blameAnnotationsExtension(): Extension {
       ? spacer : measureMarker(update.state.field(blameField), aspect),
     markers: view => {
       const annotations = view.state.field(blameField).filter(annotation => aspectText(annotation, aspect))
+      // 作者列上色：`AnnotationsSettings.getAuthorsColors` + `computeBgColors` 的作者映射
+      // （`src/blameAuthorColors.ts`）。主题取自文档的 `data-theme`，与编辑器主题同源。
+      const colors = aspect === 'author'
+        ? blameAuthorColors(annotations.map(annotation => annotation.author ?? ''), blameThemeFromDocument())
+        : []
       const ranges: Range<GutterMarker>[] = annotations.map(annotation =>
-        new BlameMarker(annotation, aspect).range(view.state.doc.line(annotation.line).from))
+        new BlameMarker(annotation, aspect, colors).range(view.state.doc.line(annotation.line).from))
       return ranges.length ? RangeSet.of(ranges, true) : RangeSet.empty
     },
   }))

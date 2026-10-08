@@ -48,8 +48,8 @@ async function apply(reverse: boolean) {
 <template>
   <!-- IDEA 的提交查看器：diff 的每一块都可勾选，工具条只暂存/退回勾中的那些块。 -->
   <div v-if="hunks?.hunks.length" class="sc-hunks">
-    <button class="sc-tool" :disabled="busy" title="把勾选的改动块暂存（git apply --cached）" @click="apply(false)"><Plus :size="iconSize.control" />暂存勾选块</button>
-    <button class="sc-tool" :disabled="busy" title="把勾选的已暂存块退回工作区（reverse apply）" @click="apply(true)"><Minus :size="iconSize.control" />退回勾选块</button>
+    <button class="sc-tool" :disabled="busy" title="把勾选的改动块暂存（git apply --cached）" @click="apply(false)"><Plus aria-hidden="true" :size="iconSize.control" />暂存勾选块</button>
+    <button class="sc-tool" :disabled="busy" title="把勾选的已暂存块退回工作区（reverse apply）" @click="apply(true)"><Minus aria-hidden="true" :size="iconSize.control" />退回勾选块</button>
     <span class="sc-hunk-hint">{{ staged ? '已暂存差异' : '工作区差异' }} · {{ hunks.hunks.length }} 块</span>
   </div>
   <p v-if="error" class="sc-warning sc-hunk-error" role="status">{{ error }}</p>

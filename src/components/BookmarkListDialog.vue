@@ -9,7 +9,6 @@
 import { computed, ref, watch } from 'vue'
 import { listDialog, listNameIssue, namedListNames, confirmDeleteList, finishListDialog } from '../bookmarkListActions.ts'
 
-const props = defineProps<{ askBeforeDeleting: boolean }>()
 const value = ref('')
 
 const mode = computed(() => listDialog.value?.mode ?? 'create')
@@ -40,7 +39,6 @@ function confirm() {
       <h2>{{ title }}</h2>
       <template v-if="deleting">
         <p class="rename-target">确定要删除 ''{{ listDialog?.name }}'' 书签列表吗? 此操作无法撤消。</p>
-        <p v-if="!askBeforeDeleting" class="rename-note">（「删除多个书签前询问」关着，所以不再单独确认。）</p>
       </template>
       <template v-else-if="mode === 'select'">
         <p class="rename-target">把这条书签加到哪个列表？</p>
@@ -55,12 +53,12 @@ function confirm() {
         <p v-if="issue" class="rename-note" style="color: var(--error)">{{ issue }}</p>
       </template>
       <div v-if="!deleting && mode !== 'select'" class="dialog-actions">
-        <button class="subtle-button" @click="listDialog = null">取消</button>
         <button class="primary-button" :disabled="!value.trim() || Boolean(issue)" @click="confirm">{{ confirmLabel }}</button>
+        <button class="subtle-button" @click="listDialog = null">取消</button>
       </div>
       <div v-else class="dialog-actions">
-        <button class="subtle-button" @click="listDialog = null">取消</button>
         <button v-if="deleting" class="primary-button" @click="confirm">删除</button>
+        <button class="subtle-button" @click="listDialog = null">取消</button>
       </div>
     </section>
   </div>

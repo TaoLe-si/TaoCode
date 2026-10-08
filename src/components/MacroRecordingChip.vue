@@ -22,7 +22,7 @@ watch(() => props.recording, () => { open.value = false })
     <div v-if="recording && open" class="tree-menu-backdrop" @click="open = false" @contextmenu.prevent="open = false" />
     <AnchoredMenu v-if="recording && open" :x="point.x" :y="point.y" role="dialog" aria-label="宏录制" @keydown.esc.stop="open = false">
       <div class="macro-recording-details"><span>{{ text || '宏录制已开始' }}</span><button class="icon-button" title="关闭宏录制提示" aria-label="关闭宏录制提示" @click="open = false"><X :size="iconSize.dense" /></button></div>
-      <button class="menu-button" role="menuitem" @click="open = false; stop()"><span class="menu-item-icon"><Square :size="iconSize.menu" /></span><span>停止宏录制</span></button>
+      <button class="menu-button" role="menuitem" @click="open = false; stop()"><span class="menu-item-icon"><Square aria-hidden="true" :size="iconSize.menu" /></span><span>停止宏录制</span></button>
     </AnchoredMenu>
   </Teleport>
 </template>

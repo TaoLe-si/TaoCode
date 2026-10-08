@@ -93,7 +93,14 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     // reformatOnPaste 同一个设置类。消费方 src/enterHandlers.ts 与 src/editorTyping.ts 的 smartQuotes。
     "autoInsertPairQuote", "closeCommentOnEnter", "insertBraceOnEnter",
     // Code Vision（CodeVisionSettings.kt 的 State：:36 isEnabled、:38-39 可见条数 5、
-    // :45/:50 两个「只装与出厂相反那一半」的集合）。组 id 只有两个，见 src/codeLensSettings.ts:48-50。
+    // :45/:50 两个「只装与出厂相反那一半」的集合）。**组 id 是四个**，与前端 `src/codeLensSettings.ts`
+    // 的 `CODE_VISION_GROUP_IDS`（:104-106）逐条同源：`LspCodeVisionProvider`（`LspCodeVisionProvider.kt:20`）
+    // 与 `problems` / `references` / `inheritors`（`PlatformCodeVisionIds.kt:5-7`）；值域校验在
+    // native/settings_editor_keys.hpp 的那一条分支，两边同由 tests/code-lens-grouping.test.mjs 钉住。
+    // 订正留痕（2026-10-06 codevision2）：这里原写「组 id 只有两个，见 src/codeLensSettings.ts:48-50」——
+    // 那是某条被中止的 lane 把白名单砍成两组时留下的注释，与还原后的四组白名单相反、行号也漂了；
+    // 少列一组不是"少一个选项"而是**整本编辑器设置存不下去**（右键隐藏那一组写进运行时表，
+    // 读盘时被判 INVALID_SETTINGS），故按上游组键逐字复原并留下这条交叉判据。
     "codeVisionEnabled", "codeVisionDisabledGroups", "codeVisionEnabledGroups", "codeVisionVisibleEntries",
     // 快速文档两档（EditorSettingsExternalizable.java:76 默认 true；DocumentationToolWindowManager.kt:55
     // 的 `documentation.auto.update` 默认 true）。键名由 src/docHoverPolicy.ts 的 DOC_HOVER_SETTING_KEYS 定死。
@@ -119,9 +126,11 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
 
 inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {
     "defaultProjectDirectory", "reopenLastProject", "deleteToBin", "autoSyncFiles",
+    "embeddedBrowserAllowInsecureCertificates",
     "backgroundSyncFiles", "autoSaveFiles", "autoSaveIfInactive", "isUseSafeWrite", "confirmExit",
     "isShowWelcomeScreen", "confirmOpenNewProject2", "processCloseConfirmation", "inactiveTimeout",
     "supportScreenReaders", "autoShowProcessPopup",
+    "overrideSystemDateFormat", "dateFormatPattern", "use24HourTime", "prettyFormattingAllowed",
     // 音频提示（无障碍）：IDEA `AudioCuesSettings.kt:17` 的 @State(name="AudioCues")，默认 off。
     // `audioCuesMode` 三档（AudioCuesSettings.kt:75-79 的 AUTO/ON/OFF）；`audioCuesDisabled`
     // 是 `AudioCuesSettingsState.disabledCues`（:69-72）的数组形态（存的是六个 cue 的 id）。
@@ -129,6 +138,8 @@ inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {
     // ConsoleConfigurable (`Console`, lang-impl/.../execution/console/ConsoleConfigurable.java:43-73)：
     // 控制台行折叠规则 —— 要折叠的行 + 不折叠的例外两个列表。
     "foldConsoleLines", "foldExceptions",
+    // StackTraceFoldingSettings 的栈折叠开关与阈值。
+    "foldJavaStackTrace", "foldJavaStackTraceGreaterThan",
     // DiffSettingsConfigurable（`diff.base`，diff-impl/.../DiffSettingsConfigurable.kt:31 `settings.context.lines`）：
     // diff 的上下文行数。
     "diffContextLines",

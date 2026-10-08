@@ -43,8 +43,17 @@ test('用户改过就不动（以免把编辑成果冲掉）', () => {
 })
 
 test('接线：面板把这三步接在 amend 开关上，占位文本只有一种（上游没有再编一句提示）', () => {
-  const text = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src/components/SourceControl.vue'), 'utf8')
-  assert.match(text, /watch\(amend, value => \{/, 'amend 开关触发')
-  assert.match(text, /request<GitCommitDetails>\('git\.commitDetails', \{ revision: 'HEAD' \}\)/, '上次提交的信息来自 git.commitDetails（原生 %B）')
-  assert.match(text, /:placeholder="COMMIT_MESSAGE_PLACEHOLDER"/, '占位文本只有包里的那一条')
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const panel = readFileSync(join(root, 'src/components/SourceControl.vue'), 'utf8')
+  const section = readFileSync(join(root, 'src/commitMessageSection.ts'), 'utf8')
+  // 2026-10-06：amend 三步（监听开关 → 取上次提交信息 → 还原草稿）整段搬进了
+  // `src/commitMessageSection.ts`（SourceControl.vue 贴着机检行数上限），所以这里
+  // 先钉「面板真的建了这个 section 并把它要的三样喂进去」，再钉 section 里那三步的锚点。
+  assert.match(panel, /createCommitMessageSection\(\{[\s\S]*?message, amend, settings: \(\) => props\.commitSettings/,
+    '面板必须用 createCommitMessageSection 建这一节，并把 message/amend/settings 三样喂进去')
+  assert.match(panel, /:placeholder="COMMIT_MESSAGE_PLACEHOLDER"/, '占位文本只有包里的那一条')
+  assert.match(section, /watch\(deps\.amend, value => \{/, 'amend 开关触发')
+  assert.match(section, /request<GitCommitDetails>\('git\.commitDetails', \{ revision: 'HEAD' \}\)/, '上次提交的信息来自 git.commitDetails（原生 %B）')
+  assert.match(section, /restoreBeforeAmendMessage\(deps\.message\.value, amendDraft, beforeAmendMessage\)/, '退出 amend 时还原草稿')
+  assert.match(section, /amendMessagePlan\(deps\.message\.value, details\.message\)/, '进 amend 时按计划填入上次的信息')
 })

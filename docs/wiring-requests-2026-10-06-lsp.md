@@ -246,3 +246,16 @@ import { noteDocumentChanged, noteDocumentClosed } from './lsSessionHost.ts'
 3. **`LspNodeRuntimeManager`/`LspNodeRuntimeDownloads`**（下载 node 运行时）：派单禁网、禁外部配额调用，本仓只发现随发行的 JDT LS ⇒ 无法核实也做不到。
 4. **`stdio` 之外的连接器**（上游 `Lsp4jServerConnectorSocket`）：`native/lsp_host.hpp` 的 `Host::Spec` 只有 stdio 一条口，改它要动 `.hpp` ⇒ 见第 1 条。
 5. **流量级 JSON-RPC 逐条记录**（上游 `LspTrafficPayloadPopup`）：要宿主把每一条出入帧都转一份给前端 ⇒ 事件名要进 `src/bridge.ts` 的白名单（保留文件）⇒ 没做，也没写成 L 条（它比 L5 更大，等主代理排期）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **L1** —— 目标 `src/components/CodeEditor.vue`（禁改清单）。需 CodeEditor owner。
+- **L2 部分**：`@policy-change` 已接（`src/App.vue:2478`）；`:can-toggle-hover="true"` 未加（L1 未落地前不放假控件）。
+- **L3 已接线（形状迁移）**：`docHoverPolicyFromSettings` 由 `src/workspaceLifecycle.ts:247` 调用。
+
+结论：L2 的 policy-change 与 L3 已接；L1 与 can-toggle-hover 转 CodeEditor owner。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「L2 的 policy-change 与 L3 已接；L1 与 can-toggle-hover 转 CodeEditor owner。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

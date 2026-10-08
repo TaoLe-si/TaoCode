@@ -71,3 +71,15 @@
 - 本篇「净 +5 行」实际净 +6 行；`src/App.vue` 现 2675 行（上限 2737，仍安全）。
 - 剩下的线只有 **T1**（`src/bridge.ts` 的 `logMessage?`）与 **T2**（`round.error` 要不要按 `applied` 分档），
   都在 `docs/wiring-requests-2026-10-06-dap3.md`。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **D1 已接线**：`src/App.vue:1110` 已是 `const round = await breakpointUpdater.queueFile(path, next, { now: true })`，import 在 `:107`；全文件 `grep dapSetBreakpoints` 0 命中（裸发已清）。
+
+结论：**零待接**，未改任何文件。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「**零待接**，未改任何文件。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。
+`src/components/DebugPanel.vue` 的挂载点（`:210/:248/:258`）属**大组件 lane** 独占（本 lane 禁改），需大组件 lane 处理；该文件当前超过 900 行（`tests/module-size.test.mjs` 报「未登记的巨型源文件」），也归大组件 lane 拆分。

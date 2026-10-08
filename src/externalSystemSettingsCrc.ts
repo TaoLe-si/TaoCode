@@ -17,6 +17,8 @@
 // 本仓的取数通道：没有 VFS/`Document`，由调用方把内容读出来（`file.read`）传进来；读不到的文件
 // 等价于上游 `findFileByPath` 返回 null（`:60`），即不进新表 → 落进 `deleted`（与上游同一取舍）。
 
+import { settingsFileCrcCalculatorFor } from './externalSystemExtensionPoints.ts'
+
 /** CRC-32（IEEE 802.3 / zlib，与 `java.util.zip.CRC32` 同多项式 0xEDB88320）。 */
 const CRC32_POLYNOMIAL = 0xedb88320
 
@@ -84,16 +86,24 @@ export function settingsFileEvents(status: SettingsFilesStatus): Array<{ path: s
 /**
  * 读一张新的 CRC 表（`calculateSettingsFilesCRC`，`:56-66`）：逐个读内容，CRC 为 0 的不进表。
  * `read` 返回 null = 文件读不到（不存在/无权），与上游 `findFileByPath` 为 null 同一处理。
+ *
+ * `systemId` 给定时先问 `com.intellij.externalSystemCrcCalculator` 的插件贡献
+ * （`ExternalSystemCrcCalculator.getInstance(systemId, file)`，`ExternalSystemCrcCalculator.kt:34-38`）：
+ * 命中且 `calculateCrc` 给出非 null ⇒ 用它；否则走默认 CRC-32。第三方按该 id 挂一条计算器就能
+ * 改变某个设置文件的指纹（例如忽略构建脚本里的注释），这是那条 EP 在本仓的真实消费点。
  */
 export async function calculateSettingsFilesCrc(
   paths: readonly string[],
   read: (path: string) => Promise<string | null>,
+  systemId = '',
 ): Promise<Map<string, number>> {
   const crc = new Map<string, number>()
   for (const path of paths) {
     const content = await read(path)
     if (content === null) continue
-    const value = settingsFileCrc(content)
+    const calculator = settingsFileCrcCalculatorFor(systemId, path)
+    let value = calculator ? calculator.calculateCrc({ systemId, file: path, text: content }) : null
+    if (value === null || value === undefined) value = settingsFileCrc(content)
     if (value !== 0) crc.set(path, value)
   }
   return crc

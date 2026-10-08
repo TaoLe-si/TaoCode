@@ -31,6 +31,7 @@
 // `EnterAfterJavadocTagHandler.java` 与 `EnterHandler.java:417-428` 的 javadoc 生成要靠 PSI 找方法声明
 // —— 本仓没有 PSI，与上游的退出条件保持一致，返回 null（详见报告的「做不到」）。
 import type { ChangeSpec } from '@codemirror/state'
+import { commentCompleteVerdict } from './editorActionExtraExtensionPoints.ts'
 
 /** 块注释的词法（上游 `CodeDocumentationAwareCommenter` 的三个前缀 + 一个后缀）。 */
 export interface BlockCommentLexicon {
@@ -132,10 +133,45 @@ export function blockCommentStartOffset(text: string, caret: number, lexicon: Bl
   return start
 }
 
+/**
+ * 问「这条注释写完了吗」时要带给 EP 的上下文（本仓没有 `PsiComment`，路径/语言由调用方给；
+ * 不给就按未知档问 —— 见 `src/editorActionExtraExtensionPoints.ts` 的 `acceptsLanguage`）。
+ */
+export interface BlockCommentCompleteContext {
+  path?: string
+  language?: string
+}
+
 // 这条块注释闭合了吗（`EnterHandler.java:207-210` 的默认判据：注释文本必须以 suffix 收尾）。
 // 词法层等价问法：从 `/*` 往后找得到 `*/`。
-export function blockCommentComplete(text: string, start: number, lexicon: BlockCommentLexicon): boolean {
+//
+// **2026-10-06 本 lane 补**：这里现在是 `com.intellij.commentCompleteHandler` 的真实消费点 ——
+// 上游 `EnterHandler.isCommentComplete`（`:200-204`）先问扩展点，**第一个** `isApplicable` 为真的
+// 处理器说了算；一个都不适用才落到上面那条词法兜底。bundled 贡献 `isApplicable: () => false`
+// ⇒ 没有第三方挂进来时，本函数的返回值与既有实现逐字相同。
+export function blockCommentComplete(
+  text: string, start: number, lexicon: BlockCommentLexicon, context: BlockCommentCompleteContext = {},
+): boolean {
+  const suffix = lexicon.block?.[1]
+  if (suffix) {
+    const handler = blockCommentCompleteHandler(text, start, lexicon, suffix, context)
+    if (handler !== null) return handler
+  }
   return blockCommentClose(text, start, lexicon) >= 0
+}
+
+/** 问一遍 EP；没有适用处理器返回 null（= 落到词法兜底）。 */
+function blockCommentCompleteHandler(
+  text: string, start: number, lexicon: BlockCommentLexicon, suffix: string, context: BlockCommentCompleteContext,
+): boolean | null {
+  const line = text.slice(0, start).split('\n').length - 1
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1
+  const verdict = commentCompleteVerdict({
+    path: context.path ?? '', language: context.language ?? '',
+    text, line, character: start - lineStart,
+    commentStart: start, commentPrefix: lexicon.block?.[0], commentSuffix: suffix,
+  })
+  return verdict ? verdict.complete : null
 }
 
 /** 光标所在行的行首下标（`DocumentUtil.getLineStartOffset` 的等价物，`:63`/`:72`）。 */
@@ -174,11 +210,13 @@ export interface BlockCommentEnterResult {
  * **订正（2026-10-06 复核）**：这里原先写「本仓 `EditorSettings` 里没有这一条对应项」—— 实际是**有键**
  * （`src/settingsModel.ts:429`，默认 true）**有界面**（`src/components/EditorEnterKeysFields.vue:33`）
  * **没有消费方**。缺的那一半现在接上了：`src/enterHandlers.ts` 把 `EnterLanguage.blockCloseOnEnter ?? true`
- * 传进这个实参；宿主递 `props.settings.closeCommentOnEnter` 的那一行在保留文件里
- * ⇒ `docs/wiring-requests-2026-10-06-editorinput.md` R1。不传时按上游默认 true 走，行为一格不变。
+ * 传进这个实参，宿主那一行也已落地（`src/components/CodeEditor.vue:117` 传 `props.settings`，接线请求 W-1 已闭环）。
+ * 关掉它看得见的差别由 `tests/editor-enter-switches.test.mjs` 端到端钉住。
+ * 不传时按上游默认 true 走，行为一格不变。
  */
 export function enterInBlockComment(
   text: string, caret: number, lexicon: BlockCommentLexicon, closeOnEnter = true,
+  context: BlockCommentCompleteContext = {},
 ): BlockCommentEnterResult | null {
   const open = lexicon.block?.[0]
   const close = lexicon.block?.[1]
@@ -190,7 +228,9 @@ export function enterInBlockComment(
   if (beforeWhitespace >= 0 && text[beforeWhitespace] !== '\n') return null // `:53-54`
 
   // `:62-68` 注释没闭合 ⇒ 光标行的行尾补「缩进 + */」，回车本身走默认的（Result.Default）。
-  if (closeOnEnter && !blockCommentComplete(text, start, lexicon)) {
+  // 「没闭合」这一问先问 `com.intellij.commentCompleteHandler`（上游 `EnterHandler.java:200-204`），
+  // 没有适用处理器才用词法兜底（见 `blockCommentComplete`）。
+  if (closeOnEnter && !blockCommentComplete(text, start, lexicon, context)) {
     const indent = text.slice(beforeWhitespace + 1, start)
     return { edits: [{ from: lineEndOf(text, caret), insert: `\n${indent} ${close}` }], caretAdvance: 0, forceIndent: false }
   }

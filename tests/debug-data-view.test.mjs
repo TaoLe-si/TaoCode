@@ -7,7 +7,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { DEFAULT_DEBUG_DATA_VIEW, collectReferenceRows, collectVarRows, isNullValueText, visibleChildren } from '../src/debugDataView.ts'
+import { DEFAULT_DEBUG_DATA_VIEW, collectEvaluateRows, collectReferenceRows, collectVarRows, isNullValueText, visibleChildren } from '../src/debugDataView.ts'
 
 const v = (name, value, reference = 0, named = true) => ({ name, value, reference, named })
 
@@ -53,6 +53,18 @@ test('collectReferenceRows 与变量树共用同一套展开/选项规则', () =
   const values = { 5: [v('b', '2'), v('a', '1')] }
   const rows = collectReferenceRows(5, values, {}, { hideNullValues: false, sortByName: true })
   assert.deepEqual(rows.map(row => row.name), ['a', 'b'])
+})
+
+test('collectEvaluateRows 接的是 dap.evaluate 的整条回参：reference 优先、退回 variablesReference', () => {
+  const values = { 5: [v('b', '2'), v('a', '1')], 9: [v('z', '3')] }
+  // 原生 `shape_evaluate` 两个键都发（同一个值）；只发 variablesReference 的老形状也要认。
+  assert.deepEqual(collectEvaluateRows({ result: '{...}', reference: 5, variablesReference: 5 }, values, {}, { hideNullValues: false, sortByName: true }).map(row => row.name), ['a', 'b'])
+  assert.deepEqual(collectEvaluateRows({ result: '{...}', variablesReference: 5 }, values, {}).map(row => row.name), ['b', 'a'], '只有 variablesReference 时也展开')
+  assert.deepEqual(collectEvaluateRows({ result: '{...}', reference: 9 }, values, {}).map(row => row.name), ['z'])
+  // 标量结果（没有句柄）⇒ 空表，不画"读取中…"的假节点。
+  assert.deepEqual(collectEvaluateRows({ result: '42' }, values, {}), [])
+  assert.deepEqual(collectEvaluateRows(undefined, values, {}), [])
+  assert.deepEqual(collectEvaluateRows({ result: '42', reference: 0, variablesReference: 0 }, values, {}), [])
 })
 
 // —— 键登记不许漂（前端默认 / 原生白名单 / 原生默认 / 预览态白名单四份）——

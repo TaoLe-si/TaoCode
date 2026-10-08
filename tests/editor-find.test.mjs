@@ -153,8 +153,12 @@ test('the editor hosts the bar and binds IDEA’s find keys', () => {
   // FindNext = F3（:707）、FindPrevious = Shift+F3（:507）、FindWordAtCaret = Ctrl+F3、
   // FindPrevWordAtCaret = Ctrl+Shift+F3、ToggleFindInSelection = Ctrl+Alt+E、
   // UnselectPreviousOccurrence = Alt+Shift+J。
+  // 这一族键位 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限，拆一次降一次）；
+  // 宿主那一半（查找栏组件 + 扩展）仍钉在 CodeEditor.vue 上。
+  const keymap = read('src/editorKeymap.ts')
   for (const key of ["'Mod-f'", "'Mod-r'", "'F3'", "'Shift-F3'", "'Ctrl-F3'", "'Ctrl-Shift-F3'", "'Ctrl-Alt-e'", "'Alt-Shift-j'"])
-    assert.ok(editor.includes(`key: ${key}`), `编辑器缺少键位 ${key}`)
+    assert.ok(keymap.includes(`key: ${key}`), `编辑器缺少键位 ${key}`)
+  assert.ok(editor.includes('keymap.of(editorKeymap)'), '常驻 keymap 要真的装进编辑器')
 })
 
 test('the edit menu carries the whole FindMenuGroup', () => {

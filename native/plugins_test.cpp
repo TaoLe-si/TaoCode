@@ -302,6 +302,28 @@ int main() {
         check(json.at("plugins").at(0).contains("vendor"), "vendor 要进 JSON（前端按它过滤 /vendor:）");
     });
 
+    // 上游 `<change-notes>`：PluginXmlConst.kt:42 的元素名、XmlReader.kt:193 的读取、
+    // PluginDetailsPageComponent.kt:1394 的展示（空内容整块不可见）。本仓同口径：没写 = 不渲染。
+    run("变更说明 changeNotes：去空白、没写、超长与 1200 的边界（详情面板那一行靠它）", [] {
+        const fs::path root = scratch("change-notes");
+        const fs::path plugins_dir = root / "plugins";
+        write_file(plugins_dir / "with_notes" / "plugin.json",
+                   R"({"name": "有说明", "changeNotes": "  这一版修掉了换行符的问题  "})");
+        write_file(plugins_dir / "no_notes" / "plugin.json", R"({"name": "没说明"})");
+        write_file(plugins_dir / "edge_notes" / "plugin.json",
+                   std::string("{\"name\": \"恰好 1200\", \"changeNotes\": \"") + std::string(1200, 'x') + "\"}");
+        write_file(plugins_dir / "long_notes" / "plugin.json",
+                   std::string("{\"name\": \"超一档\", \"changeNotes\": \"") + std::string(1201, 'x') + "\"}");
+        const auto plugins = list(plugins_dir);
+        check(find_plugin(plugins, "with_notes").change_notes == "这一版修掉了换行符的问题", "changeNotes 的首尾空白要剪掉");
+        check(find_plugin(plugins, "no_notes").change_notes.empty(), "清单没写变更说明时是空串（详情面板不渲染那一行）");
+        check(find_plugin(plugins, "edge_notes").change_notes.size() == 1200, "1200 字符是上限内，该整段留下");
+        check(find_plugin(plugins, "long_notes").change_notes.empty(), "超过 1200 字符与没写同义（不留半截说明）");
+        const Json json = to_json(plugins);
+        check(json.at("plugins").at(0).contains("changeNotes"), "changeNotes 要进 JSON（前端详情面板读它）");
+        check(json.at("plugins").at(0).at("description").is_string(), "description 与 changeNotes 是两格，不能互相顶替");
+    });
+
     run("重复的命令 id 只留第一条（菜单行 id 不能重复）", [] {
         const fs::path root = scratch("dup-commands");
         const fs::path plugins_dir = root / "plugins";

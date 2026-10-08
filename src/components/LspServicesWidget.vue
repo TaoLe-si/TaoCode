@@ -67,7 +67,7 @@ async function run(item: (typeof items.value)[number]) {
 </script>
 
 <template>
-  <button ref="anchor" class="status-chip status-lsp-services" :class="{ 'has-error': items.some(item => item.isError) }" :aria-expanded="open" :title="tooltip || `语言服务：${NO_SERVICES}`" :aria-label="`语言服务：${line}`" @click.stop="toggle"><CircleAlert v-if="items.some(item => item.isError)" :size="iconSize.dense" /><Plug v-else :size="iconSize.dense" />{{ line }}</button>
+  <button ref="anchor" class="status-chip status-lsp-services" :class="{ 'has-error': items.some(item => item.isError) }" :aria-expanded="open" :title="tooltip || `语言服务：${NO_SERVICES}`" :aria-label="`语言服务：${line}`" @click.stop="toggle"><CircleAlert aria-hidden="true" v-if="items.some(item => item.isError)" :size="iconSize.dense" /><Plug aria-hidden="true" v-else :size="iconSize.dense" />{{ line }}</button>
   <Teleport to="body">
     <div v-if="open" class="tree-menu-backdrop" @click="open = false" @contextmenu.prevent="open = false" />
     <AnchoredMenu v-if="open" :x="point.x" :y="point.y" role="dialog" aria-label="语言服务">
@@ -91,9 +91,12 @@ async function run(item: (typeof items.value)[number]) {
 <style scoped>
 .status-lsp-services { display: inline-flex; align-items: center; gap: var(--space-1); }
 .status-lsp-services.has-error { color: var(--error); }
-.lsp-empty { color: var(--text-dim); padding: var(--space-2); }
-.lsp-section { color: var(--text-dim); font-size: var(--font-dense); padding: var(--space-1) var(--space-2); }
+.lsp-empty { color: var(--muted); padding: var(--space-2); }
+/* 小标题：与 `.panel-heading` 同一档（11px）。原先写的是 `var(--font-dense)` —— 那个令牌
+   本仓**根本没有定义**（`tokens.css` 只有 `--font-ui/brand/mono` 三个字族令牌，没有字号阶梯），
+   于是这条 font-size 声明一直是个空操作，字号实际继承自宿主（12px）。 */
+.lsp-section { color: var(--muted); font-size: 11px; padding: var(--space-1) var(--space-2); }
 .lsp-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); max-width: 360px; }
 .lsp-name { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lsp-state { flex: 1; color: var(--text-dim); }
+.lsp-state { flex: 1; color: var(--muted); }
 </style>

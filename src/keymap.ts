@@ -11,9 +11,10 @@
 // 依赖之所以有 104 个，是因为它是"按键 → 动作"的总线，动作本身都在各自的域里；这里只做判定。
 import { dapState, dapStep, isDesktop, runState, type RunConfig, type RunStartParams, type Workspace } from './bridge.ts'
 import { MAXIMIZE_SHORTCUT_CODE } from './toolWindowHeader.ts'
-import { EDITOR_ACTIONS, findKeyBinding } from './keymapBindings.ts'
+import { EDITOR_ACTIONS, KEY_BINDINGS, findKeyBinding } from './keymapBindings.ts'
 import { effectiveKeyBindings } from './keymapEditor.ts'
 import { ACTIONS, registerEditorActions, registerKeymapActions } from './actionRegistry.ts'
+import { shouldDelegateAgentComposerShortcut } from './agentComposerShortcuts.ts'
 import { recordKeyEvent } from './macroHost.ts'
 import { presentShortcut } from './presentationAssistant.ts'
 import type { Tab } from './editorTab'
@@ -119,6 +120,15 @@ export interface KeymapContext {
   gotoSuper?: () => unknown
   gotoTest?: () => unknown
   gotoRelated?: () => unknown
+  /**
+   * 「优化导入」（Code › Optimize Imports，`$default.xml:340-342` = `control alt O`）的执行入口 =
+   * 宿主 `src/semanticActions.ts` 的 `runOrganizeImports`（菜单那一行 `src/menus/codeMenu.ts:112`
+   * 已经在调同一个函数；宿主 `src/App.vue:972` 也早从 `createSemanticActions` 解出了它）。
+   * **可选**：宿主没把它塞进 `createKeymap` 时这一条不注册（见下面 `unwired`），按键原样放行 ——
+   * 注册一个跑不动的动作就是「假控件」。接线请求见
+   * `docs/wiring-requests-2026-10-06-refactorfix.md` R1（一行：把 `runOrganizeImports` 加进 `createKeymap({...})`）。
+   */
+  runOrganizeImports?: () => unknown
   openConfigChooser: () => void
   openGeneratePopup: () => unknown
   openGoLine: () => void
@@ -179,7 +189,7 @@ export function createKeymap(ctx: KeymapContext) {
           runContextConfiguration, runSelectedConfig, runToCursor, save, saveAll, openSelectIn, showNavBar, selectNextTab,
           selectPreviousTab, showBlame, showOutput, showQuickDoc, showView, startBuild, stopRun, stretchToolWindow,
           toggleBookmark, toggleBreakpointAt, toggleMaximizeEditor, updateProject, openRunAnything, runEditor,
-          gotoSuper, gotoTest, gotoRelated } = ctx
+          gotoSuper, gotoTest, gotoRelated, runOrganizeImports } = ctx
   // IDEA 的 Keymap 没有"双击 Shift"这条绑定，它是 SearchEverywhere 的默认手势；宿主原先用
   // 一个模块级 `let lastShiftAt` 记上一次 Shift 的时间戳，随函数一起搬进来。
   // RunAnything 的双击 Ctrl 走同一机制（`$default.xml:7-9` 的 gesture shortcut）。
@@ -188,6 +198,7 @@ export function createKeymap(ctx: KeymapContext) {
 function onKey(event: KeyboardEvent) {
   // Every keystroke counts as activity for the idle-driven background refresh.
   noteActivity()
+  if (shouldDelegateAgentComposerShortcut(event)) return
   // Alt+1..9 focus the tool windows (IDEA ActivateToolWindowAction is unconditional);
   // modals and the palette keep the keyboard first.
   if (event.altKey && workspace.value
@@ -397,6 +408,10 @@ function onKey(event: KeyboardEvent) {
     'refactor.extractMethod': () => extractMethod(),
     'refactor.inline': () => inlineVariable(),
     'inspection.runByName': () => { void openCodeActions(caretPayload(), true) },
+    // 「优化导入」与 Code 菜单那一行**同一个入口**（`ctx.runOrganizeImports` = `src/semanticActions.ts`
+    // 的 `runOrganizeImports`，它才是 `src/organizeImports.ts` 那两个出口的唯一消费者）——
+    // 这里只转发，绝不抄第二份实现（判据 `tests/refactor-organize-imports.test.mjs`）。
+    'code.optimizeImports': () => void (runOrganizeImports?.()),
     'docs.quickDoc': () => { void showQuickDoc() },
     'edit.copyReference': () => { void copyReference() },
     'edit.copyPath': () => copyPaths(),
@@ -409,12 +424,12 @@ function onKey(event: KeyboardEvent) {
   // `effectiveKeyBindings()` = 出厂表 + 用户自定义覆盖（上游 `KeymapManagerEx.getActiveKeymap()`：
   // 用户方案叠在出厂 `BundledKeymapBean` 之上）。分派与「演示助手」显示的快捷键都读同一份，
   // 所以改键**立刻**改变实际行为，不是只改菜单文案。
-  const bindings = effectiveKeyBindings()
-  // 宿主没把 `gotoSuper`/`gotoTest`/`gotoRelated` 塞进 ctx 时，这三条**不参与注册**：
+  const bindings = effectiveKeyBindings(undefined, KEY_BINDINGS)
+  // 宿主没把 `gotoSuper`/`gotoTest`/`gotoRelated`/`runOrganizeImports` 塞进 ctx 时，这几条**不参与注册**：
   // `registerKeymapActions` 见 `handlerOf` 返回 undefined 就跳过 ⇒ `ACTIONS.has` 为假 ⇒ 命中键位也原样放行。
   // 少了这一层就会出现「键位表写着 Ctrl+Shift+T、按下去只吞键不干活」的假动作（本仓铁律）。
   const unwired = new Set([gotoSuper ? '' : 'navigate.super', gotoTest ? '' : 'navigate.test',
-    gotoRelated ? '' : 'navigate.related'])
+    gotoRelated ? '' : 'navigate.related', runOrganizeImports ? '' : 'code.optimizeImports'])
   registerKeymapActions(bindings, binding => (unwired.has(binding.id) ? undefined : tailActions[binding.id]), () => ({
     workspace: !!workspace.value, editor: !!active.value, lsp: lspReady.value,
   }))

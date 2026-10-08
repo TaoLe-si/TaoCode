@@ -11,9 +11,15 @@
 //   · 扩展示例顺序照上游：自定义在前，默认扩展兜底（label/parent/children 三处都是首个非空命中）；
 //   · `additionalRoots` 与左侧根扩展：默认只有一个工作区根（本仓单根）。
 //
+// **2026-10-06 本 lane 补**：EP 宿主已落 —— `com.intellij.navbar`（逐字取自上游
+// `platform/platform-impl/resources/intellij.platform.ide.impl.xml:433` 的
+// `qualifiedName="com.intellij.navbar"`，interface `NavBarModelExtension` dynamic="true"）。
+// 默认扩展按 bundled 贡献登记，第三方按同一 EP id 挂的扩展由 `createNavBarModel()`
+// （本模型的真实装配点）合并进来，顺序照上游「自定义在前、默认兜底」。
+//
 // 明确不做（上游有、本仓没有）：PSI 元素与注入片段（`PsiFileSystemItem`/`InjectedLanguageManager`）、
-// 库/SDK/模块元素（`LibraryOrderEntry`/`JdkOrderEntry`/`ModuleOrderEntry`，本仓外部库树是合成行）、
-// 真扩展点宿主（`com.intellij.navbar` EP；本仓的扩展表由调用方注入）。
+// 库/SDK/模块元素（`LibraryOrderEntry`/`JdkOrderEntry`/`ModuleOrderEntry`，本仓外部库树是合成行）。
+import { APPLICATION_SCOPE, EXTENSIONS, type ExtensionHandle, type RegisterExtensionOptions } from './extensionPoints.ts'
 
 /** 导航栏上的一个元素（本仓的 PSI 替代物）。 */
 export interface NavBarElement {
@@ -84,17 +90,53 @@ function defaultParent(element: NavBarElement): NavBarElement | null {
 }
 
 /** 默认扩展（`DefaultNavBarExtension`）：名字取路径末段、父级取上级目录、无额外根。 */
+export const DEFAULT_NAV_BAR_EXTENSION: NavBarModelExtension = {
+  getPresentableText: element => element.name || null,
+  getParent: element => defaultParent(element),
+  adjustElement: element => element,
+  additionalRoots: () => [],
+}
+
 export function defaultNavBarExtension(): NavBarModelExtension {
-  return {
-    getPresentableText: element => element.name || null,
-    getParent: element => defaultParent(element),
-    adjustElement: element => element,
-    additionalRoots: () => [],
-  }
+  return DEFAULT_NAV_BAR_EXTENSION
+}
+
+// ── `com.intellij.navbar` 扩展点宿主（`NavBarModelExtension`） ──────────────────────
+
+/** EP id（逐字取自上游 `intellij.platform.ide.impl.xml:433` 的 `qualifiedName`）。 */
+export const NAV_BAR_EXTENSION_EP = 'com.intellij.navbar'
+
+/** 一条导航栏扩展贡献（上游 EP 无 id，这里是本仓宿主要求的键）。 */
+export interface NavBarExtensionContribution {
+  id: string
+  extension: NavBarModelExtension
+}
+
+/** 声明 EP（幂等）。 */
+export function declareNavBarExtensionPoint(): void {
+  EXTENSIONS.declareExtensionPoint({ id: NAV_BAR_EXTENSION_EP, name: '导航栏扩展', scope: APPLICATION_SCOPE, dynamic: true })
+}
+
+/** 插件贡献一个导航栏扩展（等价于上游 plugin.xml 的 `<com.intellij.navbar implementation=…/>`）。 */
+export function registerNavBarExtension(id: string, extension: NavBarModelExtension, options: RegisterExtensionOptions = {}): ExtensionHandle {
+  return EXTENSIONS.registerExtension(NAV_BAR_EXTENSION_EP, id, { id, extension }, options)
+}
+
+/** 注销一条导航栏扩展贡献。 */
+export function unregisterNavBarExtension(id: string): boolean {
+  return EXTENSIONS.unregisterExtension(NAV_BAR_EXTENSION_EP, id)
+}
+
+/** 当前 EP 上的全部扩展（bundled 默认扩展 + 第三方）。 */
+export function navBarExtensionsFromExtensions(scope: string = APPLICATION_SCOPE): NavBarModelExtension[] {
+  return EXTENSIONS.extensionsOf<NavBarExtensionContribution>(NAV_BAR_EXTENSION_EP, scope)
+    .map(contribution => contribution.extension)
 }
 
 export function createNavBarModel(options: NavBarModelOptions): NavBarModel {
-  const extensions = [...options.extensions, defaultNavBarExtension()]
+  // 上游 EP 调用顺序：调用方注入的自定义扩展在前，EP 上的第三方扩展居中，默认扩展兜底。
+  const fromEp = navBarExtensionsFromExtensions().filter(extension => extension !== DEFAULT_NAV_BAR_EXTENSION)
+  const extensions = [...options.extensions, ...fromEp, DEFAULT_NAV_BAR_EXTENSION]
 
   const firstNonNull = <T>(pick: (extension: NavBarModelExtension) => T | null | undefined, fallback: T): T => {
     for (const extension of extensions) {
@@ -165,3 +207,7 @@ export function createNavBarModel(options: NavBarModelOptions): NavBarModel {
 
   return { chain, presentableText, parentOf, adjust, roots, childrenOf }
 }
+
+// bundled：默认扩展按上游 plugin.xml 的 `<com.intellij.navbar/>` 形态登记在 EP 上（兜底那一条）。
+declareNavBarExtensionPoint()
+EXTENSIONS.registerExtension(NAV_BAR_EXTENSION_EP, 'default', { id: 'default', extension: DEFAULT_NAV_BAR_EXTENSION }, { source: 'bundled' })

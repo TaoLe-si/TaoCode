@@ -6,9 +6,12 @@
 // Shelve · —— · ChangesView.Refresh · —— · VersionControlsGroup
 //
 // 本仓的取舍（只列真有的动作，缺的逐条记在清单批 111）：
-//   · 有：显示差异 · 复制路径/引用… · 回滚… · 暂存 / 取消暂存 · 添加到 VCS · 加入 .gitignore ·
-//     从本地更改创建补丁… · 作为补丁复制到剪贴板 · 应用补丁… · 从剪贴板应用补丁 · 刷新；
-//   · 缺：签出（Perforce 语义）、更改列表四项与"移到另一个更改列表"（本仓没有 changelist 这一层）、
+//   · 有：提交文件… · 显示差异 · 复制路径/引用… · 回滚… · 暂存 / 取消暂存 · 添加到 VCS ·
+//     加入 .gitignore · 从本地更改创建补丁… · 作为补丁复制到剪贴板 · 应用补丁… ·
+//     从剪贴板应用补丁 · 刷新；
+//   · 缺：签出（Perforce 语义）、更改列表的**新建/重命名/删除/设为默认**四项（那四项在上游是
+//     `ChangesView.Changelists` 组里的动作，落在本仓面板的**变更列表选择器那一行**，
+//     见 src/changeListSection.ts；菜单里只留「移到其他变更列表…」这一条 = `ChangesView.Move`）、
 //     搁置（本仓在 Git 菜单里）、在新标签页显示差异与跳转到源（都要宿主的"开标签页"通道，
 //     面板当前只 emit notify）。
 // 文案取随 IDE 发货的中文包 `ActionsBundle.properties`（键注在每一行旁），助记符标记去掉。
@@ -19,19 +22,23 @@ import { CHANGES_MENU_ROWS, changesMenuRows } from '../src/changesMenuActions.ts
 
 const read = rel => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
 
-test('a tracked unstaged file gets diff / revert / stage / patch / refresh', () => {
+// 首行是 `commitFile`（上游 `VcsActions.xml:187` 的 `CheckinFiles` 挂在组最上面，
+// `CommonCheckinFilesAction.kt:37-53` 把选中路径设成这次提交的范围）—— 面板真在分派它
+// （`src/components/SourceControl.vue` 的 `case 'commitFile': return setCommitScope(path)`），
+// 忽略的文件不给（`CommonCheckinFilesAction.kt:75-78` 的 `isActionEnabled`）。
+test('a tracked unstaged file gets commit-file / diff / revert / stage / patch / refresh', () => {
   assert.deepEqual(changesMenuRows({ staged: false, untracked: false }).map(r => r.id),
-    ['diff', 'copyPath', 'revert', 'stage', 'patch', 'patchClipboard', 'applyPatch', 'applyPatchClipboard', 'refresh'])
+    ['commitFile', 'moveToChangeList', 'diff', 'copyPath', 'revert', 'stage', 'patch', 'patchClipboard', 'applyPatch', 'applyPatchClipboard', 'refresh'])
 })
 
-test('an untracked file gets add-to-VCS and ignore instead of revert', () => {
+test('an untracked file gets commit-file, then add-to-VCS and ignore instead of revert', () => {
   assert.deepEqual(changesMenuRows({ staged: false, untracked: true }).map(r => r.id),
-    ['diff', 'copyPath', 'stage', 'addToVcs', 'ignore', 'patch', 'patchClipboard', 'applyPatch', 'applyPatchClipboard', 'refresh'])
+    ['commitFile', 'moveToChangeList', 'diff', 'copyPath', 'stage', 'addToVcs', 'ignore', 'patch', 'patchClipboard', 'applyPatch', 'applyPatchClipboard', 'refresh'])
 })
 
 test('a staged file gets unstage instead of stage', () => {
   assert.deepEqual(changesMenuRows({ staged: true }).map(r => r.id),
-    ['diff', 'copyPath', 'unstage', 'patch', 'patchClipboard', 'applyPatch', 'applyPatchClipboard', 'refresh'])
+    ['commitFile', 'moveToChangeList', 'diff', 'copyPath', 'unstage', 'patch', 'patchClipboard', 'applyPatch', 'applyPatchClipboard', 'refresh'])
 })
 
 test('the labels are the shipped Chinese ones (mnemonics stripped)', () => {
@@ -108,3 +115,62 @@ test('the patch labels are the shipped Chinese ones', () => {
   assert.equal(labels.patch, '从本地更改创建补丁…', 'ActionsBundle.properties:127')
   assert.equal(labels.patchClipboard, '作为补丁复制到剪贴板', ':131')
 })
+
+// —— merge3（2026-10-06）：两条自动合并动作的启用条件按**内容**判 ——
+// 上游 `MagicResolvedConflictsAction.kt:17` 的 `setEnabled(viewer.model.hasAutoResolvableConflictedChanges())`
+// 与 `ApplyNonConflictsAction.kt:31` 的 `setEnabled(viewer.model.hasNonConflictedChanges(side))`：
+// 一处都合不掉时那颗按钮是**灰的**，不是"可点 + 事后提示"。
+// 本仓的内容侧事实由 `src/mergeResolveHost.ts` 的 `conflictResolutionAvailability` 读一次文件算出，
+// 落到菜单行的 `enabled` 上（`src/components/SourceControl.vue` 的 `:disabled="row.enabled === false"`）。
+import { hasAutoResolvableBlock, hasNonConflictingBlock } from '../src/mergeResolve.ts'
+import { conflictResolutionAvailability } from '../src/mergeResolveHost.ts'
+
+const conflictBlock = (ours, theirs, base) => [
+  '<<<<<<< HEAD', ...ours,
+  ...(base ? ['||||||| merged common ancestors', ...base] : []),
+  '=======', ...theirs, '>>>>>>> feature',
+].join('\n')
+
+test('内容侧判据：能自动合的块 vs 真冲突（照 MergeConflictModel.kt:146-152）', () => {
+  // diff3 风格：ours 与 base 相同、theirs 改了 ⇒ 能自动合，且属于"不冲突"那一类。
+  const oneSided = conflictBlock(['base'], ['changed'], ['base'])
+  assert.equal(hasAutoResolvableBlock(oneSided), true, '一侧没动 ⇒ 能自动合')
+  assert.equal(hasNonConflictingBlock(oneSided), true, '同一块也属于 hasNonConflictedChanges')
+  // 两侧都改得不一样 ⇒ 真冲突：两条都不给。
+  const real = conflictBlock(['ours'], ['theirs'], ['base'])
+  assert.equal(hasAutoResolvableBlock(real), false, '真冲突 ⇒ 合不掉')
+  assert.equal(hasNonConflictingBlock(real), false, '真冲突 ⇒ 不属于"不冲突"那一类')
+  // 两侧改成一模一样 ⇒ 能合（取任一侧），也是"不冲突"。
+  const same = conflictBlock(['same'], ['same'], ['base'])
+  assert.equal(hasAutoResolvableBlock(same), true)
+  assert.equal(hasNonConflictingBlock(same), true)
+})
+
+test('菜单行：enabled 缺省为真，内容判为 false 时那两条灰掉', () => {
+  // 还没读内容（undefined）⇒ 保持可点，不误灰。
+  const pending = Object.fromEntries(changesMenuRows({ conflicted: true }).map(r => [r.id, r.enabled]))
+  assert.equal(pending.resolveConflicts, true, '内容没读回来之前可点（不把"没读"当"没有"）')
+  assert.equal(pending.applyNonConflicts, true)
+  // 读回来发现没有可自动合的块 ⇒ 两条都灰。
+  const blocked = Object.fromEntries(changesMenuRows({ conflicted: true, autoResolvable: false, nonConflicting: false }).map(r => [r.id, r.enabled]))
+  assert.equal(blocked.resolveConflicts, false, '一处都合不掉 ⇒ 灰（上游 setEnabled）')
+  assert.equal(blocked.applyNonConflicts, false)
+  // 有可自动合的块 ⇒ 两条都亮。
+  const open = Object.fromEntries(changesMenuRows({ conflicted: true, autoResolvable: true, nonConflicting: true }).map(r => [r.id, r.enabled]))
+  assert.equal(open.resolveConflicts, true)
+  assert.equal(open.applyNonConflicts, true)
+  // 非冲突行不受影响（`enabled` 缺省 true）。
+  assert.equal(changesMenuRows({ staged: false }).every(r => r.enabled !== false), true)
+})
+
+test('组装层真读内容：SourceControl 打开冲突行的菜单时问一次 availability，并绑到 :disabled', () => {
+  const panel = read('src/components/SourceControl.vue')
+  assert.match(panel, /conflictResolutionAvailability/, '面板要 import 并用这个判据')
+  assert.match(panel, /if \(!conflicted\) return\n\s*const token = \+\+rowMenuToken/, '只对冲突行问一次（非冲突行不问）')
+  assert.match(panel, /Object\.assign\(rowMenu\.value\.change, availability\)/, '把内容判据落进菜单目标')
+  assert.match(panel, /<button v-else role="menuitem" :disabled="row\.enabled === false"/, '菜单行绑 :disabled')
+  const host = read('src/mergeResolveHost.ts')
+  assert.match(host, /export async function conflictResolutionAvailability/, '判据实现在宿主链模块里')
+  assert.match(host, /if \(!conflictsIn\(content\)\.length\) return \{\}/, '没有冲突标记就不给内容判据（保持可点）')
+})
+

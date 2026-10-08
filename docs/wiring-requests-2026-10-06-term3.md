@@ -95,3 +95,17 @@ function onTerminalOpenFile(payload: { path: string; line: number | null; column
 
 两条都**不需要新 `.cpp`**，因此不需要登记 `CMakeLists.txt`；判据建议加进 `native/terminal_test.cpp`
 （现 219 行，上限 1300）。跑原生测试时按规约**读日志里的 `tests passed` 那行**，不要看 npm 退出码。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（终端 `file:` 链接跳编辑器）** —— 目标 `src/App.vue`（本 lane）+ `TerminalPanel.vue`（本 lane）+ 宿主。登记为待办（需可判定层）。
+- **R2（宿主 `exists` 查询）** —— native，非本 lane。
+- **R3（设置三格）** —— `src/settingsModel.ts`（保留），需 settings owner。
+- **R4（全局键位两条）** —— `src/keymap.ts` / `keymapBindings.ts`（保留），非本 lane。
+
+结论：零接线（R1 登记，R2/R3/R4 转 owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（R1 登记，R2/R3/R4 转 owner）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

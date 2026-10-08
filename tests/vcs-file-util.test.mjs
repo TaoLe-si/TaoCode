@@ -54,8 +54,14 @@ test('unescapeGitPath：引号与八进制字节（UTF-8）还原', () => {
 })
 
 test('行尾/BOM/二进制判定', () => {
-  assert.equal(detectLineSeparator('a\r\nb\n'), '\r\n')
+  // 主行尾按**分隔符计数**取多数，不是「出现过 CRLF 就算 CRLF」——照上游
+  // `platform/core-impl/src/com/intellij/openapi/fileEditor/impl/LoadTextUtil.java:801-815` 的
+  // `ConvertResult.majorLineSeparator()`：crlf 严格多于另两者才是 `\r\n`，否则 cr 严格多于 lf 才是 `\r`，
+  // 再否则只要 lf 出现过就是 `\n`。所以「CRLF 1 个 + LF 1 个」的平局判 `\n`。
+  assert.equal(detectLineSeparator('a\r\nb\n'), '\n', '平局（CRLF 1 / LF 1）按上游落 LF')
+  assert.equal(detectLineSeparator('a\r\nb\r\nc\nd'), '\r\n', 'CRLF 多数才是 CRLF')
   assert.equal(detectLineSeparator('a\rb'), '\r')
+  assert.equal(detectLineSeparator('a\rb\rc\nd'), '\r', 'CR 多数是 CR')
   assert.equal(detectLineSeparator('a\nb'), '\n')
   assert.equal(normalizeLineSeparators('a\r\nb\rc\nd', '\n'), 'a\nb\nc\nd')
   assert.equal(hasBom(BOM + 'x'), true)

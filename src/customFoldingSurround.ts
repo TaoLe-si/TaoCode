@@ -26,10 +26,13 @@
 //     —— 本仓没有可独立调用的「按范围调整缩进」的格式化器（格式化走 LSP 的 `textDocument/formatting`，
 //     要整篇回包），所以两行标记一律沿用选区首行的缩进，具体卡点记在报告里。
 //
-// provider 从哪来：`src/customFoldingProviders.ts` 那张表（EP 注册顺序、标记、占位规则、Surround 标题）。
-// 这里不重复定义任何标记文本，避免与折叠识别那一处认得不一样。
-import { CUSTOM_FOLDING_PROVIDERS, type CustomFoldingProviderInfo } from './customFoldingProviders.ts'
+// provider 从哪来：`src/customFoldingProviders.ts` 的 **注册表**（EP 注册顺序、标记、
+// 占位规则、Surround 标题），不是那张常量表 —— EP 化后第三方按 `com.intellij.customFoldingProvider`
+// 挂进来的 provider 与 bundled 的两条走同一条消费路。这里不重复定义任何标记文本，
+// 避免与折叠识别那一处认得不一样。
+import { commentMarkerBody, customFoldingProviders, markerKindOf, type CustomFoldingProviderInfo } from './customFoldingProviders.ts'
 import type { CommentStyle } from './commentToggle.ts'
+import type { SurroundTemplate } from './surround.ts'
 
 /** `CustomFoldingSurroundDescriptor.java:47`。 */
 export const DEFAULT_DESC_TEXT = 'Description'
@@ -121,7 +124,7 @@ export interface CustomFoldingSurroundItem {
 }
 
 export function customFoldingSurrounders(): CustomFoldingSurroundItem[] {
-  return CUSTOM_FOLDING_PROVIDERS.map(provider => ({
+  return customFoldingProviders().map(provider => ({
     id: provider.id, title: provider.description, provider,
   }))
 }
@@ -130,3 +133,99 @@ export function customFoldingSurrounders(): CustomFoldingSurroundItem[] {
 export function customFoldingSurrounder(id: string): CustomFoldingSurroundItem | null {
   return customFoldingSurrounders().find(item => item.id === id) ?? null
 }
+
+// ── 「Surround With」列表里的那几行 ──────────────────────────────────────────────────
+//
+// 上游那张列表的形状（本批逐行开过，与文件头部引的是同一个文件）：
+//   · `CustomFoldingSurroundDescriptor.java:217-227` `getSurrounders()` = **每个已注册的
+//     `CustomFoldingProvider` 一行**（`CustomFoldingProvider.getAllProviders()` 的注册顺序），
+//     不是四种手写文本 —— 所以本仓这里也按 provider 表的条数给（三条：NetBeans / VisualStudio /
+//     provider 表里 id 为空的那一族）。
+//   · `:244-246` 每行的标题就是 `provider.getDescription()`；
+//   · `:249-260` `isApplicable` 先问语言有没有注释词法（`getElementsToSurround` 那一头在
+//     `:52-56`：`Commenter` 为 null、且行注释前缀与块注释成对标记都拿不到时直接返回空数组）
+//     ⇒ **认不出注释词法的文件里这一族一条都不给**，本仓由 `surroundRowForFile` 的 null 分支做。
+//   · `:275-289` + `:306-307` 标记文字一律用**这门语言自己的注释**包起来（行注释前缀优先，
+//     没有行注释才退到块注释那一对；`wrapStartEndMarkerTextInLanguageSpecificComment()` 默认
+//     为 true，`platform/core-api/src/com/intellij/lang/folding/CustomFoldingProvider.java:43-45`）
+//     ⇒ Python 里是 `#<region Description>`、SQL 里是 `--<region Description>`，
+//     **不是** `//<region>`。
+//   · `:299-302` 开始标记里的 `?` 换成 `DEFAULT_DESC_TEXT`（`:47`）；列表这一侧只能把文字放进去，
+//     「选中那段让用户改名」（`:303` + `:313` + `:320` `updater.select`）要走 `surroundWithRegion`
+//     那条命令才做得到（宿主 `src/components/CodeEditor.vue:732-745` 的 `surroundWith` 只落一个
+//     光标，不给选区）⇒ 已写进接线请求。
+//
+// 静态表里那三行的注释包装按这一档给（`//` 一族在本仓的注释表里占多数扩展名）：
+// 列表的标题与搜索词都不含标记文本（`:244-246` 的标题就是 `getDescription()`），
+// 这一档只是「还没拿到目标文件时」的字面值；每一条在真正落地前都由 `surroundRowForFile`
+// 换成该文件自己的注释词法，换不出可用标记的那行会被摘掉。
+const ROW_STYLE: CommentStyle = { line: '//' }
+
+/** 上游 `:275-289`：行注释前缀优先，没有才退到块注释那一对；两者都没有 ⇒ null。 */
+export function markerCommentWrap(style: CommentStyle | null): { prefix: string; suffix: string } | null {
+  const line = style?.line ?? ''
+  if (line) return { prefix: line, suffix: '' }
+  const block = style?.block
+  return block ? { prefix: block[0]!, suffix: block[1]! } : null
+}
+
+/** `getStartString()` 里 `?` 的那一档换成 `Description`（`:299-302`）。 */
+const startMarkerOf = (provider: CustomFoldingProviderInfo): string =>
+  provider.startString.replace('?', DEFAULT_DESC_TEXT)
+
+/**
+ * 这一族在这个文件的注释词法里包出来是什么样；包完必须被**同一张 provider 表认回**
+ * 这一族的开始与结束标记，认不回就返回 null —— 否则点下去插进文件的是折不起来的死文本
+ * （`src/customFoldingProviders.ts` 的 `commentMarkerBody` 只认行注释那几种前缀与单行闭合的
+ * 块注释，所以 CSS/HTML 那一档只有两个真 provider 落得进去，`<region ?>` 那一族落不进去）。
+ */
+export function customFoldingMarkers(
+  provider: CustomFoldingProviderInfo, style: CommentStyle | null,
+): { prefix: string; suffix: string } | null {
+  const wrap = markerCommentWrap(style)
+  if (!wrap) return null
+  const prefix = `${wrap.prefix}${startMarkerOf(provider)}${wrap.suffix}`
+  const suffix = `${wrap.prefix}${provider.endString}${wrap.suffix}`
+  const start = markerKindOf(commentMarkerBody(prefix))
+  const end = markerKindOf(commentMarkerBody(suffix))
+  if (!start || start.kind !== 'start' || start.provider !== provider) return null
+  if (!end || end.kind !== 'end' || end.provider !== provider) return null
+  return { prefix, suffix }
+}
+
+// 列表行的搜索词：三种叫法都在（`region` / `endregion` / `editor-fold` / `pragma` / `折叠区域`），
+// 与上一版那四行的 keywords 覆盖面一致，只是不再各写一份标记文本。
+const ROW_KEYWORDS = 'region endregion pragma fold custom folding 折叠区域 区域 注释'
+
+/** provider 注册表 → 「Surround With」列表行（每个 provider 一行，`:217-227` + `:244-246`）。 */
+export function customFoldingSurroundRows(): SurroundTemplate[] {
+  return customFoldingProviders().map(provider => {
+    const markers = customFoldingMarkers(provider, ROW_STYLE)
+    return {
+      title: provider.description,
+      keywords: ROW_KEYWORDS,
+      // 认不出 `//` 这一档时（表里不会发生，真发生了也不该静默给出一个错标记）留空串，
+      // 由 `surroundRowForFile` 在落地前按文件词法重算或摘掉这一行。
+      prefix: markers?.prefix ?? '',
+      suffix: markers?.suffix ?? '',
+      block: true,
+    }
+  })
+}
+
+/** 这一行的标题是不是 provider 注册表里的某个 `getDescription()`（是 ⇒ 折叠行，需要按文件重包）。 */
+function providerOfRow(row: SurroundTemplate): CustomFoldingProviderInfo | null {
+  return customFoldingProviders().find(provider => provider.description === row.title) ?? null
+}
+
+/**
+ * 把列表行换成「目标文件自己的注释词法」那一份；不是折叠行的原样返回，
+ * 折叠行在这个文件里包不出可用标记（含**这门语言根本没有注释词法**）时返回 null ⇒ 列表里摘掉这一行。
+ */
+export function surroundRowForFile(row: SurroundTemplate, style: CommentStyle | null): SurroundTemplate | null {
+  const provider = providerOfRow(row)
+  if (!provider) return row
+  const markers = customFoldingMarkers(provider, style)
+  return markers ? { ...row, prefix: markers.prefix, suffix: markers.suffix } : null
+}
+

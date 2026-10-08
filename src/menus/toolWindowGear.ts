@@ -61,6 +61,10 @@ export const TOOL_WINDOW_GEAR_SPEC: readonly ToolWindowGearEntry[] = [
   // 在它自己的树头部（`ToolWindowView.vue`），用法视图（引用）的「视图选项」组在这里 ——
   // 后者属于"挂着内容的那个窗口"，所以标 `contentsScoped`，侧栏齿轮拿不到它。
   { action: 'usage.viewOptions', fromHost: true, contentsScoped: true },
+  // 「分组」那一组（上游 `UsageViewImpl.java:1089-1098` 的 popup group +
+  // `GroupByDirectoryStructureAction.java:10-26`；文本 `UsageViewBundle.properties:19` "Group By" /
+  // `:21` "Directory Structure"）。上游它在工具条，本仓引用面板没有工具条那一层 ⇒ 进齿轮，理由见 `src/usageViewGear.ts`。
+  { action: 'usage.groupBy', fromHost: true, contentsScoped: true },
   // `group.add(ActionManager.getInstance().getAction(SpeedSearchAction.ID))`（`ToolWindowImpl.kt:869`）：
   // 齿轮的**第一条**，在 CloseAll 之前。它不在任何菜单组里 —— `PlatformActions.xml:146` 是顶层
   // `<reference>`（只登记引用、不加进菜单），所以本仓也不给它编一个菜单位置，行由宿主按

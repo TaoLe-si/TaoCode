@@ -34,7 +34,7 @@ function pick(mode: string, disabled?: boolean) {
 <style scoped>
 /* 与 DebugPanel 的复制弹层同款（fixed 定位在点击处，backdrop 收点击）。 */
 .debug-menu-backdrop { position: fixed; inset: 0; z-index: 40; }
-.debug-menu { position: fixed; z-index: 41; display: flex; flex-direction: column; min-width: 132px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.debug-menu { position: fixed; z-index: 41; display: flex; flex-direction: column; min-width: 132px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .debug-menu button { text-align: left; }
 .debug-menu button:disabled { color: var(--muted); opacity: .6; }
 </style>

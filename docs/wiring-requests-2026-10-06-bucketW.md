@@ -122,3 +122,14 @@
 | 桶 10b 第 6 条（提权运行 `elevate?: boolean`） | `src/bridge.ts` 的 `RunStartParams` 是保留文件，且如请求自己所说：提权进程拿不到 `run_host` 那根继承管道，要先定 daemon/命名管道那一层，不是加参数能收工的。 |
 | 桶 11c W-B11c-3（`'jar'` 运行配置类型） | 三张表必须同改，其中 `src/settingsModel.ts:25` 的 `RunConfig['type']` 联合是保留文件 ⇒ 交主代理一次做完（`src/jarRun.ts:50`/`:103` 的表单字段与类型 id 已备好，`src/jarRun.ts` 也在 orphan 基线里等这一条）。 |
 | 桶 14a W3（移动的撤销要连引用改写一起撤） | `renameEntryWithReferences` 的实现属重构域（实测在 `src/semanticActions.ts:465`，桶 1 名下、本轮未收口）。`src/explorerActions.ts:111-115` 的注释与指针已订正到 14a 那份请求。 |
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **H1 已接线**：`src/App.vue:2315` 的 `<TestRunnerPanel …>` 已带 `@jump="target => revealLocation({ path: target.path, line: Math.max(0, target.line - 1) })"`。
+- **H2 已闭环**：`src/components/ToolWindowView.vue` 已无 `TestRunnerPanel` / `HistoryPanel` 陈旧 import。
+- **H3 已接线**：`src/App.vue:2556-2558` 的「将目录标记为」子菜单已在。
+- **H4 已接线**：`src/App.vue:1442` 的 `createTreeActions` deps 已含 `refreshTree`。
+- **H5 未落** —— 目标 `src/components/CodeEditor.vue`（禁改清单，emit `viewportFirst`）+ `src/App.vue`（本 lane 可改）。因 CodeEditor 侧未 emit，App.vue 单方面补 `firstVisibleLine` 无数据源 ⇒ 需 **CodeEditor owner** 先补 emit（与 5b W-5 同一条）。
+- **H6 表** —— 逐条登记，其中「桶 15 W1」本 lane 已接（见 bucket15 处理结果）、「桶 10b 第 1 条」本 lane 已核为早已接线、「桶 11c W-B11c-3」本 lane 已核为已接线；其余（10b 第 2/3/4/5/6 条、14a W3）转对应 owner。
+
+结论：H1-H4 已接线；H5 转给 CodeEditor owner。

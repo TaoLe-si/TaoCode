@@ -2,10 +2,10 @@
 
 | 档 | 类数 |
 |---|---:|
-| [x] | 0 |
-| [~] | 978 |
+| [x] | 74 |
+| [~] | 917 |
 | [ ] | 0 |
-| [-] | 630 |
+| [-] | 617 |
 | 合计 | 1608 |
 
 | 类 | 族 | 档 | 行数 | Swing | 平台 | 测试 | TaoCode |
@@ -28,7 +28,7 @@
 | `JvmConfigurationOptions` | exec/run-instances | `[~]` | 20 |  |  |  | 从未出现 |
 | `MethodBrowser` | exec/run-instances | `[-]` | 88 | Y |  |  | 从未出现 |
 | `MethodListDlg` | exec/run-instances | `[-]` | 129 | Y |  |  | 从未出现 |
-| `RunConfigurationExtension` | exec/run-instances | `[~]` | 94 |  |  |  | 从未出现 |
+| `RunConfigurationExtension` | exec/run-instances | `[x]` | 94 |  |  |  | 从未出现 |
 | `SingleClassConfiguration` | exec/run-instances | `[~]` | 19 |  |  |  | 从未出现 |
 | `TargetDebuggerConnectionUtil` | exec/run-instances | `[~]` | 126 |  |  |  | 从未出现 |
 | `TestClassCollector` | exec/run-instances | `[~]` | 133 |  |  |  | 从未出现 |
@@ -178,29 +178,29 @@
 | `RemoteState` | exec/run-configs | `[~]` | 21 |  |  |  | 从未出现 |
 | `JvmEnvironmentKeyProvider` | exec/misc | `[-]` | 23 |  |  |  | 从未出现 |
 | `AdvancedExceptionFilter` | exec/filters | `[~]` | 44 |  |  |  | 从未出现 |
-| `ArithmeticExceptionInfo` | exec/filters | `[~]` | 49 |  |  |  | 从未出现 |
-| `ArrayCopyIndexOutOfBoundsExceptionInfo` | exec/filters | `[~]` | 86 |  |  |  | 从未出现 |
-| `ArrayIndexOutOfBoundsExceptionInfo` | exec/filters | `[~]` | 58 |  |  |  | 从未出现 |
-| `ArrayStoreExceptionInfo` | exec/filters | `[~]` | 31 |  |  |  | 从未出现 |
-| `AssertionErrorInfo` | exec/filters | `[~]` | 28 |  |  |  | 从未出现 |
-| `ClassCastExceptionInfo` | exec/filters | `[~]` | 146 |  |  |  | 从未出现 |
+| `ArithmeticExceptionInfo` | exec/filters | `[x]` | 49 |  |  |  | 从未出现 |
+| `ArrayCopyIndexOutOfBoundsExceptionInfo` | exec/filters | `[x]` | 86 |  |  |  | 从未出现 |
+| `ArrayIndexOutOfBoundsExceptionInfo` | exec/filters | `[x]` | 58 |  |  |  | 从未出现 |
+| `ArrayStoreExceptionInfo` | exec/filters | `[x]` | 31 |  |  |  | 从未出现 |
+| `AssertionErrorInfo` | exec/filters | `[x]` | 28 |  |  |  | 从未出现 |
+| `ClassCastExceptionInfo` | exec/filters | `[x]` | 146 |  |  |  | 从未出现 |
 | `ExceptionAnalysisProvider` | exec/filters | `[~]` | 69 |  |  |  | 从未出现 |
 | `ExceptionBaseFilterFactory` | exec/filters | `[~]` | 22 |  |  |  | 从未出现 |
 | `ExceptionExFilterFactory` | exec/filters | `[~]` | 128 |  |  |  | 从未出现 |
 | `ExceptionFilter` | exec/filters | `[~]` | 74 |  |  |  | 从未出现 |
 | `ExceptionFilterFactory` | exec/filters | `[~]` | 47 |  |  |  | 从未出现 |
 | `ExceptionFilters` | exec/filters | `[~]` | 32 |  |  |  | 从未出现 |
-| `ExceptionInfo` | exec/filters | `[~]` | 243 |  |  |  | 从未出现 |
+| `ExceptionInfo` | exec/filters | `[x]` | 243 |  |  |  | 从未出现 |
 | `ExceptionInfoCache` | exec/filters | `[~]` | 153 |  |  |  | 从未出现 |
 | `ExceptionLineParser` | exec/filters | `[~]` | 36 |  |  |  | 从未出现 |
 | `ExceptionLineParserFactory` | exec/filters | `[~]` | 14 |  |  |  | 从未出现 |
 | `ExceptionLineRefiner` | exec/filters | `[~]` | 65 |  |  |  | 从未出现 |
 | `ExceptionWorker` | exec/filters | `[~]` | 245 |  |  |  | 从未出现 |
-| `JetBrainsNotNullInstrumentationExceptionInfo` | exec/filters | `[~]` | 120 |  |  |  | 从未出现 |
+| `JetBrainsNotNullInstrumentationExceptionInfo` | exec/filters | `[x]` | 120 |  |  |  | 从未出现 |
 | `JvmExceptionOccurrenceFilter` | exec/filters | `[~]` | 30 |  |  |  | 从未出现 |
 | `NavigateToExceptionClassFilter` | exec/filters | `[~]` | 27 |  |  |  | 从未出现 |
-| `NegativeArraySizeExceptionInfo` | exec/filters | `[~]` | 53 |  |  |  | 从未出现 |
-| `NullPointerExceptionInfo` | exec/filters | `[~]` | 312 |  |  |  | 从未出现 |
+| `NegativeArraySizeExceptionInfo` | exec/filters | `[x]` | 53 |  |  |  | 从未出现 |
+| `NullPointerExceptionInfo` | exec/filters | `[x]` | 312 |  |  |  | 从未出现 |
 | `JavaPatchableProgramRunner` | exec/configurations-types | `[~]` | 12 |  |  |  | 从未出现 |
 | `JavaProgramPatcher` | exec/configurations-types | `[~]` | 54 |  |  |  | 从未出现 |
 | `ProcessProxyFactory` | exec/configurations-types | `[~]` | 18 |  |  |  | 从未出现 |
@@ -211,20 +211,20 @@
 | `AffectedTestsInChangeListPainter` | exec/junit | `[~]` | 44 |  |  |  | 从未出现 |
 | `TestDiscoveryVcsHelperImpl` | exec/junit | `[~]` | 25 |  |  |  | 从未出现 |
 | `ShowAffectedTestsAction` | exec/junit | `[-]` | 569 | Y |  |  | 从未出现 |
-| `HyperlinkInfo` | exec/filters | `[~]` | 25 |  |  |  | 只被注释引用 |
+| `HyperlinkInfo` | exec/filters | `[x]` | 25 |  |  |  | 只被注释引用 |
 | `DummyWslIjentAvailabilityService` | exec/wsl | `[-]` | 7 |  |  |  | 从未出现 |
 | `WslIjentAvailabilityService` | exec/wsl | `[-]` | 26 |  |  |  | 从未出现 |
 | `CommonProgramRunConfigurationParameters` | exec/misc | `[-]` | 46 |  |  |  | 从未出现 |
 | `ConfigurationWithCommandLineShortener` | exec/misc | `[-]` | 21 |  |  |  | 从未出现 |
-| `ConsoleFolding` | exec/misc | `[-]` | 63 |  |  |  | 从未出现 |
-| `DefaultExecutionTargetProvider` | exec/misc | `[-]` | 19 |  |  |  | 从未出现 |
+| `ConsoleFolding` | exec/misc | `[x]` | 63 |  |  |  | 从未出现 |
+| `DefaultExecutionTargetProvider` | exec/misc | `[x]` | 19 |  |  |  | 从未出现 |
 | `EnvFilesOptions` | exec/misc | `[-]` | 7 |  |  |  | 从未出现 |
 | `ExecutionEnvironmentIdImpl` | exec/misc | `[-]` | 54 |  |  |  | 从未出现 |
 | `ExecutionHelper` | exec/misc | `[-]` | 497 | Y |  |  | 从未出现 |
 | `ExecutionMode` | exec/misc | `[-]` | 123 | Y |  |  | 从未出现 |
 | `ExecutionModes` | exec/misc | `[-]` | 117 | Y |  |  | 从未出现 |
 | `ExecutionTargetManagerImpl` | exec/misc | `[-]` | 310 |  |  |  | 从未出现 |
-| `ExecutorRegistryImpl` | exec/misc | `[-]` | 544 |  |  |  | 从未出现 |
+| `ExecutorRegistryImpl` | exec/misc | `[x]` | 544 |  |  |  | 从未出现 |
 | `ExternalizablePath` | exec/misc | `[-]` | 44 |  |  |  | 从未出现 |
 | `InputRedirectAware` | exec/misc | `[-]` | 111 |  |  |  | 从未出现 |
 | `Output` | exec/misc | `[-]` | 49 |  |  |  | 只被注释引用 |
@@ -247,7 +247,7 @@
 | `ChooseRunConfigurationManager` | exec/actions | `[-]` | 752 | Y |  |  | 从未出现 |
 | `ChooseRunConfigurationPopup` | exec/actions | `[-]` | 535 | Y |  |  | 从未出现 |
 | `ChooseRunConfigurationPopupAction` | exec/actions | `[~]` | 45 |  |  |  | 从未出现 |
-| `ClearConsoleAction` | exec/actions | `[~]` | 40 |  |  |  | 从未出现 |
+| `ClearConsoleAction` | exec/actions | `[x]` | 40 |  |  |  | 从未出现 |
 | `CreateAction` | exec/actions | `[~]` | 109 |  |  |  | 从未出现 |
 | `CreateNewConfigurationAction` | exec/actions | `[~]` | 24 |  |  |  | 从未出现 |
 | `DeleteRunConfigurationAction` | exec/actions | `[~]` | 30 |  |  |  | 从未出现 |
@@ -259,7 +259,7 @@
 | `ExecutorAction` | exec/actions | `[-]` | 498 | Y |  |  | 从未出现 |
 | `ExecutorGroupActionGroup` | exec/actions | `[~]` | 68 |  |  |  | 从未出现 |
 | `ExecutorProvider` | exec/actions | `[~]` | 23 |  |  |  | 从未出现 |
-| `PauseOutputAction` | exec/actions | `[~]` | 66 |  |  |  | 从未出现 |
+| `PauseOutputAction` | exec/actions | `[x]` | 66 |  |  |  | 从未出现 |
 | `RunConfigurationSpecificActionBase` | exec/actions | `[~]` | 68 |  |  |  | 从未出现 |
 | `RunConfigurationsComboBoxAction` | exec/actions | `[-]` | 654 | Y |  |  | 从未出现 |
 | `RunContextAction` | exec/actions | `[~]` | 165 |  |  |  | 从未出现 |
@@ -288,11 +288,11 @@
 | `RunConfigurationPathMacroFilter` | exec/run-configs | `[~]` | 39 |  |  |  | 从未出现 |
 | `EnvFileParser` | exec/misc | `[-]` | 41 |  |  |  | 从未出现 |
 | `AbstractFileHyperlinkFilter` | exec/filters | `[~]` | 161 |  |  |  | 从未出现 |
-| `FileHyperlinkRawData` | exec/filters | `[~]` | 113 |  |  |  | 从未出现 |
+| `FileHyperlinkRawData` | exec/filters | `[x]` | 113 |  |  |  | 从未出现 |
 | `FileHyperlinkRawDataFinder` | exec/filters | `[~]` | 26 |  |  |  | 从未出现 |
 | `HyperlinkWithHoverInfo` | exec/filters | `[-]` | 21 | Y |  |  | 从未出现 |
 | `HyperlinkWithPopupMenuInfo` | exec/filters | `[~]` | 28 |  |  |  | 从未出现 |
-| `PatternBasedFileHyperlinkFilter` | exec/filters | `[~]` | 41 |  |  |  | 从未出现 |
+| `PatternBasedFileHyperlinkFilter` | exec/filters | `[x]` | 41 |  |  |  | 从未出现 |
 | `PatternBasedFileHyperlinkRawDataFinder` | exec/filters | `[~]` | 129 |  |  |  | 从未出现 |
 | `PatternHyperlinkFormat` | exec/filters | `[~]` | 77 |  |  |  | 从未出现 |
 | `PatternHyperlinkPart` | exec/filters | `[~]` | 21 |  |  |  | 从未出现 |
@@ -302,8 +302,8 @@
 | `BeforeRunStepsPanel` | exec/run-instances | `[-]` | 394 | Y |  |  | 从未出现 |
 | `BeforeRunTaskAwareConfiguration` | exec/run-instances | `[~]` | 15 |  |  |  | 从未出现 |
 | `BeforeRunTaskHelper` | exec/run-instances | `[~]` | 50 |  |  |  | 从未出现 |
-| `ConfigurationSettingsEditor` | exec/run-instances | `[~]` | 410 | Y |  |  | 真实代码 |
-| `ConfigurationSettingsEditorPanel` | exec/run-instances | `[~]` | 72 | Y |  |  | 真实代码 |
+| `ConfigurationSettingsEditor` | exec/run-instances | `[x]` | 410 | Y |  |  | 真实代码 |
+| `ConfigurationSettingsEditorPanel` | exec/run-instances | `[x]` | 72 | Y |  |  | 真实代码 |
 | `ConfigurationSettingsEditorWrapper` | exec/run-instances | `[-]` | 196 | Y |  |  | 只被注释引用 |
 | `ConsoleBuffer` | exec/run-instances | `[~]` | 24 |  |  |  | 从未出现 |
 | `ConsoleInputListener` | exec/run-instances | `[~]` | 28 |  |  |  | 从未出现 |
@@ -315,7 +315,7 @@
 | `MyDiffContainer` | exec/run-instances | `[-]` | 99 | Y |  |  | 从未出现 |
 | `NameGeneratingListenerDecorator` | exec/run-instances | `[~]` | 60 |  |  |  | 从未出现 |
 | `NewRunConfigurationPopup` | exec/run-instances | `[-]` | 299 | Y |  |  | 从未出现 |
-| `ProcessHandlerPidProvider` | exec/run-instances | `[~]` | 21 |  |  |  | 从未出现 |
+| `ProcessHandlerPidProvider` | exec/run-instances | `[x]` | 21 |  |  |  | 从未出现 |
 | `ProcessStreamsSynchronizer` | exec/run-instances | `[~]` | 242 |  |  |  | 从未出现 |
 | `ProjectRunConfigurationConfigurable` | exec/run-instances | `[-]` | 98 | Y |  |  | 从未出现 |
 | `ProjectRunConfigurationInitializer` | exec/run-instances | `[~]` | 43 |  |  |  | 从未出现 |
@@ -325,7 +325,7 @@
 | `RunConfigurable` | exec/run-instances | `[~]` | 1600 | Y |  |  | 真实代码 |
 | `RunConfigurableTreeRenderer` | exec/run-instances | `[-]` | 80 | Y |  |  | 从未出现 |
 | `RunConfigurationBeforeRunProvider` | exec/run-instances | `[~]` | 439 |  |  |  | 从未出现 |
-| `RunConfigurationBeforeRunProviderDelegate` | exec/run-instances | `[~]` | 27 |  |  |  | 从未出现 |
+| `RunConfigurationBeforeRunProviderDelegate` | exec/run-instances | `[x]` | 27 |  |  |  | 从未出现 |
 | `RunConfigurationCreator` | exec/run-instances | `[~]` | 15 |  |  |  | 从未出现 |
 | `RunConfigurationFeatureCollector` | exec/run-instances | `[~]` | 34 |  | Y |  | 从未出现 |
 | `RunConfigurationIconAndInvalidCache` | exec/run-instances | `[~]` | 91 |  |  |  | 从未出现 |
@@ -409,15 +409,15 @@
 | `RunToolbarRerunAction` | exec/run-toolbar | `[~]` | 50 |  |  |  | 从未出现 |
 | `RunToolbarRollbackToPrevious` | exec/run-toolbar | `[~]` | 87 |  |  |  | 从未出现 |
 | `RunToolbarRunConfigurationsAction` | exec/run-toolbar | `[-]` | 367 | Y |  |  | 从未出现 |
-| `RunToolbarSettings` | exec/run-toolbar | `[~]` | 105 |  |  |  | 从未出现 |
+| `RunToolbarSettings` | exec/run-toolbar | `[x]` | 105 |  |  |  | 从未出现 |
 | `RunToolbarSettingsConfigurableProvider` | exec/run-toolbar | `[~]` | 44 |  |  |  | 从未出现 |
 | `RunToolbarShortcutHelper` | exec/run-toolbar | `[~]` | 33 |  |  |  | 从未出现 |
 | `RunToolbarShowHidePopupAction` | exec/run-toolbar | `[-]` | 132 | Y |  |  | 从未出现 |
-| `RunToolbarSlotManager` | exec/run-toolbar | `[~]` | 600 |  |  |  | 从未出现 |
+| `RunToolbarSlotManager` | exec/run-toolbar | `[x]` | 600 |  |  |  | 从未出现 |
 | `RunToolbarStopAction` | exec/run-toolbar | `[~]` | 63 |  |  |  | 从未出现 |
 | `RunToolbarWidgetAction` | exec/run-toolbar | `[-]` | 38 | Y |  |  | 只被注释引用 |
-| `RunWidgetResizeController` | exec/run-toolbar | `[~]` | 33 |  |  |  | 从未出现 |
-| `RunWidgetWidthHelper` | exec/run-toolbar | `[~]` | 71 |  |  |  | 从未出现 |
+| `RunWidgetResizeController` | exec/run-toolbar | `[x]` | 33 |  |  |  | 从未出现 |
+| `RunWidgetWidthHelper` | exec/run-toolbar | `[x]` | 71 |  |  |  | 从未出现 |
 | `ComboBoxArrowComponent` | exec/run-toolbar | `[-]` | 85 | Y |  |  | 从未出现 |
 | `MouseListenerHelper` | exec/run-toolbar | `[-]` | 52 | Y |  |  | 从未出现 |
 | `ProcessesByType` | exec/run-toolbar | `[-]` | 68 | Y |  |  | 从未出现 |
@@ -481,7 +481,7 @@
 | `CommonTags` | exec/ui | `[~]` | 20 |  |  |  | 真实代码 |
 | `ConsoleTextAttributesSerializationHack` | exec/ui | `[~]` | 31 |  |  |  | 从未出现 |
 | `DynamicBorderWrapper` | exec/ui | `[-]` | 23 | Y |  |  | 从未出现 |
-| `ExecutionConsolePauseStateProvider` | exec/ui | `[~]` | 18 |  |  |  | 从未出现 |
+| `ExecutionConsolePauseStateProvider` | exec/ui | `[x]` | 18 |  |  |  | 从未出现 |
 | `ExecutionUiServiceImpl` | exec/ui | `[~]` | 32 |  |  |  | 从未出现 |
 | `InvalidRunConfigurationIcon` | exec/ui | `[~]` | 56 |  |  |  | 从未出现 |
 | `MacroComboBoxModel` | exec/ui | `[~]` | 65 |  |  |  | 从未出现 |
@@ -620,20 +620,20 @@
 | `UnixUtil` | exec/run-instances | `[~]` | 225 |  |  |  | 从未出现 |
 | `AdditionalRunningOptions` | exec/misc | `[-]` | 20 |  |  |  | 从未出现 |
 | `BeforeRunTask` | exec/misc | `[-]` | 90 |  |  |  | 从未出现 |
-| `BeforeRunTaskProvider` | exec/misc | `[-]` | 96 |  |  |  | 从未出现 |
+| `BeforeRunTaskProvider` | exec/misc | `[x]` | 96 |  |  |  | 从未出现 |
 | `CantRunException` | exec/misc | `[-]` | 59 |  |  |  | 从未出现 |
 | `DefaultExecutionResult` | exec/misc | `[-]` | 78 |  |  |  | 从未出现 |
 | `DefaultExecutionTarget` | exec/misc | `[-]` | 36 |  |  |  | 从未出现 |
 | `ExecutionActionStatus` | exec/misc | `[-]` | 17 |  |  |  | 从未出现 |
 | `ExecutionBundle` | exec/misc | `[-]` | 30 |  |  |  | 只被注释引用 |
-| `ExecutionListener` | exec/misc | `[-]` | 54 |  |  |  | 从未出现 |
-| `ExecutionManager` | exec/misc | `[-]` | 138 |  |  |  | 从未出现 |
+| `ExecutionListener` | exec/misc | `[x]` | 54 |  |  |  | 从未出现 |
+| `ExecutionManager` | exec/misc | `[~]` | 138 |  |  |  | 从未出现 |
 | `ExecutionResult` | exec/misc | `[-]` | 34 |  |  |  | 从未出现 |
 | `ExecutionTarget` | exec/misc | `[-]` | 83 |  |  |  | 从未出现 |
 | `ExecutionTargetListener` | exec/misc | `[-]` | 23 |  |  |  | 从未出现 |
 | `ExecutionTargetManager` | exec/misc | `[-]` | 90 |  |  |  | 从未出现 |
-| `Executor` | exec/misc | `[-]` | 120 |  |  |  | 只被注释引用 |
-| `ExecutorRegistry` | exec/misc | `[-]` | 34 |  |  |  | 从未出现 |
+| `Executor` | exec/misc | `[x]` | 120 |  |  |  | 只被注释引用 |
+| `ExecutorRegistry` | exec/misc | `[x]` | 34 |  |  |  | 从未出现 |
 | `InlineResumeCreator` | exec/misc | `[-]` | 22 |  |  |  | 从未出现 |
 | `Location` | exec/misc | `[-]` | 85 |  |  |  | 真实代码 |
 | `PsiLocation` | exec/misc | `[-]` | 108 |  |  |  | 从未出现 |
@@ -643,8 +643,8 @@
 | `RunnerAndConfigurationSettings` | exec/misc | `[-]` | 283 |  |  |  | 从未出现 |
 | `RunnerIconProvider` | exec/misc | `[-]` | 30 |  |  |  | 从未出现 |
 | `AbstractRunConfiguration` | exec/run-configs | `[~]` | 43 |  |  |  | 从未出现 |
-| `RunConfigurationExtensionBase` | exec/run-configs | `[~]` | 161 |  |  |  | 从未出现 |
-| `RunConfigurationExtensionsManager` | exec/run-configs | `[~]` | 238 |  |  |  | 从未出现 |
+| `RunConfigurationExtensionBase` | exec/run-configs | `[x]` | 161 |  |  |  | 从未出现 |
+| `RunConfigurationExtensionsManager` | exec/run-configs | `[x]` | 238 |  |  |  | 从未出现 |
 | `AdditionalTabComponentManager` | exec/run-configs | `[~]` | 25 |  |  |  | 从未出现 |
 | `AdditionalTabComponentManagerEx` | exec/run-configs | `[~]` | 21 |  |  |  | 从未出现 |
 | `AsyncPathVerdictCache` | exec/run-configs | `[~]` | 208 |  |  |  | 从未出现 |
@@ -653,7 +653,7 @@
 | `ConfigurationFactory` | exec/run-configs | `[~]` | 146 |  |  |  | 从未出现 |
 | `ConfigurationInfoProvider` | exec/run-configs | `[~]` | 28 |  |  |  | 从未出现 |
 | `ConfigurationPerRunnerSettings` | exec/run-configs | `[~]` | 27 |  |  |  | 从未出现 |
-| `ConfigurationType` | exec/run-configs | `[~]` | 86 |  |  |  | 只被注释引用 |
+| `ConfigurationType` | exec/run-configs | `[x]` | 86 |  |  |  | 只被注释引用 |
 | `ConfigurationTypeUtil` | exec/run-configs | `[~]` | 39 |  |  |  | 从未出现 |
 | `JavaTargetDependentParameters` | exec/run-configs | `[~]` | 42 |  |  |  | 从未出现 |
 | `LocatableConfiguration` | exec/run-configs | `[~]` | 33 |  |  |  | 从未出现 |
@@ -691,16 +691,16 @@
 | `UnknownRunConfiguration` | exec/run-configs | `[-]` | 172 | Y |  |  | 从未出现 |
 | `VirtualConfigurationType` | exec/run-configs | `[~]` | 11 |  |  |  | 从未出现 |
 | `VisibleRunContentState` | exec/run-configs | `[~]` | 8 |  |  |  | 从未出现 |
-| `WithoutOwnBeforeRunSteps` | exec/run-configs | `[~]` | 23 |  |  |  | 真实代码 |
+| `WithoutOwnBeforeRunSteps` | exec/run-configs | `[x]` | 23 |  |  |  | 真实代码 |
 | `WrappingRunConfiguration` | exec/run-configs | `[~]` | 33 |  |  |  | 从未出现 |
 | `runConfigurationType` | exec/run-configs | `[~]` | 77 |  |  |  | 从未出现 |
 | `RunDashboardListener` | exec/run-toolbar | `[~]` | 31 |  |  |  | 从未出现 |
-| `RunDashboardManager` | exec/run-toolbar | `[~]` | 79 |  |  |  | 从未出现 |
+| `RunDashboardManager` | exec/run-toolbar | `[x]` | 79 |  |  |  | 从未出现 |
 | `RunDashboardManagerProxy` | exec/run-toolbar | `[~]` | 32 |  |  |  | 从未出现 |
 | `RunDashboardUiManager` | exec/run-toolbar | `[~]` | 51 |  |  |  | 从未出现 |
-| `DefaultRunExecutor` | exec/misc | `[-]` | 92 |  |  |  | 从未出现 |
+| `DefaultRunExecutor` | exec/misc | `[x]` | 92 |  |  |  | 从未出现 |
 | `ExecutorGroup` | exec/misc | `[-]` | 127 |  |  |  | 从未出现 |
-| `Filter` | exec/filters | `[~]` | 284 |  |  |  | 真实代码 |
+| `Filter` | exec/filters | `[x]` | 284 |  |  |  | 真实代码 |
 | `TextConsoleBuilder` | exec/filters | `[~]` | 49 |  |  |  | 从未出现 |
 | `TextConsoleBuilderFactory` | exec/filters | `[~]` | 17 |  |  |  | 从未出现 |
 | `ExecutionResult` | exec/run-instances | `[~]` | 4 |  |  |  | 从未出现 |
@@ -714,10 +714,10 @@
 | `ExecutionEnvironmentBuilder` | exec/configurations-types | `[~]` | 188 |  |  |  | 从未出现 |
 | `ExecutionEnvironmentProvider` | exec/configurations-types | `[~]` | 27 |  |  |  | 从未出现 |
 | `ExecutionUtil` | exec/configurations-types | `[-]` | 323 | Y |  |  | 从未出现 |
-| `GenericProgramRunner` | exec/configurations-types | `[~]` | 61 |  |  |  | 从未出现 |
+| `GenericProgramRunner` | exec/configurations-types | `[x]` | 61 |  |  |  | 从未出现 |
 | `IndicatorIcon` | exec/configurations-types | `[-]` | 35 | Y |  |  | 从未出现 |
 | `ProcessProxy` | exec/configurations-types | `[~]` | 31 |  |  |  | 从未出现 |
-| `ProgramRunner` | exec/configurations-types | `[~]` | 135 |  |  |  | 从未出现 |
+| `ProgramRunner` | exec/configurations-types | `[x]` | 135 |  |  |  | 从未出现 |
 | `BaseTargetEnvironmentRequest` | exec/target | `[~]` | 23 |  |  |  | 从未出现 |
 | `BrowsableTargetEnvironmentType` | exec/target | `[~]` | 61 |  |  |  | 从未出现 |
 | `ContributedConfigurationBase` | exec/target | `[~]` | 28 |  |  |  | 从未出现 |
@@ -744,7 +744,7 @@
 | `TargetEnvironment` | exec/target | `[~]` | 192 |  |  |  | 从未出现 |
 | `TargetEnvironmentAwareRunProfile` | exec/target | `[~]` | 103 |  |  |  | 从未出现 |
 | `TargetEnvironmentAwareRunProfileState` | exec/target | `[~]` | 80 |  |  |  | 从未出现 |
-| `TargetEnvironmentConfiguration` | exec/target | `[~]` | 65 |  |  |  | 从未出现 |
+| `TargetEnvironmentConfiguration` | exec/target | `[x]` | 65 |  |  |  | 从未出现 |
 | `TargetEnvironmentConfigurations` | exec/target | `[~]` | 64 |  |  |  | 从未出现 |
 | `TargetEnvironmentExt` | exec/target | `[~]` | 23 |  |  |  | 从未出现 |
 | `TargetEnvironmentPaths` | exec/target | `[~]` | 119 |  |  |  | 从未出现 |
@@ -803,33 +803,33 @@
 | `ConsoleViewContentType` | exec/ui | `[~]` | 122 |  |  |  | 从未出现 |
 | `FragmentedSettings` | exec/ui | `[~]` | 25 |  |  |  | 从未出现 |
 | `SettingsEditorFragmentType` | exec/ui | `[~]` | 54 |  |  |  | 从未出现 |
-| `ExecutionTargetProvider` | exec/misc | `[-]` | 20 |  |  |  | 从未出现 |
-| `RunConfigurationProducerService` | exec/misc | `[-]` | 65 |  |  |  | 从未出现 |
-| `RunnerRegistry` | exec/misc | `[-]` | 25 |  |  |  | 从未出现 |
+| `ExecutionTargetProvider` | exec/misc | `[x]` | 20 |  |  |  | 从未出现 |
+| `RunConfigurationProducerService` | exec/misc | `[~]` | 65 |  |  |  | 从未出现 |
+| `RunnerRegistry` | exec/misc | `[x]` | 25 |  |  |  | 从未出现 |
 | `CompatibleRunConfigurationProducer` | exec/actions | `[~]` | 44 |  |  |  | 从未出现 |
 | `ConfigurationContext` | exec/actions | `[~]` | 456 |  |  |  | 从未出现 |
 | `ConfigurationFromContext` | exec/actions | `[~]` | 169 |  |  |  | 从未出现 |
 | `ConfigurationFromContextImpl` | exec/actions | `[~]` | 61 |  |  |  | 从未出现 |
-| `ConsoleActionsPostProcessor` | exec/actions | `[~]` | 47 |  |  |  | 从未出现 |
+| `ConsoleActionsPostProcessor` | exec/actions | `[x]` | 47 |  |  |  | 从未出现 |
 | `LazyRunConfigurationProducer` | exec/actions | `[~]` | 17 |  |  |  | 从未出现 |
 | `MultipleRunLocationsProvider` | exec/actions | `[~]` | 55 |  |  |  | 从未出现 |
 | `PreferredProducerFind` | exec/actions | `[~]` | 177 |  |  |  | 从未出现 |
-| `RunConfigurationProducer` | exec/actions | `[~]` | 289 |  |  |  | 只被注释引用 |
+| `RunConfigurationProducer` | exec/actions | `[x]` | 289 |  |  |  | 只被注释引用 |
 | `LegacyRunDashboardServiceSubstitutor` | exec/run-toolbar | `[~]` | 18 |  |  |  | 从未出现 |
 | `RunDashboardChecker` | exec/run-toolbar | `[~]` | 12 |  |  |  | 从未出现 |
 | `RunDashboardCustomizationBuilder` | exec/run-toolbar | `[~]` | 12 |  |  |  | 从未出现 |
 | `RunDashboardCustomizer` | exec/run-toolbar | `[~]` | 45 |  |  |  | 从未出现 |
 | `RunDashboardDefaultTypesProvider` | exec/run-toolbar | `[~]` | 16 |  |  |  | 从未出现 |
-| `RunDashboardGroup` | exec/run-toolbar | `[~]` | 28 |  |  |  | 从未出现 |
+| `RunDashboardGroup` | exec/run-toolbar | `[x]` | 28 |  |  |  | 从未出现 |
 | `RunDashboardNode` | exec/run-toolbar | `[~]` | 23 |  |  |  | 从未出现 |
 | `RunDashboardRunConfigurationNode` | exec/run-toolbar | `[~]` | 35 |  |  |  | 从未出现 |
 | `RunDashboardRunConfigurationStatus` | exec/run-toolbar | `[~]` | 91 |  |  |  | 从未出现 |
-| `CompositeFilter` | exec/filters | `[~]` | 237 |  |  |  | 从未出现 |
+| `CompositeFilter` | exec/filters | `[x]` | 237 |  |  |  | 从未出现 |
 | `CompositeInputFilter` | exec/filters | `[~]` | 78 |  |  |  | 从未出现 |
 | `ConsoleDependentFilterProvider` | exec/filters | `[~]` | 30 |  |  |  | 从未出现 |
 | `ConsoleDependentInputFilterProvider` | exec/filters | `[~]` | 23 |  |  |  | 从未出现 |
-| `ConsoleFilterProvider` | exec/filters | `[~]` | 32 |  |  |  | 从未出现 |
-| `ConsoleFilterProviderEx` | exec/filters | `[~]` | 25 |  |  |  | 从未出现 |
+| `ConsoleFilterProvider` | exec/filters | `[x]` | 32 |  |  |  | 从未出现 |
+| `ConsoleFilterProviderEx` | exec/filters | `[x]` | 25 |  |  |  | 从未出现 |
 | `ConsoleInputFilterProvider` | exec/filters | `[~]` | 29 |  |  |  | 从未出现 |
 | `FileHyperlinkInfo` | exec/filters | `[~]` | 13 |  |  |  | 从未出现 |
 | `FileHyperlinkInfoBase` | exec/filters | `[~]` | 96 |  |  |  | 从未出现 |
@@ -897,7 +897,7 @@
 | `BasicGutterContentProvider` | exec/console | `[-]` | 97 | Y |  |  | 从未出现 |
 | `ConsoleConfigurable` | exec/console | `[~]` | 264 |  |  |  | 真实代码 |
 | `ConsoleConfigurableUI` | exec/console | `[-]` | 109 | Y |  |  | 从未出现 |
-| `ConsoleEncodingComboBox` | exec/console | `[~]` | 112 |  |  |  | 从未出现 |
+| `ConsoleEncodingComboBox` | exec/console | `[x]` | 112 |  |  |  | 从未出现 |
 | `ConsoleExecuteAction` | exec/console | `[~]` | 164 |  |  |  | 从未出现 |
 | `ConsoleExecutionEditor` | exec/console | `[-]` | 233 | Y |  |  | 从未出现 |
 | `ConsoleFoldingSettings` | exec/console | `[~]` | 156 |  |  |  | 从未出现 |
@@ -927,10 +927,10 @@
 | `LanguageConsoleView` | exec/console | `[~]` | 52 |  |  |  | 从未出现 |
 | `MergedHorizontalScrollBarModel` | exec/console | `[~]` | 85 |  |  |  | 从未出现 |
 | `PrefixHistoryModel` | exec/console | `[~]` | 157 |  |  |  | 从未出现 |
-| `ProcessBackedConsoleExecuteActionHandler` | exec/console | `[~]` | 59 |  |  |  | 从未出现 |
+| `ProcessBackedConsoleExecuteActionHandler` | exec/console | `[x]` | 59 |  |  |  | 从未出现 |
 | `SubstringConsoleFolding` | exec/console | `[~]` | 28 |  |  |  | 从未出现 |
 | `UseConsoleInputAction` | exec/console | `[~]` | 58 |  |  |  | 从未出现 |
-| `CommandHistory` | exec/console | `[~]` | 44 |  |  |  | 从未出现 |
+| `CommandHistory` | exec/console | `[x]` | 44 |  |  |  | 从未出现 |
 | `HistoryKeyListener` | exec/console | `[~]` | 104 |  |  |  | 从未出现 |
 | `RunDashboardService` | exec/run-toolbar | `[~]` | 34 |  |  |  | 从未出现 |
 | `RunDashboardServiceId` | exec/run-toolbar | `[~]` | 20 |  |  |  | 从未出现 |
@@ -1090,16 +1090,16 @@
 | `SMCustomMessagesParsing` | exec/sm-runner | `[~]` | 17 |  |  |  | 从未出现 |
 | `SMStacktraceParser` | exec/sm-runner | `[~]` | 40 |  |  |  | 从未出现 |
 | `SMTestRunnerConnectionUtil` | exec/sm-runner | `[~]` | 346 |  |  |  | 从未出现 |
-| `ServiceMessageBuilder` | exec/sm-runner | `[~]` | 83 |  |  |  | 从未出现 |
-| `ServiceMessageUtil` | exec/sm-runner | `[~]` | 88 |  |  |  | 从未出现 |
+| `ServiceMessageBuilder` | exec/sm-runner | `[x]` | 83 |  |  |  | 从未出现 |
+| `ServiceMessageUtil` | exec/sm-runner | `[x]` | 88 |  |  |  | 从未出现 |
 | `SmRunnerBundle` | exec/sm-runner | `[~]` | 27 |  |  |  | 从未出现 |
 | `TestHistoryConfiguration` | exec/sm-runner | `[~]` | 83 |  |  |  | 从未出现 |
 | `TestsLocationProviderUtil` | exec/sm-runner | `[~]` | 164 |  |  |  | 从未出现 |
 | `GeneralIdBasedToSMTRunnerEventsConvertor` | exec/sm-runner | `[~]` | 570 |  | Y |  | 从未出现 |
-| `GeneralTestEventsProcessor` | exec/sm-runner | `[~]` | 377 |  |  |  | 从未出现 |
-| `GeneralToSMTRunnerEventsConvertor` | exec/sm-runner | `[~]` | 558 |  | Y |  | 从未出现 |
+| `GeneralTestEventsProcessor` | exec/sm-runner | `[x]` | 377 |  |  |  | 从未出现 |
+| `GeneralToSMTRunnerEventsConvertor` | exec/sm-runner | `[x]` | 558 |  | Y |  | 从未出现 |
 | `LongLineCutter` | exec/sm-runner | `[~]` | 74 |  |  |  | 从未出现 |
-| `OutputEventSplitter` | exec/sm-runner | `[~]` | 100 |  |  |  | 从未出现 |
+| `OutputEventSplitter` | exec/sm-runner | `[x]` | 100 |  |  |  | 从未出现 |
 | `OutputToGeneralTestEventsConverter` | exec/sm-runner | `[~]` | 703 |  |  |  | 从未出现 |
 | `ProcessOutputConsumer` | exec/sm-runner | `[~]` | 16 |  |  |  | 从未出现 |
 | `ProxyFilters` | exec/sm-runner | `[~]` | 50 |  |  |  | 从未出现 |
@@ -1111,20 +1111,20 @@
 | `SMTRunnerRunDashboardCustomizer` | exec/sm-runner | `[~]` | 96 |  |  |  | 从未出现 |
 | `SMTRunnerTreeBuilder` | exec/sm-runner | `[-]` | 86 | Y |  |  | 从未出现 |
 | `SMTRunnerTreeStructure` | exec/sm-runner | `[~]` | 62 |  |  |  | 从未出现 |
-| `SMTestLocator` | exec/sm-runner | `[~]` | 64 |  |  |  | 从未出现 |
+| `SMTestLocator` | exec/sm-runner | `[x]` | 64 |  |  |  | 从未出现 |
 | `SMTestProxy` | exec/sm-runner | `[-]` | 1279 | Y |  |  | 从未出现 |
 | `TestListenerProtocol` | exec/sm-runner | `[~]` | 9 |  |  |  | 从未出现 |
 | `TestProxyFilterProvider` | exec/sm-runner | `[~]` | 26 |  |  |  | 从未出现 |
 | `TestProxyPrinterProvider` | exec/sm-runner | `[~]` | 116 |  |  |  | 从未出现 |
-| `TestSuiteStack` | exec/sm-runner | `[~]` | 136 |  |  |  | 从未出现 |
-| `BaseStartedNodeEvent` | exec/sm-runner | `[~]` | 97 |  |  |  | 从未出现 |
+| `TestSuiteStack` | exec/sm-runner | `[x]` | 136 |  |  |  | 从未出现 |
+| `BaseStartedNodeEvent` | exec/sm-runner | `[x]` | 97 |  |  |  | 从未出现 |
 | `TestDurationStrategy` | exec/sm-runner | `[~]` | 21 |  |  |  | 从未出现 |
-| `TestFailedEvent` | exec/sm-runner | `[~]` | 224 |  |  |  | 从未出现 |
-| `TestFinishedEvent` | exec/sm-runner | `[~]` | 50 |  |  |  | 从未出现 |
-| `TestIgnoredEvent` | exec/sm-runner | `[~]` | 45 |  |  |  | 从未出现 |
-| `TestOutputEvent` | exec/sm-runner | `[~]` | 47 |  |  |  | 从未出现 |
+| `TestFailedEvent` | exec/sm-runner | `[x]` | 224 |  |  |  | 从未出现 |
+| `TestFinishedEvent` | exec/sm-runner | `[x]` | 50 |  |  |  | 从未出现 |
+| `TestIgnoredEvent` | exec/sm-runner | `[x]` | 45 |  |  |  | 从未出现 |
+| `TestOutputEvent` | exec/sm-runner | `[x]` | 47 |  |  |  | 从未出现 |
 | `TestSetNodePropertyEvent` | exec/sm-runner | `[~]` | 69 |  |  |  | 从未出现 |
-| `TestStartedEvent` | exec/sm-runner | `[~]` | 81 |  |  |  | 从未出现 |
+| `TestStartedEvent` | exec/sm-runner | `[x]` | 81 |  |  |  | 从未出现 |
 | `TestSuiteFinishedEvent` | exec/sm-runner | `[~]` | 45 |  |  |  | 从未出现 |
 | `TestSuiteStartedEvent` | exec/sm-runner | `[~]` | 63 |  |  |  | 从未出现 |
 | `TreeNodeEvent` | exec/sm-runner | `[~]` | 94 |  |  |  | 从未出现 |
@@ -1170,7 +1170,7 @@
 | `AbstractTestProxy` | exec/testframework | `[~]` | 194 |  |  |  | 从未出现 |
 | `CompositePrintable` | exec/testframework | `[~]` | 423 |  |  |  | 从未出现 |
 | `DeferingPrinter` | exec/testframework | `[~]` | 46 |  |  |  | 从未出现 |
-| `FailedTestsNavigator` | exec/testframework | `[~]` | 185 |  |  |  | 从未出现 |
+| `FailedTestsNavigator` | exec/testframework | `[x]` | 185 |  |  |  | 从未出现 |
 | `Filter` | exec/testframework | `[~]` | 169 |  |  |  | 真实代码 |
 | `HistoryTestRunnableState` | exec/testframework | `[~]` | 8 |  |  |  | 从未出现 |
 | `HyperLink` | exec/testframework | `[~]` | 54 |  |  |  | 从未出现 |
@@ -1197,13 +1197,13 @@
 | `AbstractRerunFailedTestsAction` | exec/testframework | `[-]` | 336 | Y |  |  | 从未出现 |
 | `ConsolePropertiesProvider` | exec/testframework | `[~]` | 18 |  |  |  | 从未出现 |
 | `RerunFailedTestsAction` | exec/testframework | `[-]` | 71 | Y |  |  | 从未出现 |
-| `ScrollToRunningTestAction` | exec/testframework | `[~]` | 49 |  |  |  | 从未出现 |
+| `ScrollToRunningTestAction` | exec/testframework | `[x]` | 49 |  |  |  | 从未出现 |
 | `ScrollToTestSourceAction` | exec/testframework | `[~]` | 53 |  |  |  | 从未出现 |
 | `TestDiffContent` | exec/testframework | `[~]` | 124 |  |  |  | 从未出现 |
 | `TestDiffProvider` | exec/testframework | `[~]` | 55 |  |  |  | 从未出现 |
 | `TestDiffRequestProcessor` | exec/testframework | `[~]` | 149 |  |  |  | 从未出现 |
 | `TestFrameworkActions` | exec/testframework | `[~]` | 66 |  |  |  | 从未出现 |
-| `TestTreeExpander` | exec/testframework | `[~]` | 63 |  |  |  | 从未出现 |
+| `TestTreeExpander` | exec/testframework | `[x]` | 63 |  |  |  | 从未出现 |
 | `ViewAssertEqualsDiffAction` | exec/testframework | `[~]` | 108 |  |  |  | 从未出现 |
 | `AbstractAutoTestManager` | exec/testframework | `[-]` | 267 | Y |  |  | 从未出现 |
 | `AdjustAutotestDelayActionGroup` | exec/testframework | `[~]` | 85 |  |  |  | 从未出现 |
@@ -1216,7 +1216,7 @@
 | `ExportTestResultsConfiguration` | exec/testframework | `[~]` | 106 |  |  |  | 从未出现 |
 | `ExportTestResultsDialog` | exec/testframework | `[-]` | 97 | Y |  |  | 从未出现 |
 | `ExportTestResultsForm` | exec/testframework | `[-]` | 371 | Y |  |  | 从未出现 |
-| `TestResultsXmlFormatter` | exec/testframework | `[~]` | 367 |  |  |  | 从未出现 |
+| `TestResultsXmlFormatter` | exec/testframework | `[x]` | 367 |  |  |  | 从未出现 |
 | `package-info` | exec/testframework | `[~]` | 5 |  |  |  | 从未出现 |
 | `DiffHyperlink` | exec/testframework | `[~]` | 152 |  |  |  | 从未出现 |
 | `AbstractTestTreeBuilderBase` | exec/testframework | `[~]` | 19 |  |  |  | 从未出现 |
@@ -1302,7 +1302,7 @@
 | `WslTargetStepBase` | exec/wsl | `[-]` | 20 |  |  |  | 从未出现 |
 | `WslTargetWizardModel` | exec/wsl | `[-]` | 59 |  |  |  | 从未出现 |
 | `package-info` | exec/wsl | `[-]` | 5 |  |  |  | 从未出现 |
-| `DefaultDebugExecutor` | dbg/misc | `[-]` | 92 |  |  |  | 从未出现 |
+| `DefaultDebugExecutor` | dbg/misc | `[x]` | 92 |  |  |  | 从未出现 |
 | `ActivateDebugToolWindowAction` | dbg/misc | `[-]` | 35 |  |  |  | 从未出现 |
 | `CoverageEnabledConfiguration` | exec/run-configs | `[~]` | 319 |  |  |  | 从未出现 |
 | `CoverageClassFilterEditor` | exec/run-configs | `[~]` | 66 |  |  |  | 从未出现 |
@@ -1538,7 +1538,7 @@
 | `JUnitExternalLibraryDescriptor` | exec/junit | `[~]` | 28 |  |  |  | 从未出现 |
 | `JUnitLauncherDependencies` | exec/junit | `[~]` | 263 |  |  |  | 从未出现 |
 | `JUnitParameterChooser` | exec/junit | `[-]` | 160 | Y |  |  | 从未出现 |
-| `JUnitParameterCollector` | exec/junit | `[~]` | 278 |  |  |  | 从未出现 |
+| `JUnitParameterCollector` | exec/junit | `[x]` | 278 |  |  |  | 从未出现 |
 | `JUnitParameterizedFieldSourceGotoRelatedProvider` | exec/junit | `[~]` | 12 |  |  |  | 从未出现 |
 | `JUnitParameterizedMethodSourceGotoRelatedProvider` | exec/junit | `[~]` | 12 |  |  |  | 从未出现 |
 | `JUnitParameterizedSourceGotoRelatedProvider` | exec/junit | `[~]` | 55 |  |  |  | 从未出现 |
@@ -1557,9 +1557,9 @@
 | `TestMethods` | exec/junit | `[~]` | 160 |  |  |  | 从未出现 |
 | `TestObject` | exec/junit | `[~]` | 820 |  |  |  | 从未出现 |
 | `TestPackage` | exec/junit | `[~]` | 300 |  |  |  | 从未出现 |
-| `TestTags` | exec/junit | `[~]` | 133 |  |  |  | 从未出现 |
+| `TestTags` | exec/junit | `[x]` | 133 |  |  |  | 从未出现 |
 | `TestUniqueId` | exec/junit | `[~]` | 121 |  |  |  | 从未出现 |
-| `TestsPattern` | exec/junit | `[~]` | 228 |  |  |  | 从未出现 |
+| `TestsPattern` | exec/junit | `[x]` | 228 |  |  |  | 从未出现 |
 | `UniqueIdConfigurationProducer` | exec/junit | `[~]` | 113 |  |  |  | 从未出现 |
 | `UnknownTestTarget` | exec/junit | `[~]` | 37 |  |  |  | 从未出现 |
 | `JUnit5ExternalLibraryResolver` | exec/junit | `[~]` | 13 |  |  |  | 从未出现 |

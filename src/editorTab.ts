@@ -16,6 +16,7 @@ export interface EditorHandle {
   command(name: string): boolean
   expandAtCursor(text: string): boolean
   hasSelection(): boolean
+  foldSelectionEnabled(): boolean
   setReadOnly(value: boolean): void
   surroundWith(template: SurroundTemplate): void
   getCursor(): { line: number; ch: number }

@@ -19,6 +19,10 @@ import { copyToClipboard } from './clipboard.ts'
 import { errorMessage } from './errors.ts'
 import { collectTroubleshootingReport, describeScreens, type ProjectTroubleContext } from './troubleshootingCollectors.ts'
 import type { PluginList } from './pluginGroups.ts'
+import {
+  installBundledGeneralTroubleInfoCollectors, installBundledProjectSpecialPathsProvider,
+  installBundledSpecialPathsProvider, specialPathEntries, troubleshootingReportFromExtensions,
+} from './diagnosticsExtensionPoints.ts'
 
 export interface AppInfo { version: string; platform: string; arch: string; webview2: string; profile: string }
 export interface LogPaths { dir: string; file: string; exists: boolean; size: number }
@@ -64,11 +68,33 @@ export function createHelpActions(deps: HelpActionsDeps) {
     } catch (error) { deps.notify(errorMessage(error), true) }
   }
 
-  /** `BrowseSpecialPathsAction`：列出特殊目录，点一项就在文件管理器里打开。 */
+  /**
+   * `BrowseSpecialPathsAction`：列出特殊目录，点一项就在文件管理器里打开。
+   *
+   * 上游这张表由 `SpecialPathsProvider` EP 收上来（应用级 + 项目级两条内置实现），本仓同样
+   * 走 EP：宿主 `app.specialPaths` 的那一张与当前工作区根各登记成一条 bundled 贡献
+   * （`src/diagnosticsExtensionPoints.ts` 的 `installBundledSpecialPathsProvider` /
+   * `installBundledProjectSpecialPathsProvider`），第三方插件按同一 EP id 挂的提供者一并出现。
+   * 第三方路径的前端无法做存在性判定（宿主只对自建的那几张算 `exists`），故它们按「存在」显示。
+   */
   async function browseSpecialPaths() {
     if (!deps.isDesktop) { deps.notify('桌面端才能浏览特殊目录。', true); return }
     try {
-      specialPaths.value = await request<SpecialPath[]>('app.specialPaths')
+      const native = await request<SpecialPath[]>('app.specialPaths')
+      const byPath = new Map(native.map(entry => [entry.path.toLowerCase(), entry]))
+      const root = deps.projectContext?.()?.root ?? null
+      installBundledSpecialPathsProvider(() =>
+        native.map(entry => ({ name: entry.label, path: entry.path, kind: 'folder' as const })))
+      installBundledProjectSpecialPathsProvider(() => root)
+      specialPaths.value = specialPathEntries(root).map(entry => {
+        const known = byPath.get(entry.path.toLowerCase())
+        return {
+          id: known?.id ?? entry.path,
+          label: entry.name,
+          path: entry.path,
+          exists: known ? known.exists : true,
+        }
+      })
       specialPathsOpen.value = true
     } catch (error) { deps.notify(errorMessage(error), true) }
   }
@@ -98,8 +124,10 @@ export function createHelpActions(deps: HelpActionsDeps) {
     try {
       const host = await request<{ text: string }>('app.troubleshooting')
       // 上游是 `CompositeGeneralTroubleInfoCollector` 逐项收集（`TroubleInfoCollector` EP）；
-      // 本仓宿主给进程侧固定字段，前端按 `src/troubleshootingCollectors.ts` 的四条通用收集器
-      // （About/System/Plugins/Displays）补一段 —— 每条数据抓不到就省略该段，不写空话。
+      // 本仓宿主给进程侧固定字段，前端按 `src/troubleshootingCollectors.ts` 的五条通用收集器
+      // （About/System/Plugins/Displays/Project）补一段 —— 每条数据抓不到就省略该段，不写空话。
+      // `project` 那一段的数据源就是宿主注入的 `deps.projectContext`（上游把 `Project` 传给每个
+      // 收集器；本仓没有容器）：没打开工作区时它返回 null，Project 段整段省略。
       const appInfo = await request<AppInfo>('app.info').catch(() => null)
       const memory = await request<ProcessMemory>('app.memory').catch(() => null)
       const plugins = deps.isDesktop ? await request<PluginList>('plugin.list').catch(() => null) : null
@@ -109,6 +137,7 @@ export function createHelpActions(deps: HelpActionsDeps) {
         plugins: plugins?.plugins ?? null,
         screens: describeScreens(),
         cpuCount: navigator.hardwareConcurrency,
+        project: deps.projectContext?.() ?? null,
       }))
       await copyToClipboard(report ? `${host.text}\n\n${report}` : host.text)
       deps.notify('排障信息已复制到剪贴板。')

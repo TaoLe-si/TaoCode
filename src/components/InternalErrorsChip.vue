@@ -49,7 +49,7 @@ onBeforeUnmount(() => { if (timer !== undefined) window.clearInterval(timer) })
     aria-label="内部错误" :aria-expanded="open"
     @click.stop="open = true; void refresh()"
   >
-    <TriangleAlert :size="iconSize.dense" />{{ internalErrorLabel(errors!.count) }}
+    <TriangleAlert aria-hidden="true" :size="iconSize.dense" />{{ internalErrorLabel(errors!.count) }}
   </button>
   <InternalErrorsDialog v-if="open && visible && errors" :errors="errors" :show-log="showLog" @close="open = false" />
 </template>

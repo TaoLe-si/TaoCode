@@ -153,9 +153,53 @@ export const REGISTRY_KEYS: readonly RegistryKeySpec[] = [
 
 const BY_KEY = new Map(REGISTRY_KEYS.map(spec => [spec.key, spec]))
 
-/** 按 key 取登记项（未登记返回 undefined；调用方据此拒绝编辑未知键）。 */
+// ── `com.intellij.registryKey` 扩展点宿主（插件贡献的注册表键） ──────────────────────
+//
+// 上游 `platform/ide-core/resources/intellij.platform.ide.core.xml:38` 声明
+// `<extensionPoint qualifiedName="com.intellij.registryKey" beanClass="RegistryKeyBean" dynamic="true"/>`：
+// 插件按它贡献自己的注册表键。本仓把 bundled 的 `REGISTRY_KEYS` 登记进 EP，第三方按同一 EP id
+// 挂的键由 `allRegistryKeySpecs()` 收编，`registryKeySpec`/`registryRows`/`visibleRegistryRows`
+// 这些**真实消费点**都从它取表。
+import { APPLICATION_SCOPE, EXTENSIONS, type ExtensionHandle, type RegisterExtensionOptions } from './extensionPoints.ts'
+
+/** EP id（逐字取自上游 `intellij.platform.ide.core.xml:38` 的 `qualifiedName`）。 */
+export const REGISTRY_KEY_EP = 'com.intellij.registryKey'
+
+/** 声明 EP（幂等）。 */
+export function declareRegistryKeyExtensionPoint(): void {
+  EXTENSIONS.declareExtensionPoint({ id: REGISTRY_KEY_EP, name: '注册表键', scope: APPLICATION_SCOPE, dynamic: true })
+}
+
+/** 插件贡献一个注册表键（等价于上游 plugin.xml 的一条 `com.intellij.registryKey`）。 */
+export function registerRegistryKey(spec: RegistryKeySpec, options: RegisterExtensionOptions = {}): ExtensionHandle {
+  return EXTENSIONS.registerExtension(REGISTRY_KEY_EP, spec.key, spec, options)
+}
+
+/** 注销一条注册表键贡献。 */
+export function unregisterRegistryKey(key: string): boolean {
+  return EXTENSIONS.unregisterExtension(REGISTRY_KEY_EP, key)
+}
+
+/** 当前 EP 上的全部注册表键（bundled + 第三方）。 */
+export function registryKeysFromExtensions(scope: string = APPLICATION_SCOPE): RegistryKeySpec[] {
+  return EXTENSIONS.extensionsOf<RegistryKeySpec>(REGISTRY_KEY_EP, scope)
+}
+
+/** 全部登记键：bundled 表在前，EP 上的第三方贡献按 key 去重补在后面。 */
+export function allRegistryKeySpecs(scope: string = APPLICATION_SCOPE): RegistryKeySpec[] {
+  const merged = new Map<string, RegistryKeySpec>(BY_KEY)
+  for (const spec of registryKeysFromExtensions(scope)) if (!merged.has(spec.key)) merged.set(spec.key, spec)
+  return [...merged.values()]
+}
+
+// bundled：内置键表按上游 plugin.xml 的 `<com.intellij.registryKey/>` 形态登记在 EP 上。
+declareRegistryKeyExtensionPoint()
+for (const spec of REGISTRY_KEYS)
+  EXTENSIONS.registerExtension(REGISTRY_KEY_EP, spec.key, spec, { source: 'bundled' })
+
+/** 按 key 取登记项（未登记返回 undefined；调用方据此拒绝编辑未知键）。含 EP 上的第三方贡献。 */
 export function registryKeySpec(key: string): RegistryKeySpec | undefined {
-  return BY_KEY.get(key)
+  return BY_KEY.get(key) ?? registryKeysFromExtensions().find(spec => spec.key === key)
 }
 
 /** 类型化解析：返回规范化的字符串形态；类型不合法时返回 null（调用方给错误提示，不静默吞掉）。 */
@@ -200,7 +244,7 @@ export interface RegistryRow {
 
 /** `RegistryUi` 的表行（只读形态；本仓不提供就地编辑，编辑走设置页或不再提供）。 */
 export function registryRows(overrides: ReadonlyMap<string, string> = new Map(), general?: GeneralSettingsState): RegistryRow[] {
-  return REGISTRY_KEYS.map(spec => {
+  return allRegistryKeySpecs().map(spec => {
     const overridden = overrides.has(spec.key)
     const value = registryValue(spec, overrides, general)
     return {
@@ -253,13 +297,13 @@ export function filterRegistryKeys(specs: readonly RegistryKeySpec[], query: str
 export function restartRequiredChanges(
   before: ReadonlyMap<string, string>, after: ReadonlyMap<string, string>, general?: GeneralSettingsState,
 ): RegistryKeySpec[] {
-  return REGISTRY_KEYS.filter(spec => spec.restartRequired
+  return allRegistryKeySpecs().filter(spec => spec.restartRequired
     && registryValue(spec, before, general) !== registryValue(spec, after, general))
 }
 
 /** 升格为设置页开关的键（消费点 `GeneralRegistryToggles.vue`：渲染说明与改动标注）。 */
 export function registryToggleKeys(): RegistryKeySpec[] {
-  return REGISTRY_KEYS.filter(spec => spec.field !== undefined)
+  return allRegistryKeySpecs().filter(spec => spec.field !== undefined)
 }
 
 /**
@@ -295,7 +339,7 @@ export const REGISTRY_RESTART_NOTE = '需要重启 IDE 才生效。'
  */
 export function visibleRegistryRows(general: GeneralSettingsState, query = '',
                                     sort?: 'key' | 'value' | 'source'): RegistryRow[] {
-  const matched = new Set(filterRegistryKeys(REGISTRY_KEYS, query).map(spec => spec.key))
+  const matched = new Set(filterRegistryKeys(allRegistryKeySpecs(), query).map(spec => spec.key))
   const rows = registryRows(new Map(), general).filter(row => matched.has(row.key))
   if (!sort) return rows
   const by = (row: RegistryRow): string => sort === 'key' ? row.key : sort === 'value' ? row.value : row.source

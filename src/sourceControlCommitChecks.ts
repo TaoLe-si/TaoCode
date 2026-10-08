@@ -6,10 +6,15 @@
 // `act` / `commit` 四个依赖刻意与面板里的同名调用保持一致，搬动的那些行一个字都没改。
 //
 // 2026-10-06（桶 13c）接上「上次检查结果」那条状态线：跳过与否不再看"失败行有没有内容"，而是走
-// `src/commitChecksResult.ts` 的状态机（上游 `RecentCommitChecks`，`NonModalCommitWorkflowHandler.kt:229-249、
-// 337-342、533-557`），并把 reset 的判据换成上游那一条（变更集/文档真的变了，不是只数条数）。
+// `src/commitChecksResult.ts` 的状态机（上游 `RecentCommitChecks`，`NonModalCommitWorkflowHandler.kt:229-250、
+// 336-341、530-563`），并把 reset 的判据换成上游那一条（变更集/文档真的变了，不是只数条数）。
+// 这三处区间本批（commitfp）逐行重数过：原写 `229-249 / 337-342 / 533-557` —— `:249` 少了 reset 的闭括号、
+// `:337` 少了第一个 skip（`skipEarlyCommitChecks` 在 `:336`）、`:342` 是空行，`:530` 是 `handleCommitProblem`
+// 的函数头而 `:557` 之后那个 `ABORTED/ERROR ⇒ FAILED` 的赋值在 `:561`。
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
-import { commitBlockMessage, commitBlockReason, commitIncludedCount } from './commitCheck.ts'
+import { commitBlockReason, commitIncludedCount } from './commitCheck.ts'
+// 提交前后的插件面（三条上游 EP 的宿主）：内建闸与第三方 handler 在这一层合流，见 `src/checkinHandlers.ts`。
+import { createCheckinHandlers, runBeforeCheckin, type CheckinPanelLike } from './checkinHandlers.ts'
 import { COMMIT_ACTION_TEXT, CHECKS_STEP_TODO, PROGRESS_PRESENTATION_DELAY_MS, RUNNING_CHECKS_TEXT, SHOW_DETAILS_TEXT,
   REVIEW_TODO_ACTION, CHECKS_CANCEL_TEXT, checksFailedTitle, checksProgressShown, commitActionText, commitAndPushText,
   checksProgress as checksProgressOf, checksProgressPopup, indexingWarningVisible, commitCheckReport, failureTexts,
@@ -25,7 +30,7 @@ import type { NoticeAction } from './notices.ts'
 import type { GitChange } from './bridge.ts'
 import type { CommitMessageProblem } from './commitMessageInspection.ts'
 
-/** 这一轮跳过哪些相位（上游 `doExecuteSession:337-340` 的四个 skip 参数里本仓有的那两个）。 */
+/** 这一轮跳过哪些相位（上游 `doExecuteSession` 里 `:336-339` 那四个 skip 参数中本仓有的那两个）。 */
 export interface CommitChecksSkip {
   early: boolean
   modifications: boolean
@@ -58,18 +63,23 @@ export interface CommitChecksDeps {
   /** 宿主答"哪些还没保存"的那条通道（上游 `SaveCommittingDocumentsVetoer`）。 */
   dirtyPaths: () => string[]
   /**
-   * 编辑器内容的修订计数（上游 `DocumentListener.documentChanged`，`NonModalCommitWorkflowHandler.kt:216-225`）：
-   * 宿主接上线后每次键入/保存都要变；没接时不给（指纹保持本批之前的形状）。见 W2 接线请求。
+   * **每篇文档各自的修订号**（上游 `Document.getModificationStamp()`，
+   * `platform/core-api/src/com/intellij/openapi/editor/Document.java:184-192`；每次文本变更换一个号
+   * `platform/core-impl/src/com/intellij/openapi/editor/impl/DocumentImpl.java:171`）——
+   * 这是"内容又变了 ⇒ 上一轮结果作废"那一维的**唯一**输入：号变 ⇒ 指纹变 ⇒ 作废；号不变 ⇒ 逐字不变 ⇒ 仍复用。
+   * `dirtyPaths` 那份快照只覆盖"第一次编辑"（同一篇再改它一个字都不变），担不了这一档。
+   *
+   * 生产方：`src/documentRevisions.ts`（每次键入由 `src/lspNavigation.ts` 的 `onEditorChange` 记一笔，
+   * 程序性改写由 `src/editorFileOps.ts` 的缩进转换记一笔），面板在 `SourceControl.vue` 交进来。
+   * 上一版那个**全局**编辑计数（`editorEpoch`，`docs/wiring-requests-2026-10-06-vcs2.md` W2）本批**删掉了**：
+   * 它连是哪一篇都不认，别的文件（含不在 VCS 下、不在内容里的那些）动一下也算这次变更集变了，
+   * 而上游 `NonModalCommitWorkflowHandler.kt:222` 问的始终是**这篇文件**过不过 `:191-199` 那三道筛。
+   * 生产方已在仓里 ⇒ 这一档不再是"宿主没接就交空数组"的**可选**入参（撤线请求
+   * `docs/wiring-requests-2026-10-06-preflight.md` P1/P2/P3 由本批落地）。
+   * 筛的分工：`getVcsFor != null`（`:193`）与 `isInContent`（`:198`）本仓算不出来 —— 生产方只报
+   * "工作区里打开且真的被编辑过"的那些文档，被忽略的那一篇由模块侧过筛（`documentAffectsCommitChecksResult`）。
    */
-  editorEpoch?: () => number
-  /**
-   * **每篇文档各自的修订号**（上游 `Document.getModificationStamp()`，`Document.java:184-192`；
-   * 提交检查由 `documentChanged` 作废那一条的直接等价物，`NonModalCommitWorkflowHandler.kt:215-226`）。
-   * 上面那个全局计数会把"别的文档动了一下"也算成这次变更集变了，而 `dirtyPaths` 那份快照只覆盖
-   * 第一次编辑 ⇒ 这一档才是"同一篇改两次也作废"的那一口。没给（宿主还没接）= 空数组 = 本批之前的形状。
-   * 接线请求：`docs/wiring-requests-2026-10-06-commit2.md` C2。
-   */
-  documentRevisions?: () => readonly DocumentRevision[]
+  documentRevisions: () => readonly DocumentRevision[]
   /**
    * 「提交文件…」的范围（R1）：给了就按**这次包含的变更**判"有没有内容"，
    * 上游那条 `isCommitEmpty()` 问的就是这个集合（`AbstractCommitWorkflowHandler.kt:82`：
@@ -81,17 +91,18 @@ export interface CommitChecksDeps {
 
 export function createCommitChecks(deps: CommitChecksDeps) {
   const { props, emit, act, commit, staged, changes, message, amend, checkTodoBeforeCommit, todoCheckBusy, todoHits,
-          messageProblems, signoff, postponeSlowChecks, dirtyPaths, editorEpoch, documentRevisions,
+          messageProblems, signoff, postponeSlowChecks, dirtyPaths, documentRevisions,
           commitScope } = deps
   // IDEA's commit check (NonModalCommitWorkflowHandler.checkCommit, :177-184) records which
   // precondition is missing and CommitProgressPanel.buildErrorText() (:321-328) prints that
   // reason right above the commit actions. The Commit button itself only needs a VCS and no
-  // running commit (isReady(), :156-159), so it stays clickable and the reason appears on the
+  // running commit (isReady(), :159), so it stays clickable and the reason appears on the
   // click — see src/commitCheck.ts for the grouping rules.
   const commitCheckError = ref('')
   // 提交前检查报出来的问题（上游 `FailuresPanel`，`CommitProgressPanel.kt:394`）：**它跟上面那条错误行
   // 不是同一处 UI** —— 错误行说的是"为什么这次不能提交"（空判），这一行说的是"检查发现了什么"。
-  // 行只在有 failure 时可见（`isVisible = false` 起步，`:430`；`addFailure` 才显示，`:410`）。
+  // 行只在有 failure 时可见（`isVisible = false` 起步在 `:397`；`addFailure` 才显示，`:410`；留痕：原写 `:430`，
+  // 那一行是 `FailuresDescriptionPanel.isInitialized` 的注释，跟可见性无关）。
   const checksFailures = ref<CommitCheckFailure[]>([])
   const checksBusy = ref(false)
   /**
@@ -103,7 +114,7 @@ export function createCommitChecks(deps: CommitChecksDeps) {
   /** 这一轮检查的上下文：正文两档（`isOnlyRunCommitChecks`）+ 当前步名 + 是不是提交后那一轮。 */
   const checksRound = ref<{ onlyRunChecks: boolean; step: string | null; postRound: boolean }>(
     { onlyRunChecks: true, step: null, postRound: false })
-  /** `willSkipCommitChecks()`（`:229-233`）：上一轮检查已经失败 ⇒ 提交时跳过这些相位、按钮改名叫「仍然{0}」。 */
+  /** `willSkipCommitChecks()`（`:229-232`；留痕：原写 `:229-233`，`:233` 是空行）：上一轮检查已经失败 ⇒ 提交时跳过这些相位、按钮改名叫「仍然{0}」。 */
   const checksSkipped = computed(() => willSkipCommitChecks(checksResult.value))
   // 按钮名的四档（`AbstractCommitWorkflowHandler.kt:226-237`）：提交 / 仍然提交 / 修正提交 / 仍然修正。
   const commitButtonLabel = computed(() => `${commitActionText({
@@ -121,28 +132,52 @@ export function createCommitChecks(deps: CommitChecksDeps) {
   }))
   // CommitProgressPanel.clearError() (:316-319) drops the label as soon as the message or the
   // inclusion change (:146-156 installs the document and inclusion listeners that call it).
-  // 注意上游**只**在这里清错误行：失败行要等下一轮检查开始才清（`progressStarted`，`:221-227`），
+  // 注意上游**只**在这里清错误行：失败行要等下一轮检查开始才清（`CommitProgressPanel.kt` 的
+  // `progressStarted` `:219-227`，清失败行那一句 `failuresPanel.clearFailures()` 在 `:225`；
+  // 留痕：原写 `:221-227`（2026-10-06 commitfpclose 重数）—— 那是同一个函数的 body，函数头在 `:219`），
   // 上一版把失败行也跟着消息一起清掉，于是「仍然提交」的名字和那条刷新按钮会凭空消失。
   watch(message, () => { commitCheckError.value = '' })
-  // `resetCommitChecksResult()`（`:246-249`）的触发条件在 `:200-226`：VFS 或文档变了、而且变的文件
-  // 是"会影响检查结果"的那些（`:191-199`：在 VCS 下、在内容里、状态不是 IGNORED）。本仓的等价信号 =
+  // `resetCommitChecksResult()`（`:247-250`；留痕：原写 `:246-249`，本批重开该文件逐行数过 —— `:246` 是空行、
+  // 函数体在 `:248-249`，闭括号 `:250`）的触发条件在 `:202-225`（原写 `:200-226`：VFS 那半在 `:202-213`、
+  // 文档那半在 `:215-226`，`:200`/`:201` 是那道筛的收尾与大空行）：VFS 或文档变了、而且变的文件
+  // 是"会影响检查结果"的那些（`:191-199`：在 VCS 下 `:193`、在内容里 + 状态不是 IGNORED `:198`）。本仓的等价信号 =
   // 变更集指纹（`commitChecksFingerprint`）—— 已经 UNKNOWN 就早退（`:205`/`:218`；留痕：原写 `:202`，
   // commit2 逐行重开 NonModalCommitWorkflowHandler.kt 核实后改指早退那两行）。
   // 第二个参数是**未保存清单**（`:216-225` 的 documentChanged 在本仓的代理，只覆盖第一次编辑）；
-  // 第三个参数是宿主的修订计数，接上线后每一次键入都会让这一轮结果作废；
-  // 第四个参数是**按文档的修订号**（`Document.java:184-192`）：同一篇第二次编辑也变，别的文档变了不算。
-  watch(() => commitChecksFingerprint(changes.value, dirtyPaths(), editorEpoch ? editorEpoch() : null,
-                                      documentRevisions ? documentRevisions() : []), () => {
+  // 第三个参数是**按文档的修订号**（`Document.java:184-192`，每次文本变更领一个新号 `DocumentImpl.java:171`）：
+  // 这是"内容又变了"那一维的唯一驱动 —— 同一篇改第二次也变（上一版把它限死在"必须在变更列表里"，
+  // 于是 git 侧干净的文件改两次不作废 ⇒ 本批按上游那三道筛放开），别的文档动了一下不算。
+  // 生产方已在仓里（`src/documentRevisions.ts`）⇒ 这里不再有"没接就交空数组"那一档；
+  // 上一版的全局计数 `editorEpoch` 连同它的字段与面板 prop 一起删掉（全局计数不是修订号，见上面字段注释）。
+  watch(() => commitChecksFingerprint(changes.value, dirtyPaths(), documentRevisions()), () => {
     commitCheckError.value = ''
     if (commitChecksShouldReset(checksResult.value)) checksResult.value = resetCommitChecks()
   })
+  /**
+   * 这次提交能不能跑（上游 `AbstractCommitWorkflow.kt:555-565` 逐个问 handler 的那一步）。
+   *
+   * 内建那道空判/空信息闸与第三方 handler **走同一条路**：闸的结论作为 bundled 贡献
+   * （`src/checkinHandlers.ts` 的 `BUILTIN_EMPTY_COMMIT_HANDLER_ID`）出现在 EP 里，
+   * 第三方按 `com.intellij.checkinHandlerFactory` 挂的 handler 在这里同样会被问到 ——
+   * 返回 `CANCEL`/`CLOSE_WINDOW` 就能真的挡下这次提交，并把自己的说明写到面板那条错误行上。
+   */
   function passedCommitCheck(): boolean {
     const reason = commitBlockReasonNow.value
-    commitCheckError.value = reason ? commitBlockMessage(reason) : ''
-    return reason === null
+    const panel: CheckinPanelLike = {
+      // 本仓没有 `Project` 对象；工作区根那条口由宿主在 `passedCommitCheck` 的调用侧给（保留文件），
+      // 目前第三方 handler 若要看根，走 `docs/wiring-requests-2026-10-06-b1b7verdict.md` 的 W-2。
+      root: '',
+      message: message.value,
+      paths: staged.value.map(change => change.path),
+      amend: amend.value,
+      blockReason: reason,
+    }
+    const outcome = runBeforeCheckin(createCheckinHandlers(panel))
+    commitCheckError.value = outcome.result === 'COMMIT' ? '' : (outcome.message ?? '')
+    return outcome.result === 'COMMIT'
   }
 
-  /** `skipEarlyCommitChecks` / `skipModificationCommitChecks`（`:337-338`）从状态折算出来。 */
+  /** `skipEarlyCommitChecks` / `skipModificationCommitChecks`（`:336-337`）从状态折算出来。 */
   function skipFromState(): CommitChecksSkip {
     return {
       early: willSkipEarlyCommitChecks(checksResult.value),
@@ -168,9 +203,10 @@ export function createCommitChecks(deps: CommitChecksDeps) {
   onScopeDispose(stopChecksDelay)
 
   /**
-   * 一轮检查的**开头**要做的事（上游 `runWithProgress` + `progressStarted`，`CommitProgressPanel.kt:181-227`）：
+   * 一轮检查的**开头**要做的事（上游 `runWithProgress` + `progressStarted`，`CommitProgressPanel.kt:185-227`；
+   * 留痕：原写 `:181-227`，`:181-183` 是 `dispose()`）：
    * 挂上指示器、清掉失败行（`:225`），外加会话开头的 `resetCommitChecksResult()`
-   * （`NonModalCommitWorkflowHandler.kt:342`）—— 顺序很重要：先清状态，这一轮的结果才是新账。
+   * （`NonModalCommitWorkflowHandler.kt:341`；留痕：原写 `:342`，那一行是空行）—— 顺序很重要：先清状态，这一轮的结果才是新账。
    */
   function beginChecksRound(onlyRunChecks: boolean, postRound = false) {
     checksRound.value = { onlyRunChecks, step: null, postRound }
@@ -189,7 +225,7 @@ export function createCommitChecks(deps: CommitChecksDeps) {
    *
    * @param skip 跳过哪些相位（`willSkipEarlyCommitChecks` / `willSkipModificationCommitChecks`）。
    *   「运行提交检查」那一把刷新按钮传 `{ early: false, modifications: false }`：
-   *   上游的 skip 参数带 `!isOnlyRunCommitChecks` 前缀（`:337-340`），所以只跑检查时**一条都不跳**。
+   *   上游的 skip 参数带 `!isOnlyRunCommitChecks` 前缀（`:336-339`），所以只跑检查时**一条都不跳**。
    */
   async function collectCommitChecks(withBlockReason = true, skip: CommitChecksSkip = skipFromState()): Promise<CommitCheckReport> {
     const reason = withBlockReason ? commitBlockReasonNow.value : null
@@ -201,7 +237,8 @@ export function createCommitChecks(deps: CommitChecksDeps) {
       try { hits = await todoHits() } finally { todoCheckBusy.value = false }
     }
     // 提交信息检查是同步的（纯函数 + 现成的 computed），没有"正在进行"的那一瞬间可显示，所以不占步名；
-    // 跳过早相位时这一条根本不进失败行（上游 EARLY_FAILED 之后 `runEarlyCommitChecks` 不再跑，`:445-453`）。
+    // 跳过早相位时这一条根本不进失败行（上游 EARLY_FAILED 之后 `runEarlyCommitChecks` 不再跑：跳过的那道闸
+    // 在 `:378-380`，函数本体 `:447-455`；留痕：原写 `:445-453` 两头都差几行）。
     const problems = skip.early ? [] : messageProblems.value
     const stagedPaths = new Set(staged.value.map(change => change.path))
     return commitCheckReport({
@@ -224,15 +261,16 @@ export function createCommitChecks(deps: CommitChecksDeps) {
   function applyChecksReport(report: CommitCheckReport, commitActions = false, summary?: string[]) {
     commitCheckError.value = report.blockMessage
     checksFailures.value = report.failures
-    // 状态按 `:533-557` 落档（只跑检查且过了 = PASSED；提交路径且过了 = UNKNOWN；失败按相位）。
+    // 状态按 `:530-563` 落档（只跑检查且过了 = PASSED；提交路径且过了 = UNKNOWN；失败按相位）。
     checksResult.value = checksResultAfter({
       failures: report.failures,
       onlyRunChecks: checksRound.value.onlyRunChecks,
       postRound: checksRound.value.postRound,
     })
     if (report.failures.length === 0) return
-    // 动作照上游 `appendShowDetailsNotificationActions`（NonModalCommitWorkflowHandler.kt:302-316）：
-    // 「显示详细信息」= 激活提交工具窗口（`showCommitCheckFailuresPanel`，:317-321）；
+    // 动作照上游 `appendShowDetailsNotificationActions`（NonModalCommitWorkflowHandler.kt:301-314；留痕：原写
+    // `:302-316` —— `:302` 是循环体第一行、函数头在 `:301`，`:316` 已经是下一个函数）：
+    // 「显示详细信息」= 激活提交工具窗口（`showCommitCheckFailuresPanel`，:316-321）；
     // 「仍然{0}」只在提交路径那条通知上（`commit.checks.failed.notification.commit.anyway.action`）。
     const actions: NoticeAction[] = [{ label: SHOW_DETAILS_TEXT, run: () => props.showToolWindow?.('git') }]
     if (commitActions) actions.push({ label: commitActionText({ amend: amend.value, skipChecks: true }), run: () => commit() })
@@ -250,7 +288,9 @@ export function createCommitChecks(deps: CommitChecksDeps) {
     if (failure.details !== REVIEW_TODO_ACTION) return
     props.showToolWindow?.('todo')
   }
-  // IDEA 的 `CommitChecksProgressIndicator`（`CommitProgressPanel.kt:108-130`）在面板里挂的那一行：
+  // IDEA 的 `InlineCommitChecksProgressIndicator`（`CommitChecksProgressIndicator.kt:43-86`；留痕：原写
+  // `CommitProgressPanel.kt:108-130` —— 那一段是面板持有的 `progress` 状态位与 dumb 防抖，不是指示器本体）
+  // 在面板里挂的那一行：
   // 标题 + 两档正文（`isOnlyRunCommitChecks` 决定用哪一条）+ 当前步名 + 副文本 + 取消。
   // 最后那个 `running` 参数是**这一行在不在界面上**，由 `checksProgressShown` 折三条判据
   // （在跑 / 失败行为空 / 300ms 延迟已过）—— 直接传 checksBusy 会让亚秒级的检查闪一行。
@@ -275,7 +315,7 @@ export function createCommitChecks(deps: CommitChecksDeps) {
   let checksToken = 0
   /**
    * 提交后那一轮检查（上游 `NonModalCommitWorkflowHandler` 的 `pendingPostCommitChecks`，
-   * `:398-407`：`NON_MODAL_COMMIT_POSTPONE_SLOW_CHECKS` 开着时慢检查不挡提交、提交结束再跑）。
+   * `:400-406`（留痕：原写 `:398-407`，`:398` 是上一档的闭括号）：`NON_MODAL_COMMIT_POSTPONE_SLOW_CHECKS` 开着时慢检查不挡提交、提交结束再跑）。
    * 提交已经成功 ⇒ 结果只落到失败行与通知上（正文由 `postCommitCheckFailures` 说明"提交已完成"）。
    *
    * 跳过条件用 `willSkipPostCommitChecks()`（`:243`）：只有**提交后那一轮自己**失败过才不再跑，
@@ -308,7 +348,7 @@ export function createCommitChecks(deps: CommitChecksDeps) {
     setStatusText(RUNNING_CHECKS_TEXT, null)
     void act(async () => {
       try {
-        // 只跑检查 ⇒ 一条相位都不跳（`:337-340` 的 `!isOnlyRunCommitChecks` 前缀）。
+        // 只跑检查 ⇒ 一条相位都不跳（`:336-339` 的 `!isOnlyRunCommitChecks` 前缀）。
         const report = await collectCommitChecks(true, { early: false, modifications: false })
         // 用户按了取消（`cancelCommitChecks` 会 ++checksToken）：这一轮的结果不落地 ——
         // 上游 `ProgressIndicator.cancel()` 之后那个任务的结果同样不会被采纳。
@@ -322,7 +362,8 @@ export function createCommitChecks(deps: CommitChecksDeps) {
       checksBusy.value = false
       endChecksRound()
       setStatusText(null, null)
-      // 抛错 = 上游 `NonModalCommitChecksFailure.ERROR` 那一档 ⇒ FAILED（`:558-560`）；
+      // 抛错 = 上游 `NonModalCommitChecksFailure.ERROR` 那一档 ⇒ FAILED（`:558-562`；留痕：原写 `:558-560`，
+      // 那个赋值在 `:561`）；
       // FAILED 不在四个 willSkip 里 ⇒ 下一次提交照常跑检查（出错不代表"检查过了"）。
       checksResult.value = checksResultAfter({ failures: [], onlyRunChecks: true, error: true })
       throw failure

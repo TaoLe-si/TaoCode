@@ -10,6 +10,17 @@
 //
 // 逐适配器的提示只覆盖本仓示例配置里真实出现过的 kind（`TaoCode.dap.json.example`：
 // cppvsdbg / lldb-dap / fake），其余走通用文案 —— 不发明适配器不提供的字段。
+//
+// 「可用附加目标」那一句来自 `com.intellij.xdebugger.attachHostProvider` EP（消费面
+// `src/xdebuggerExtensionPoints.ts` 的 `attachHostSummary`）：内建登记本机一条，第三方插件
+// 可挂自己的 host（远程通道）—— 于是提示里列的是**当前真的能用**的目标，不是写死的文案。
+// 「可用调试器」那一句来自 `com.intellij.xdebugger.attachDebuggerProvider` EP（消费面
+// `xattachDebuggerProvidersFor`，按上游 `isAttachHostApplicable(host)` 过滤）：第三方注册一条
+// 适用于 `Local` 的提供者后，它的分组名会出现在这句提示里 —— 这是那条 EP 的**真实消费点**
+// （上游 `XAttachDebuggerProvider` 的完整流程还要 `getAvailableDebuggers(project, process)`
+// 去列进程上的调试器，本仓没有进程枚举通道，见 `dbg/attach` 族判词）。
+
+import { attachHostSummary, xattachDebuggerProvidersFor, type AttachHost } from './xdebuggerExtensionPoints.ts'
 
 export interface AttachSelector {
   kind: 'pid' | 'pipe'
@@ -30,7 +41,7 @@ export function parseAttachSelector(text: string): AttachSelector | null {
   return { kind: 'pipe', pipeName: trimmed }
 }
 
-/** 附加框下方的提示：这个标识会被怎么解释 + 远程附加的真实前提。 */
+/** 附加框下方的提示：这个标识会被怎么解释 + 远程附加的真实前提 + 当前可用目标/调试器。 */
 export function attachGuidance(kind: string): string {
   const adapter = kind.trim() || 'cppvsdbg'
   const local = adapter === 'cppvsdbg'
@@ -42,7 +53,30 @@ export function attachGuidance(kind: string): string {
         : adapter === 'debugpy'
           ? '数字 = 本机 PID；debugpy 的监听地址填 host:port。'
           : '数字 = 本机进程 PID；其它文本作为适配器约定的连接标识（pipeName / host:port）原样转交。'
-  return `${local} 远程附加：先在目标机启动调试适配器的服务端，把它的连接标识填进来 —— 通道由 TaoCode.dap.json 里配置的适配器提供；本仓没有 WSL/SSH 远程后端。`
+  // 可用目标：`com.intellij.xdebugger.attachHostProvider` EP 的消费面。一个贡献都没登记时为空串
+  // （与之前逐字相同）；第三方挂远程 host 时这里如实列出。
+  const targets = attachHostSummary()
+  const targetsText = targets === '（无）' ? '' : ` 可用目标：${targets}。`
+  // 可用调试器：`com.intellij.xdebugger.attachDebuggerProvider` EP 的消费面（按 host 过滤）。
+  // 一个提供者都没登记（或都不认本机通道）时为空串，与之前逐字相同。
+  const debuggers = availableLocalAttachDebuggers()
+  const debuggersText = debuggers.length ? ` 可用调试器：${debuggers.join('、')}。` : ''
+  return `${local} 远程附加：先在目标机启动调试适配器的服务端，把它的连接标识填进来 —— 通道由 TaoCode.dap.json 里配置的适配器提供；本仓没有 WSL/SSH 远程后端。${targetsText}${debuggersText}`
+}
+
+/**
+ * 适用本机通道（`Local`）的附加调试器分组名（上游 `XAttachDebuggerProvider.getPresentationGroup()`
+ * 的可移植面）。一个提供者都不认本机通道时是空表；坏提供者（`getGroupName` 抛错）不吞掉别的条目。
+ */
+export function availableLocalAttachDebuggers(host: AttachHost = 'Local'): string[] {
+  const out: string[] = []
+  for (const provider of xattachDebuggerProvidersFor(host)) {
+    try {
+      const name = provider.getGroupName?.() ?? provider.id
+      if (name && !out.includes(name)) out.push(name)
+    } catch { /* 容错：坏提供者不影响其余条目 */ }
+  }
+  return out
 }
 
 /** 未通过解析时的就地错误（和原实现的文案一致，补上 PID 0 的说明）。 */

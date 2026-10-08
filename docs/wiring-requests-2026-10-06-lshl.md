@@ -93,3 +93,16 @@ async function runSemanticTokens(): Promise<boolean> {
 那里写「本仓登记的类型是 `LspHoverResult { available, contents }`，**没有** range 那一格」——
 实际 native 已透传 range（`native/lsp_session.cpp:166-171`）。请把该段改成中性描述，避免下一个代理
 又照它提一遍 R5。**已自修的同款**：`src/hoverDocumentation.ts:12-24`（留痕写法可照抄）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1（语义 token 按特性缓存）** —— 目标 `src/components/CodeEditor.vue`（禁改）。需 CodeEditor owner。
+- **W2** —— `src/editorSemanticField.ts`（本 lane），依赖 W1，登记。
+- **W3（`src/docHoverContent.ts:31-34` 陈旧注释）** —— 本 lane 可改面，登记。
+
+结论：零接线（W1 转 CodeEditor owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（W1 转 CodeEditor owner）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

@@ -21,6 +21,7 @@
 //   · 整段管道**必须串行**：两轮并存时，后一轮会在前一轮"折好默认、还没恢复覆盖"的中间态上存档，
 //     把"用户展开过"记成"折着"（真机上就是这么丢的）。
 import type { EditorView } from '@codemirror/view'
+import { LOW_PRIORITY_QUIESCENCE_MS } from './lspHighlightingCache.ts'
 import { applyFoldPlan, candidatesOf, foldDefaultCollapsed, foldKinds, foldedAreasOf, localRegionFolds, mergeFoldRanges, navigationRange, setFoldingRanges, unfoldIntersecting } from './editorFolding.ts'
 import { captureFoldState, dropStaleFolds, flushFoldState, rememberCandidates, restorePlan, savedFoldState, signatureAt } from './editorFoldingState.ts'
 import type { LspFold } from './editorFolding'
@@ -39,7 +40,9 @@ export interface FoldingControllerDeps {
 }
 
 export function createFoldingController(deps: FoldingControllerDeps) {
-  const debounceMs = deps.debounceMs ?? 400
+  // 折叠属于上游 `LspHighlightingCache.kt:324-328` 点名在低优先级那一族的成员 ⇒ 去抖取同一档常量，
+  // 不在宿主里再写一个自定的毫秒数（原写 400，参考树里指不到任何机制）。
+  const debounceMs = deps.debounceMs ?? LOW_PRIORITY_QUIESCENCE_MS
   let timer: number | undefined
   let busy = false
   let again = false

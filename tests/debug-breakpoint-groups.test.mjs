@@ -266,6 +266,10 @@ test('行号锚点：「移至组」族引用的上游行逐字对得上参考�
   const at = (path, n) => readFileSync(join(REF, path), 'utf8').split('\n')[n - 1].trim()
   const pins = [
     [dialog, 324, 'res.add(new MoveToGroupAction(null));'],
+    // 子菜单里「现有组名」那一段的真实区间（dap 系先写 `:332`/`:336-341`、dap3 写 `:325-335`，
+    // 实测：`:323` 起 res、`:325` 是空行、stream 在 `:326`、`.sorted()` 才在 `:332`）。
+    [dialog, 326, 'myBreakpointItems.stream()'],
+    [dialog, 332, '.sorted()'],
     [dialog, 337, 'res.add(new Separator());'],
     [dialog, 338, 'res.add(new MoveToGroupAction());'],
     [dialog, 542, 'public void actionPerformed(@NotNull AnActionEvent e) {'],
@@ -285,4 +289,56 @@ test('行号锚点：「移至组」族引用的上游行逐字对得上参考�
     assert.match(text, /:338/, '「新建…」那一项的行号没引用')
   }
   assert.match(view, /XBreakpointCustomGroupingRule\.kt:24/, '空名 = 无组 那条依据没引用')
+  // dap4 补：`.vue` 模板注释里那一格（组节点的「移至组」顺序说明）之前一直没跟着订正，
+  // 是这次收尾唯一还留在盘上的假行号 —— 原写 `<无组>` 在 `:332`、现有组名 `:336-341`。
+  assert.match(view, /在最前（`:324`/, '模板那格的 `<无组>` 行号没订正到实测的 :324')
+  assert.doesNotMatch(view, /在最前（`:332`）/, '模板那格又写回 `<无组>` 在 :332（那是 `.sorted()`）')
+  assert.doesNotMatch(view, /distinct\+sorted，`:336-341`/, '现有组名那段又写回 :336-341（实测是 :326-335）')
+  // 同一个区间在本仓必须只有一个写法：`breakpointGroups.ts` 里 dap3 订正成 `:325-335`，dap4 重数是 `:326-335`。
+  for (const text of [groups, view]) {
+    assert.match(text, /:326-335/, '现有组名那段没写成实测的 :326-335')
+    assert.doesNotMatch(text, /上游 `:325-335`/, '「移至组」清单的依据又写回 :325（那是空行）')
+  }
+})
+
+// dapfix：上一轮（dap4）只订正了「移至组」那一族，本文件的另外两条**假路径/假行号**还留在盘上：
+//   ① 「设为默认写进管理器」指到 `XBreakpointManagerImpl.java:779` —— 那是 getter，写的是 `:783`；
+//   ② 组实体 `XBreakpointCustomGroup` 只写裸文件名，紧跟上一行的 `platform/xdebugger-api/.../ui/` 之后，
+//      而该目录里根本没有这个文件（真身在 xdebugger-impl 的 `.../breakpoints/ui/grouping/`）。
+// 下面这条把两处都逐行数死，并要求仓里每一处 `XBreakpointCustomGroup.java` 都带全路径。
+test('行号锚点：默认组的**写口**与组实体的**全路径**都指对（dapfix 订正的两处）', () => {
+  if (!existsSync(REF)) return
+  const at = (path, n) => readFileSync(join(REF, path), 'utf8').split('\n')[n - 1].trim()
+  const MANAGER = 'platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointManagerImpl.java'
+  const API_GROUP_DIR = 'platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui'
+  const IMPL_GROUP = 'platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointCustomGroup.java'
+  const pins = [
+    // 读默认组 / 写默认组是两个方法，`breakpointGroups.ts` 那句「写进 XBreakpointManager」必须指后者。
+    [MANAGER, 779, 'public @Nullable String getDefaultGroup() {'],
+    [MANAGER, 783, 'public void setDefaultGroup(@Nullable String defaultGroup) {'],
+    // 新断点自动落进默认组那两处（本文件 `:23-24` 引的就是它们）。
+    [MANAGER, 248, 'state.setGroup(myDefaultGroup);'],
+    [MANAGER, 421, 'state.setGroup(myDefaultGroup);'],
+    // 组抽象基类（xdebugger-api）与组实体（xdebugger-impl 的 grouping 那一格）不同目录。
+    ['platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui/XBreakpointGroup.java', 10,
+      'public abstract class XBreakpointGroup implements Comparable<XBreakpointGroup> {'],
+    [IMPL_GROUP, 16, 'public class XBreakpointCustomGroup extends XBreakpointGroup {'],
+    [IMPL_GROUP, 35, 'public boolean isDefault() {'],
+    [IMPL_GROUP, 38, '}'],
+  ]
+  for (const [path, n, text] of pins) assert.equal(at(path, n), text, `${path.split('/').pop()}:${n} 不是那一行`)
+
+  // 反证「假路径」这一半：api 那一格里确实没有这个文件 ⇒ 裸文件名的旧写法必然指空。
+  assert.equal(existsSync(join(REF, API_GROUP_DIR, 'XBreakpointCustomGroup.java')), false,
+    '参考树里 xdebugger-api 的 ui/ 那一格出现了 XBreakpointCustomGroup.java ⇒ 本条订正的前提变了，请重新核')
+
+  const groups = readFileSync('src/breakpointGroups.ts', 'utf8')
+  assert.match(groups, /XBreakpointManagerImpl\.java:783/, '默认组的写口没钉在实测的 :783')
+  assert.doesNotMatch(groups, /XBreakpointManagerImpl\.java:779/, '写口又指回 :779（那是 getDefaultGroup 读口）')
+  assert.match(groups, /platform\/xdebugger-impl\/ui\/src\/com\/intellij\/xdebugger\/impl\/breakpoints\/ui\/grouping\/XBreakpointCustomGroup\.java/,
+    '组实体没写成实测的全路径')
+  // 每一条 `XBreakpointCustomGroup.java` 都必须带 grouping/ 前缀 —— 裸文件名读起来会落到上一行的 api 目录。
+  for (const matched of groups.matchAll(/(grouping\/)?XBreakpointCustomGroup\.java/g)) {
+    assert.ok(matched[1], '还有裸写的 XBreakpointCustomGroup.java（会被读成在 xdebugger-api 那一格）')
+  }
 })

@@ -10,9 +10,17 @@
 //   · 原始命令行（输入非空即给一行 `> 运行命令: …`，App 走 `runExternalTool` 那条 run.start 通道）。
 // 历史存 `localStorage`（与本仓其它应用级用户数据同族）。
 //
-// **明确不做**（上游有、本子集没有）：Gradle/Maven 任务作为一等候选（上游是
-// `RunAnythingProvider` 插件点，本仓运行面板已有任务树）、上下文目录选择（`RunAnythingContext`）、
-// 图标/快捷键提示列。
+// **明确不做**（上游有、本子集没有）：Gradle/Maven 任务作为一等候选（由第三方 RunAnythingProvider
+// 按 EP 贡献，见下）、图标/快捷键提示列。
+//
+// **2026-10-06 本 lane 补**：`RunAnythingProvider` 插件点已有 EP 宿主 ——
+// EP id `com.intellij.runAnything.executionProvider`（逐字取自上游
+// `platform/lang-impl/resources/intellij.platform.lang.impl.xml:243` 的
+// `qualifiedName="com.intellij.runAnything.executionProvider"`，
+// interface `com.intellij.ide.actions.runAnything.activity.RunAnythingProvider` dynamic="true"）。
+// 运行配置与命令行两条是 bundled 贡献者，第三方按同一 EP id 挂的 provider 由
+// `buildRunAnythingRows()`（对话框的真实消费点）合并进候选。
+import { APPLICATION_SCOPE, EXTENSIONS, type ExtensionHandle, type RegisterExtensionOptions } from './extensionPoints.ts'
 
 export type RunAnythingKind = 'config' | 'command' | 'history' | 'more'
 
@@ -130,6 +138,72 @@ export interface RunAnythingRowsOptions {
   expanded?: readonly RunAnythingGroupId[]
 }
 
+// ── `RunAnythingProvider` 扩展点宿主（上游 `com.intellij.runAnything.executionProvider`） ──
+
+/** EP id（逐字取自上游 `intellij.platform.lang.impl.xml:243` 的 `qualifiedName`）。 */
+export const RUN_ANYTHING_PROVIDER_EP = 'com.intellij.runAnything.executionProvider'
+
+/** provider 取值时的上下文（上游 `RunAnythingProvider.getValues(context, pattern)` 的可移植子集）。 */
+export interface RunAnythingProviderContext {
+  /** 当前运行配置（上游是 `RunManager` 里的配置）。 */
+  configs: Array<{ name: string; type?: string }>
+  /** 原始查询串（含 `>` 前缀）。 */
+  query: string
+  /** 去掉 `>` 前缀的命令行。 */
+  command: string
+  /** 历史条目。 */
+  history: RunAnythingCandidate[]
+}
+
+/**
+ * 一个候选供给方（上游 `RunAnythingProvider`/`RunAnythingActivityProvider` 的可移植子集）：
+ * 由它决定自己产出的候选落在哪个组、叫什么。命令名/配置名由 provider 自报。
+ */
+export interface RunAnythingProvider {
+  /** 贡献 id（上游 EP 无 id，这里是本仓宿主要求的键）。 */
+  id: string
+  /** 产出候选落在哪个组。 */
+  group: RunAnythingGroupId
+  /** 产出候选（上游 `getValues`）。 */
+  getValues: (context: RunAnythingProviderContext) => RunAnythingCandidate[]
+}
+
+/** 声明 EP（幂等）。 */
+export function declareRunAnythingProviderExtensionPoint(): void {
+  EXTENSIONS.declareExtensionPoint({ id: RUN_ANYTHING_PROVIDER_EP, name: 'Run Anything 候选供给方', scope: APPLICATION_SCOPE, dynamic: true })
+}
+
+/** 插件贡献一个候选供给方（等价于上游 plugin.xml 的一条 EP 贡献）。 */
+export function registerRunAnythingProvider(provider: RunAnythingProvider, options: RegisterExtensionOptions = {}): ExtensionHandle {
+  return EXTENSIONS.registerExtension(RUN_ANYTHING_PROVIDER_EP, provider.id, provider, options)
+}
+
+/** 注销一条候选供给方贡献。 */
+export function unregisterRunAnythingProvider(id: string): boolean {
+  return EXTENSIONS.unregisterExtension(RUN_ANYTHING_PROVIDER_EP, id)
+}
+
+/** 当前 EP 上的全部供给方（bundled + 第三方）。 */
+export function runAnythingProviders(scope: string = APPLICATION_SCOPE): RunAnythingProvider[] {
+  return EXTENSIONS.extensionsOf<RunAnythingProvider>(RUN_ANYTHING_PROVIDER_EP, scope)
+}
+
+/** bundled 运行配置供给方（上游 `RunAnythingRunConfigurationProvider`）。 */
+export const RUN_CONFIGURATION_PROVIDER: RunAnythingProvider = {
+  id: 'run-configurations',
+  group: 'general',
+  getValues: context => context.configs.map(configCandidate),
+}
+
+/** bundled 命令行供给方（上游 `RunAnythingCommandLineProvider`）：有命令才给一行。 */
+export const COMMAND_LINE_PROVIDER: RunAnythingProvider = {
+  id: 'command-line',
+  group: 'command',
+  getValues: context => context.command
+    ? [{ kind: 'command', name: context.command, detail: '在项目根目录运行命令' }]
+    : [],
+}
+
 /**
  * 装配候选并分组。分组顺序与上游 `RunAnythingSearchListModel` 一致：
  * 最近（`RunAnythingRecentGroup`）→ 一般（`RunAnythingGeneralGroup`）→ 命令行；
@@ -142,12 +216,13 @@ export function buildRunAnythingRows(
   query: string,
   history: RunAnythingCandidate[] = loadRunAnythingHistory(),
   options: RunAnythingRowsOptions = {},
+  providers: readonly RunAnythingProvider[] = runAnythingProviders(),
 ): RunAnythingRow[] {
   const text = query.trim()
   const expanded = new Set(options.expanded ?? [])
-  const configsList = configs.map(configCandidate)
   const recent: RunAnythingRow[] = []
   const general: RunAnythingRow[] = []
+  const commandRows: RunAnythingRow[] = []
   const needle = text.toLowerCase()
   const scoreOf = (name: string): number => {
     if (!needle) return 0
@@ -169,19 +244,24 @@ export function buildRunAnythingRows(
       sourceKind: entry.kind === 'command' ? 'command' : 'config',
     })
   }
-  for (const config of configsList) {
-    const score = scoreOf(config.name)
-    if (score < 0) continue
-    general.push({ ...config, score, indices: [], group: 'general' })
+  // 候选来自 EP 上的供给方（bundled：运行配置 + 命令行；第三方按同一 EP id 挂）。
+  const context: RunAnythingProviderContext = { configs, query: text, command: commandFromQuery(text), history }
+  for (const provider of providers) {
+    const isCommand = provider.group === 'command'
+    for (const candidate of provider.getValues(context)) {
+      // 命令行那一档不过查询过滤（它本身就是把输入当命令跑，上游同口径）。
+      const score = isCommand ? 0 : scoreOf(candidate.name)
+      if (score < 0) continue
+      const row: RunAnythingRow = { ...candidate, score, indices: [], group: provider.group }
+      if (provider.group === 'general') general.push(row)
+      else if (provider.group === 'command') commandRows.push(row)
+      else recent.push({ ...row, kind: 'history', sourceKind: candidate.kind === 'command' ? 'command' : 'config' })
+    }
   }
   const rank = (rows: RunAnythingRow[]) => rows.sort((left, right) =>
     right.score - left.score || left.name.length - right.name.length || left.name.localeCompare(right.name))
   rank(recent)
   rank(general)
-  const command = commandFromQuery(text)
-  const commandRows: RunAnythingRow[] = command
-    ? [{ kind: 'command', name: command, detail: '在项目根目录运行命令', score: 0, indices: [], group: 'command' }]
-    : []
   return dedupe([
     ...capGroup('recent', recent, expanded.has('recent')),
     ...capGroup('general', general, expanded.has('general')),
@@ -201,3 +281,9 @@ function dedupe(rows: RunAnythingRow[]): RunAnythingRow[] {
   }
   return out
 }
+
+// bundled：运行配置与命令行两条供给方按上游 plugin.xml 的 `<com.intellij.runAnything.executionProvider/>`
+// 形态登记在 EP 上；第三方按同一 EP id 挂的 provider 由 `buildRunAnythingRows` 合并。
+declareRunAnythingProviderExtensionPoint()
+for (const provider of [RUN_CONFIGURATION_PROVIDER, COMMAND_LINE_PROVIDER])
+  EXTENSIONS.registerExtension(RUN_ANYTHING_PROVIDER_EP, provider.id, provider, { source: 'bundled' })

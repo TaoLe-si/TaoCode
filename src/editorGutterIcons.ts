@@ -8,12 +8,24 @@ import { EditorView, GutterMarker, ViewPlugin, gutter } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 import { RangeSet, StateEffect, StateField } from '@codemirror/state'
 import { gutterIconAppearance, type GutterIcon } from './gutterIcons.ts'
+import { ideaStatusIconSvg } from './components/icons/ideaIconData.ts'
 
 export type { GutterIcon } from './gutterIcons'
 
-/** `GutterIconRenderer.getIcon()` 的等价物：一档一个内联 SVG。 */
+/** IDEA 装订线图标的显示边长（上游 `AllIcons.General.Error` 等是 16x16 SVG）。 */
+const GUTTER_ICON_SIZE = 16
+
+/**
+ * `GutterIconRenderer.getIcon()` 的等价物：一档一个内联 SVG。
+ *
+ * 真机走 IDEA 的**原样图标**（`IDEA_ICON_STATUS`，出处 `AllIcons.java:570/679/589`）；
+ * 只有拿不到那份数据时才退回下面的几何记号 —— 那是给"无 DOM 的测试环境"和
+ * "图标名拼错"留的降级路径，不是设计形状。
+ */
 function iconSvg(kind: GutterIcon['kind']): string {
-  const { shape, color } = gutterIconAppearance(kind)
+  const { shape, color, ideaIcon } = gutterIconAppearance(kind)
+  const idea = ideaStatusIconSvg(ideaIcon, color, GUTTER_ICON_SIZE)
+  if (idea) return idea
   if (shape === 'triangle') return `<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M6 1.6 11 10.4H1z" fill="${color}"/></svg>`
   if (shape === 'square') return `<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><rect x="1.8" y="1.8" width="8.4" height="8.4" rx="1.4" fill="${color}"/></svg>`
   if (shape === 'diamond') return `<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M6 1.4 10.6 6 6 10.6 1.4 6z" fill="${color}"/></svg>`

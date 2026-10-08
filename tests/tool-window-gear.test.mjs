@@ -25,9 +25,11 @@ function knownActionIds() {
 
 test('齿轮引用表就是本仓真能接住的那几条（顺序即上游 GearActionGroup）', () => {
   assert.deepEqual(TOOL_WINDOW_GEAR_SPEC.map(entry => entry.action),
-    ['usage.viewOptions', 'window.speedSearch', 'window.closeAllTabs', 'window.toggleContentUiType', 'window.resizeToolWindow', 'window.removeStripeButton'],
-    'additionalGearActions 在最前（`ToolWindowImpl.kt:859-868`）、SpeedSearch 次之（:869）、'
-    + 'RemoveStripeButton 在最后（:889），中间三条照 :872-887')
+    ['usage.viewOptions', 'usage.groupBy', 'window.speedSearch', 'window.closeAllTabs', 'window.toggleContentUiType', 'window.resizeToolWindow', 'window.removeStripeButton'],
+    'additionalGearActions 在最前（`ToolWindowImpl.kt:859-868`）—— 本仓把用法视图的两组都放这一档：'
+    + '「视图选项」= `UsageViewContentManagerImpl.java:114-116` 的 gearActions，'
+    + '「分组」= `UsageViewImpl.java:1089-1098` 的弹出组（上游在工具条上，本仓引用面板没有那一层，落点见 `src/usageViewGear.ts`）；'
+    + 'SpeedSearch 次之（:869）、RemoveStripeButton 在最后（:889），中间三条照 :872-887')
   const known = knownActionIds()
   // `window.speedSearch` 不在菜单索引里（上游 `PlatformActions.xml:146` 只是顶层 `<reference>`），
   // 它由宿主按"焦点处有没有可搜的列表"提供 —— 所以只核**引用型**那几条。
@@ -99,8 +101,12 @@ test('接线：齿轮行由 menuUi 解析、标题栏只负责渲染与回抛', 
   assert.match(shared, /class="menu-button tool-menu-item is-child"/, '组行成员要缩进一档，和父行区分开')
 
   const app = read('src/App.vue')
-  // 左右两个 dock 共用同一个头部组件，两处都必须拿到同一份行。
-  assert.equal((app.match(/:extra-rows="toolWindowGearRows"/g) ?? []).length, 2)
+  // 左右两个 dock 共用同一个头部组件，但左右分栏后**各有各的窗口** ⇒ 各拿各的行
+  // （原先右侧也读左栏那份 toolWindowGearRows，齿轮里出现的是左栏视图的动作 —— 耦合 bug）。
+  assert.equal((app.match(/:extra-rows="toolWindowGearRows"/g) ?? []).length, 1)
+  assert.match(app, /:extra-rows="rightToolWindowGearRows"/, '右 dock 的齿轮要拿右栏自己那份行')
+  assert.match(read('src/menuUi.ts'), /rightToolWindowGearRows = computed\(\(\) => toolWindowGearLayout\(findMenuRow, undefined, false, \(rightGearHostRows \?\? gearHostRows\)\(\)\)\)/,
+    '右栏那份同样走动作索引 + 自己的宿主行（rightGearHostRows 跟着 rightView 算）')
   assert.match(app, /@pick-extra="pickEditorPopup\(\$event\); toolMenu = null"/,
     '齿轮项的执行必须复用 runAction 那条链（可用性提示 + 宏记录都在那里），并关掉菜单')
   // 底部 dock 的标题条以前没有齿轮：内容动作只能从主菜单进，而同样的动作侧栏一点就开。

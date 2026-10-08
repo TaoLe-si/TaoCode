@@ -5,6 +5,8 @@
 import { computed, nextTick, ref, watch, type Ref } from 'vue'
 import { request, type PluginInfo, type ProjectSettings, type Workspace } from './bridge.ts'
 import { rankCommands } from './commandSearch.ts'
+import { commentStyleFor } from './commentStyles.ts'
+import { surroundRowForFile } from './customFoldingSurround.ts'
 import { surroundTemplates, type SurroundTemplate } from './surround.ts'
 import { candidates as templateCandidates, effectiveTemplates, expand as expandTemplateAt,
          defaultTemplateSettings, type Template } from './templates.ts'
@@ -30,7 +32,18 @@ export function createSurroundTemplates(deps: SurroundTemplatesDeps) {
   const surroundQuery = ref('')
   const surroundIndex = ref(0)
   const surroundInput = ref<HTMLInputElement>()
-  const surroundChoices = computed(() => rankCommands(surroundTemplates, surroundQuery.value))
+  // 折叠区域那几行按**当前文件自己的注释词法**重包（`CustomFoldingSurroundDescriptor.java:275-289`
+  // 用的是 `LanguageCommenters.forLanguage(...)`；本仓没有 PSI，按扩展名查 `src/commentStyles.ts`
+  // 那张表 —— 与已经落地的 live-template comment 宏同一个口径，见 `src/templateMacros.ts`）。
+  // 这个文件包不出可用标记的那些行**从列表里摘掉**（上游 `:52-56`：这门语言没有 `Commenter` 时
+  // `getElementsToSurround` 返回空数组 ⇒ 一项都不给），所以这里的行数只会 ≤ 静态表。
+  const surroundChoices = computed(() => {
+    const style = commentStyleFor(undefined, active.value?.path ?? '')
+    const rows = surroundTemplates
+      .map(row => surroundRowForFile(row, style))
+      .filter((row): row is SurroundTemplate => row !== null)
+    return rankCommands(rows, surroundQuery.value)
+  })
   function openSurround() {
     if (!active.value) { deps.notify('请先打开一个文件。', true); return }
     menu.value = null

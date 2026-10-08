@@ -52,8 +52,17 @@ Host& Session::ensure(const std::string& language) {
         // take Session::mutex_ (Session->Host is the other lock order) and it must
         // never throw: a malformed payload escaping here would terminate the process.
         const std::string path = uri_to_relative(uri, root_snapshot);
-        Json diagnostics = params.contains("diagnostics") ? shape_diagnostics(params.at("diagnostics")) : Json::array();
-        if (on_diagnostics_) on_diagnostics_(path, std::move(diagnostics));
+        // 整批的 `version` 与条目一起交出去：它是 `PublishDiagnosticsParams` 上的兄弟字段，
+        // `shape_diagnostics` 那一层（条目数组）结构上拿不到 —— 之前正是这一行把它丢掉的。
+        // 这里**不**按版本拒收：上游的分工是客户端传输原样转发、显示缓存那一侧按
+        // 「已发布 vs 当前文档」比版本再丢（`LspPublishDiagnosticsCache.kt:56-66`，本仓对应
+        // `src/lspHighlightingCache.ts` 的 `acceptsPublishedVersion()`）。所以递减/乱序的批次
+        // 也照样透传，让那道闸拿到真的号去拒；宿主自己丢就等于把闸门重新饿死。
+        const PublishedBatch batch = shape_publish_params(params, [root_snapshot](const std::string& target) {
+            return uri_to_relative(target, root_snapshot);
+        });
+        if (on_diagnostics_versioned_) on_diagnostics_versioned_(path, batch.items, batch.version);
+        else if (on_diagnostics_) on_diagnostics_(path, std::move(batch.items));
     });
 
     // LSP `$/progress` → 一条带百分比的后台任务（上游 LspServerNotificationsHandlerImpl.kt:257-328：
@@ -80,12 +89,15 @@ Host& Session::ensure(const std::string& language) {
                       {"cancellable", value.value("cancellable", false)}});
     });
 
-    // 服务器**主动**发来的那几种消息都走这一条出口：`window/showMessage` 与 `window/logMessage`
-    // 是通知，`window/showMessageRequest` 与 `workspace/…/refresh` 是请求 —— 客户端已在参数里
-    // 补了 `method`（见 native/lsp.cpp 的 tag_server_message）。走的是同一条 progress 出口
-    // （前端按 `event` 分派、再按 `method` 分处置），上游对这四条的处置也各不相同：
+    // 服务器**主动**发来的那几种消息与请求都走这一条出口：`window/showMessage` 与 `window/logMessage`
+    // 是通知，`window/showMessageRequest`、`workspace/…/refresh` 与本轮补上的三条动态注册/进度申请
+    // （`client/registerCapability`、`client/unregisterCapability`、`window/workDoneProgress/create`）
+    // 是请求 —— 客户端已在参数里补了 `method`（见 native/lsp.cpp 的 tag_server_message），
+    // 请求的回包在 native 那一头就地给（这几条协议返回的都是 void），这里只负责让界面看得见内容。
+    // 走的是同一条 progress 出口（前端按 `event` 分派、再按 `method` 分处置），上游对这几条的处置也各不相同：
     // `LspServerNotificationsHandlerImpl.kt:341-368`（refresh）、`:377-383`（showMessageRequest）、
-    // `:385-390`（showMessage）、`:396-404`（logMessage 只进日志，Error/Warning 才弹）。
+    // `:385-391`（showMessage）、`:393-405`（logMessage 只进日志，Error/Warning 才弹）、
+    // `:119-123`/`:125-128`（动态注册记账）、`:255`（同意进度申请）。
     host->set_server_message([this, language](Json params) {
         if (!on_progress_ || !params.is_object()) return;
         const auto text = string_at(params, "message");
@@ -100,6 +112,14 @@ Host& Session::ensure(const std::string& language) {
         // `window/showMessageRequest` 的按钮标题（协议的 `actions: MessageActionItem[]`）原样带上，
         // 由前端决定怎么显示（上游是通知上的那一排按钮；本仓的按钮还没接线，见请求文档）。
         if (params.contains("actions") && params.at("actions").is_array()) payload["actions"] = params.at("actions");
+        // 服务器**主动发起**的那三条请求（`client/registerCapability`、`client/unregisterCapability`、
+        // `window/workDoneProgress/create`）的参数形状不是 `{type,message}`，而是 `registrations` /
+        // `unregisterations` / `token`。回包由 `native/lsp.cpp` 就地给（协议返回的都是 void），
+        // 但**内容不能丢**：动态注册要在这里记账、并按注册的方法作废那一族缓存
+        // （上游 `LspServerNotificationsHandlerImpl.kt:119-123` + `:130-182` 做的正是这两件事），
+        // 丢了就又是「声明了 dynamicRegistration、服务器注册完客户端一无所知」。
+        for (const char* key : {"registrations", "unregisterations", "token"})
+            if (params.contains(key)) payload[key] = params.at(key);
         on_progress_(std::move(payload));
     });
 
@@ -157,7 +177,12 @@ Host& Session::ensure(const std::string& language) {
                 // tagSupport：声明客户端认得 DiagnosticTag 1/2（Unnecessary / Deprecated），服务器
                 // 才会在推送里带上 tags。能力表要与实际处理一致 —— 下面 `shape_diagnostics` 确实把
                 // tags 透传了；pull 那侧早就声明了同一组（见下面 `diagnostic.tagSupport`）。
-                {"publishDiagnostics", {{"relatedInformation", false}, {"versionSupport", false},
+                // versionSupport 本轮由 false 翻成 true：`false` 是对服务器说「我不看 params.version」，
+                // 于是它有权不发，前端那道按版本拒收的闸（`src/lspHighlightingCache.ts`
+                // 的 `acceptsPublishedVersion()`，上游 `LspPublishDiagnosticsCache.kt:56-66`）
+                // 就永远拿不到数据。现在 `shape_publish_params` 真的把它取出来、
+                // `VersionedDiagnosticsSink` 真的把它交出去了，声明才与处理一致。
+                {"publishDiagnostics", {{"relatedInformation", true}, {"versionSupport", true},
                                         {"dataSupport", true},
                                         {"tagSupport", {{"valueSet", Json::array({1, 2})}}}}},
                 // Refactor + symbol capabilities: declaring hierarchical symbol
@@ -250,10 +275,11 @@ Host& Session::ensure(const std::string& language) {
                                     {"overlappingTokenSupport", false},
                                     {"multilineTokenSupport", false}}},
                 // LSP `textDocument/diagnostic`（**pull 模型**，对应 IDEA 的批处理 Inspection）：
-                // 声明后服务器可以只在客户端来问时给诊断；整形只用 range/message/severity/source，
-                // 所以相关/描述/data 三项如实声明为不支持。
+                // 声明后服务器可以只在客户端来问时给诊断；整形用 range/message/severity/source，
+                // 外加 `relatedInformation`（折成宿主形状，见 `shape_diagnostics`），
+                // 所以这三项如实声明支持；`codeDescription`/`data` 仍不处理，声明为 false。
                 {"diagnostic", {{"dynamicRegistration", true},
-                                {"relatedInformation", false},
+                                {"relatedInformation", true},
                                 {"tagSupport", {{"valueSet", Json::array({1, 2})}}},
                                 {"codeDescriptionSupport", false},
                                 {"dataSupport", false}}},

@@ -1,7 +1,9 @@
 // `src/stickyLines.ts` 的**层数**与作用域白名单（`lp/sticky-lines`）：
 //   · 只把作用域符号当粘性行（字段/变量/常量不占位置 —— IDEA 的语言 provider 也是这个口径）；
 //   · 同一行起头的多条只留最内层那条（App.vue 用 startLine 当 key，撞 key 会让两行跳同一处）；
-//   · `stickyLinesLimit` 是**层数上限**，取最内层 N 条（外层在上）。
+//   · `stickyLinesLimit` 是**层数上限**，超出时留**最外** N 条、裁掉最内的（外层在上；
+//     与视口那一档同向，也是上游 `VisualStickyLines.kt:144-148` 排满即 `break` 的方向）；
+//   · 多分栏时上面两刀（provider 白名单、层数上限）**对每块面板各生效一次**，不是几块合起来算一份。
 //
 // 用真实 Vue 响应式（`ref`/`computed` 在 Node 里可用）。
 
@@ -10,6 +12,7 @@ import assert from 'node:assert/strict'
 import { ref } from 'vue'
 
 import { createStickyLines, isScopeSymbol, stickyScopes } from '../src/stickyLines.ts'
+import { stickyVisualLines } from '../src/stickyLineViewport.ts'
 
 const symbol = (name, kind, startLine, endLine) => ({ name, kind, detail: '', startLine, startChar: 0, endLine, endChar: 0 })
 
@@ -55,12 +58,15 @@ test('同一行起头的多条只留最内层（App.vue 的 key 不会撞）', (
     '同行起头、区间不同：留最内层那条（endLine 更小）')
 })
 
-test('层数上限取最内层 N 条；关掉开关或极限为 0 时为空', () => {
+test('层数上限留最外 N 条（与视口那一档同向）；关掉开关或极限为 0 时为空', () => {
   const outline = ref(OUTLINE)
   const settings = ref({ showStickyLines: true, stickyLinesLimit: 2 })
   let line = 5
   const { stickyLines } = createStickyLines({ editorSettings: settings, outline, currentLine: () => line })
-  assert.deepEqual(stickyLines.value.map(entry => entry.name), ['load', 'Inner'], '上限 2 = 最内两层')
+  // stickyScopes 给 ['Config','load','Inner']（外层在前）；上限 2 ⇒ 留最外两条、裁掉最内的 Inner。
+  // 上游 `VisualStickyLines.kt:144-148` 排满 lineLimit 即 break，候选按 `VisualStickyLine.kt:21-27`
+  // 的 primaryLine 升序（外层在前）⇒ 被裁的是最内那一条；与视口那一档（stickyVisualLines 的早停）同向。
+  assert.deepEqual(stickyLines.value.map(entry => entry.name), ['Config', 'load'], '上限 2 = 最外两层')
   settings.value = { showStickyLines: true, stickyLinesLimit: 5 }
   assert.deepEqual(stickyLines.value.map(entry => entry.name), ['Config', 'load', 'Inner'])
   settings.value = { showStickyLines: false, stickyLinesLimit: 5 }
@@ -89,4 +95,55 @@ test('给了可视区顶行时，起始行还看得见的那一层不再重复�
     '两层的起始行都在顶行之上 ⇒ 都钉')
   assert.deepEqual(stickyScopes(scopes, 15, 'java', 1).map(entry => entry.name), [],
     '一行都没滚出去 ⇒ 一条都不钉')
+})
+
+// 两条路径的裁剪方向必须一致：宿主没透面板度量时走退化路径（按光标行），透了就走视口路径
+// （`stickyVisualLines`）。同一份结构、同一个 `stickyLinesLimit`，两边留的必须是同一批层 ——
+// 上游只有「排满 lineLimit 即 break、裁掉最内的」这一种（`VisualStickyLines.kt:144-148`），
+// 两条路反向 = 缺陷。这里用三层都够宽（>=5 行）的嵌套，绕开 min-width 与去重的干扰，只比裁剪方向。
+test('limit 小于层数时，退化路径与视口路径留的是同一批最外层（裁剪方向不许两路相反）', () => {
+  const wide = [
+    { name: 'Outer', kind: 5, startLine: 0, endLine: 100 },
+    { name: 'Mid', kind: 6, startLine: 10, endLine: 90 },
+    { name: 'Inner', kind: 6, startLine: 20, endLine: 80 },
+  ]
+  const settings = ref({ showStickyLines: true, stickyLinesLimit: 2 })
+  const { stickyLines } = createStickyLines({ editorSettings: settings, outline: ref(wide), currentLine: () => 50 })
+  assert.deepEqual(stickyLines.value.map(entry => entry.name), ['Outer', 'Mid'], '退化路径留最外两条')
+  // 顶行 60（1 基）在三层起始行之下 ⇒ 三层都算「已滚出」；窗口/相交/宽度都不裁它们，只剩上限那一刀。
+  const viaView = stickyVisualLines(wide, { id: 'pane', firstVisibleLine: 60 }, 2)
+  assert.deepEqual(viaView.map(entry => entry.name), ['Outer', 'Mid'], '视口路径也留最外两条 —— 两条路同向')
+})
+
+// 多分栏从这一层往上的每一刀都要**对每块面板各生效一次**，不是几块合起来算一份
+// （上游：层挂在文档的模型上 `StickyLinesModelImpl.java:93-100`，面板与判据挂在每个编辑器上
+// `StickyLinesManager.kt:15-34`、`:86-99`）。这里钉的是 `createStickyLines` 的 `views` 出口
+// 与 provider 白名单/层数上限的先后：白名单在前（两块面板看到的是同一份过滤后的候选），
+// 上限在最后（每块各自裁到 limit 条）。
+test('多分栏：provider 白名单与层数上限对每块面板各自生效', () => {
+  const scopes = [
+    { name: 'Config', kind: 5, startLine: 0, endLine: 60 },
+    { name: 'count', kind: 8, startLine: 10, endLine: 20 },   // 够宽，但字段不是作用域 ⇒ 任何一块都不该看到它
+    { name: 'load', kind: 6, startLine: 14, endLine: 50 },
+    { name: 'deep', kind: 6, startLine: 30, endLine: 45 },
+  ]
+  const views = [{ id: 'left', firstVisibleLine: 40 }, { id: 'right', firstVisibleLine: 40 }]
+  const settings = ref({ showStickyLines: true, stickyLinesLimit: 1 })
+  const { stickyLinesByView } = createStickyLines({
+    editorSettings: settings, outline: ref(scopes), currentLine: () => 41, views: () => views,
+  })
+  assert.deepEqual(stickyLinesByView.value.get('left').map(entry => entry.name), ['Config'])
+  assert.deepEqual(stickyLinesByView.value.get('right').map(entry => entry.name), ['Config'],
+    '上限 1 ⇒ 每块各自只留最外那条（合起来两行，不是一块面板的两行）')
+  settings.value = { showStickyLines: true, stickyLinesLimit: 3 }
+  assert.deepEqual(stickyLinesByView.value.get('left').map(entry => entry.name), ['Config', 'load', 'deep'],
+    '抬到 3 ⇒ 每块各自拿到三层；字段 count 始终不在（白名单在每块面板之前都过一遍）')
+  // 闸门那一条对**两份出口是同一条**：全局关掉 / 这一语言关掉 ⇒ 一块面板的那份都没有（不画半块面板）。
+  const closed = createStickyLines({
+    editorSettings: ref({ showStickyLines: true, stickyLinesLimit: 3 }),
+    outline: ref(scopes), currentLine: () => 41, views: () => views, language: () => 'java',
+    stickyLanguages: () => ({ java: false }),
+  })
+  assert.equal(closed.stickyLinesByView.value.size, 0, '按语言那一档同样管住 views 那份出口')
+  assert.deepEqual(closed.stickyLines.value, [], '两份出口同时为空')
 })

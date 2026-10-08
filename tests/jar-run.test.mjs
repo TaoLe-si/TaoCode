@@ -8,6 +8,7 @@ import {
   jarRunConfigProblem, jarRunConfigWorkingDirectory, jarTemplateConfiguration, jarValidation, JAR_RUN_CONFIG_TYPE_ID, splitParameters,
 } from '../src/jarRun.ts'
 import { javaExecutable } from '../src/javaRun.ts'
+import { readFileSync } from 'node:fs'
 
 const withJar = (over = {}) => ({ ...jarTemplateConfiguration('C:/proj'), jarPath: 'C:/proj/app.jar', ...over })
 /** 本仓 `RunConfig` 形状的那条 JAR 记录（`src/settingsModel.ts` 的字段，不新增键）。 */
@@ -185,4 +186,16 @@ test('工作目录：cwd 空就空（上游 WORKING_DIRECTORY 空不擅自填项
   assert.equal(jarRunConfigWorkingDirectory(jarRecord({ cwd: 'C:/proj/out ' })), 'C:/proj/out')
   assert.equal(jarRunConfigWorkingDirectory(jarRecord({ cwd: '' })), '')
   assert.equal(jarRunConfigWorkingDirectory(jarRecord()), '')
+})
+
+test('接线：启动参数把 JAR 走 argv 通道（shell 关掉）并由 jarRunConfigParams 折算 program/args', () => {
+  const source = readFileSync(new URL('../src/runActions.ts', import.meta.url), 'utf8')
+  assert.match(source, /import \{[^}]*\bisJarRunConfig\b[^}]*\bjarRunConfigParams\b[^}]*\} from '\.\/jarRun\.ts'/,
+    '宿主必须引真身那两个出口，不是自己再算一遍 argv')
+  assert.match(source, /params\.shell = config\.type !== 'application' && config\.type !== 'jar'/,
+    'JAR 与 application 同一档：不过 shell（路径里的空格会被 cmd /c 切坏）')
+  assert.match(source, /const launch = jarRunConfigParams\(config, \{ jdkHome: projectSettings\.value\.java\.jdkHome \?\? '' \}\)/,
+    'JRE 那格留空要退到项目 JDK（上游 JarApplicationCommandLineState.java:20-21）')
+  assert.match(source, /params\.program = launch\.program/, '折算出的可执行文件必须落到启动参数上')
+  assert.match(source, /params\.args = launch\.args/, '折算出的 argv 必须落到启动参数上')
 })

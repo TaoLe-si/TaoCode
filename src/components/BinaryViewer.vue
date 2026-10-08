@@ -107,7 +107,7 @@ function saveAs() {
 .hex-window { position: absolute; top: 0; left: 0; right: 0; }
 .hex-row { display: flex; gap: var(--space-3); height: 20px; padding: 0 var(--space-3); white-space: pre; }
 .hex-offset { color: var(--muted); }
-.hex-bytes { display: inline-flex; gap: 4px; }
+.hex-bytes { display: inline-flex; gap: var(--space-1); }
 .hex-byte { color: var(--text); }
 .hex-ascii { color: var(--secondary); }
 </style>

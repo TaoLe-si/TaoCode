@@ -90,3 +90,26 @@ function applyRunStartupFocus() {
 
 本轮没有新增动作、没有新增控件（不放假控件）：设置页那两格（R2）在宿主接了 R3 之后才有意义，
 在那之前**不渲染**（沿用本仓「没有消费链路就不出现」的规矩）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1** —— 判词订正（`docs/inventory/*`），非本 lane。
+- **R2** —— `src/settingsModel.ts`（保留文件），非本 lane。
+- **R3（`takeFocus` 宿主动作）未落** —— 目标 `src/App.vue`（本 lane 可改）。复核 `src/runActions.ts:33/:234` 已调 `decideRunStartupFocus`，但 `focusToolWindowContent('run')` 的宿主调用点未加。登记为待办：需在 `run.started` 选中新实例后调 `decideRunStartupFocus(...).takeFocus` → `focusToolWindowContent('run')`。本 lane 因该链路的 `runInstanceList()` 导出形状与请求给的示例不完全一致（`runInstanceList` 是 ref 而非函数），未贸然接。
+- **R4 / R5** —— 请求原文自述无需改。
+
+结论：R3 登记待办；其余非本 lane。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「R3 登记待办；其余非本 lane。」。
+R3 复核仍未接：`App.vue` 无 `decideRunStartupFocus` / `focusToolWindowContent('run')` 调用点。调用时机在 `src/runInstances.ts` 的 run.started（非本 lane），且需注入宿主回调，属跨层装配，登记待办。R1/R2/R4/R5 非本 lane。
+
+## 处理结果（EP 化收口 lane，2026-10-07）
+
+**R3 已落（模块侧）**：`src/runInstances.ts` 的 `handleRunStarted` 在新实例选中之后调 `applyRunStartupFocus(...)`
+（判定走 `src/runStartupFocus.ts` 的 `decideRunStartupFocus`：focus 开关或「无焦点所有者」为真才夺焦），
+并新增宿主回调注入点 `setRunStartupFocusHost({ flagsFor, focusRunToolWindow, focusOwnerMissing })`。判据
+`tests/run-instance-startup-focus.test.mjs`（4 条，含「未注入回调 ⇒ 原行为不变」）。**宿主挂载点**（App.vue 调
+`setRunStartupFocusHost`）写在 `docs/wiring-requests-2026-10-07-epclose.md` W-2 —— 本 lane 不动 App.vue。
+R1/R2/R4/R5 结论不变。

@@ -30,6 +30,13 @@
 //   · `ansiOverrides` → `terminalPalette` 的第四参（`src/terminalColors.ts:81/:104/:111`）。
 //   供给侧（键本身、native 校验、设置页行、App.vue 挂载）全在 docs/wiring-requests-2026-10-06-termset.md R-1…R-4。
 // 布局：窗格按 `terminalGridSize()` 排成 CSS 网格（上游是 splitter 树，架构不等价 ⇒ 取同一件可见的事）。
+// 2026-10-06（termact + teampage）：滚动那四条落地 —— `Terminal.PageUp`/`PageDown`（shift PAGE_UP/PAGE_DOWN，
+//   `intellij.terminal.frontend.xml:205-212`）滚一整页，`Terminal.LineUp`/`LineDown`（control UP/DOWN，
+//   同文件 `:197-204`）滚一行；菜单里两条翻页紧跟「清空终端缓冲区」（`:266-268`）、两条逐行再另起一段（`:269-271`）。
+//   备用屏（vim/less）里四条都不启用、按键原样交回那个程序（`TerminalScrollingActions.kt:27-29` 的 `isOutputModelEditor`），
+//   Ctrl+↑/↓ 另外还要让位给 shell 的历史检索 —— 门与这条折衷都在 `src/terminalScrolling.ts`；
+//   `Terminal.SwitchFocusToEditor`（`plugin.xml:127`）走上游那一档「默认无键、设置里勾 Escape 才接管」，
+//   落点是 `src/editorFocus.ts` 的 `focusActiveEditor()`。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Columns2, Pencil, Plus, RotateCcw, RotateCw, Rows2, Search, Shrink, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { Terminal } from '@xterm/xterm'
@@ -41,6 +48,8 @@ import { iconSize } from '../uiIcons'
 import { copyToClipboard, readClipboardHistory, readClipboardText } from '../clipboard'
 import { resolveTerminalThemeName, terminalPalette, terminalXtermTheme } from '../terminalColors'
 import { createTerminalActions, terminalAction, terminalActionKeyFor, terminalActionTitle, type TerminalActionContext, type TerminalActionId } from '../terminalActions'
+import { terminalAlternateBuffer, terminalLineScrollKeyApplies, terminalScrollBy, terminalScrollingApplies, terminalViewportAtBottom } from '../terminalScrolling'
+import { editorFocusCandidates, focusActiveEditor, pickEditorToFocus } from '../editorFocus'
 import { canTerminalSplit, nextTerminalPaneCell, paneIndexAfterSplit, terminalGridSize, type TerminalPaneCell, type TerminalSplitOrientation } from '../terminalSplits'
 import { changeTerminalFontSize, FONT_SIZE_STEP_DOWN, FONT_SIZE_STEP_UP, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE, resetTerminalFontSize, TERMINAL_BASE_FONT_SIZE, terminalFontSizeForWheel, terminalFontSizeTitle, terminalWheelZoomApplies } from '../terminalFontSize'
 import { terminalClipboardActions, terminalClipboardKeyFor, terminalCopyOnCtrlC, terminalCopyOnSelect, terminalHistoryEntries, terminalIsMiddleButton, terminalPasteOnMiddleClick, type TerminalClipboardContext, type TerminalHistoryEntry } from '../terminalClipboard'
@@ -63,7 +72,7 @@ import AnchoredMenu from './AnchoredMenu.vue'
  *   `ColoredOutputTypeRegistryImpl.getAnsiColorKey(index)`（`:24`）；坏值由 `src/terminalColors.ts:70-72`
  *   的 `pickColor` 丢弃 ⇒ 留内置那两套表的对应项。
  */
-const props = defineProps<{ active: boolean; cwd?: string; confirmClose?: (label: string) => Promise<boolean>; settings?: { wheelFontChangeEnabled?: boolean; terminalBaseFontSize?: number }; ansiOverrides?: Record<string, string> | null }>()
+const props = defineProps<{ active: boolean; cwd?: string; confirmClose?: (label: string) => Promise<boolean>; settings?: { wheelFontChangeEnabled?: boolean; terminalBaseFontSize?: number; moveFocusToEditorWithEscape?: boolean; copyOnSelection?: boolean; pasteOnMiddleMouseClick?: boolean }; ansiOverrides?: Record<string, string> | null }>()
 const emit = defineEmits<{ focusTerminal: [] }>()
 
 interface Pane {
@@ -114,6 +123,13 @@ const splitCounts = new Map<number, { rights: number; downs: number }>()
  */
 const wheelFontZoomEnabled = computed(() => props.settings?.wheelFontChangeEnabled ?? false)
 /**
+ * 「Esc 把焦点交回编辑器」= 上游 Settings › Tools › Terminal 那一格（默认**没勾** ⇒ 这条动作默认无键，
+ * 全部依据与不等价说明在 `src/terminalActions.ts` 文件头 teampage 那一段）；缺省 false 同上游那一档。
+ */
+const moveFocusWithEscape = computed(() => props.settings?.moveFocusToEditorWithEscape ?? false)
+/** 当下有没有「真的在显示」的那个编辑器可以接焦点（`src/editorFocus.ts` 那一组选择器，同一个坑不再踩第二遍）。 */
+const hasVisibleEditor = () => Boolean(pickEditorToFocus(editorFocusCandidates())?.offsetParent)
+/**
  * 终端基准字号 = 设置里那一档；缺省/坏值都退回本仓内置的 `TERMINAL_BASE_FONT_SIZE`（13）。
  * 界取 `src/terminalFontSize.ts:37/:40`（上游 `EditorFontsConstants.java:11-17` 的 4 / 40）：
  * 越界的基准值会让每次复位都跳到一个 xterm 不接受的数，所以宁可不采纳。
@@ -148,6 +164,11 @@ function actionContext(): TerminalActionContext {
     searchHasText: searchText.value.trim().length > 0,
     paneCount: panes.value.length,
     exited: Boolean(current?.exited),
+    // 备用屏（vim/less 这类全屏程序）里滚动那四条都不启用 —— 上游那道门是 isOutputModelEditor。
+    alternateBuffer: isAlternateScreen(current),
+    // Esc 交焦点那一格与「当下有没有可见编辑器可接」（上游 update() 的三格在本仓的对应，见 terminalActions 文件头）。
+    moveFocusToEditorWithEscape: moveFocusWithEscape.value,
+    editorVisible: hasVisibleEditor(),
     // 标签在整排里的位置（`getIndexOfContent` / `contentCount`，MoveTerminalToolwindowTabLeftRightAction.kt:28-32）。
     tabIndex: current ? panes.value.indexOf(current) : -1,
     tabCount: panes.value.length,
@@ -387,11 +408,11 @@ async function pasteHistoryEntry(entry: TerminalHistoryEntry) {
   closeMenu()
 }
 /**
- * 中键粘贴（`JBTerminalSystemSettingsProviderBase.java:302-304`：上游这条**无条件** return true）。
+ * 中键粘贴（旋钮真值 `getPasteOnMiddleMouseButton()`，缺省 true；两档门与上游坐标见 src/terminalClipboard.ts 头注释）。
  * 在捕获阶段把事件吃掉 —— 否则 xterm 自己那条中键粘贴会再补一次，用户看到的是双份内容。
  */
 function onMiddleClick(pane: Pane, event: MouseEvent) {
-  if (!terminalIsMiddleButton(event) || !terminalPasteOnMiddleClick()) return
+  if (!terminalIsMiddleButton(event) || !terminalPasteOnMiddleClick(props.settings?.pasteOnMiddleMouseClick ?? true)) return
   if (pane.exited) return
   event.preventDefault()
   event.stopPropagation()
@@ -510,6 +531,21 @@ function clearBuffer() {
   pane.instance.clear()
   note.value = `已清空「${paneLabel(pane)}」的终端缓冲区。`
 }
+/** 这个窗格是不是处在**备用屏**（全屏程序：vim / less / man…）；读数定义与上游依据都在 `src/terminalScrolling.ts`。 */
+const isAlternateScreen = (pane: Pane | null) => terminalAlternateBuffer(pane?.instance.buffer.active)
+/**
+ * 滚动这个窗格的输出：门、档位、xterm 对应关系全在 `src/terminalScrolling.ts`（那边逐条写了上游四条动作）。
+ * 菜单这一路**不问视口位置** —— 上游菜单项的启用门只有 `isOutputModelEditor`（翻页/逐行共用那一条），
+ * 越界那一下由 xterm 夹住（`BufferService.ts:140` 的 `Math.max(Math.min(...))`），贴顶贴底就是原地不动。
+ */
+function scrollOutput(unit: 'line' | 'page', direction: number) {
+  const pane = selected.value
+  closeMenu()
+  if (!pane || !terminalScrollingApplies(isAlternateScreen(pane))) return
+  terminalScrollBy(pane.instance, unit, direction)
+}
+const scrollPage = (direction: number) => scrollOutput('page', direction)
+const scrollLine = (direction: number) => scrollOutput('line', direction)
 /** 取消分屏（`TW.Unsplit`）：关掉当前这格，回到同组剩下的那一格。 */
 function unsplit() {
   const current = selected.value
@@ -530,16 +566,16 @@ function closeMenu() { menuOpen.value = false }
 function attachHandlers(pane: Pane, instance: Terminal) {
   instance.onSelectionChange(() => {
     if (selected.value === pane) hasSelection.value = instance.hasSelection()
-    // 选中即复制（`JBTerminalSystemSettingsProviderBase.java:297-299` 的 `copyOnSelect()` = `SystemInfo.isLinux`）：
-    // 上游只在 Linux 做，Windows/macOS 不做 —— 这里照同一个门，不把「选中就进剪贴板」当成通用行为。
-    if (ON_LINUX && terminalCopyOnSelect(true) && instance.hasSelection()) void copyToClipboard(instance.getSelection())
+    // 选中即复制门 = 真身子类 `copyOnSelect()` 的 `isSystemSelectionSupported() || getCopyOnSelection()`（Linux 或旋钮开，旋钮缺省 false）：
+    // Linux 天生复制；Windows/macOS 只有勾了「Copy to clipboard on selection」才复制（旋钮值来自 settings?.copyOnSelection）。
+    if (terminalCopyOnSelect(ON_LINUX, props.settings?.copyOnSelection ?? false) && instance.hasSelection()) void copyToClipboard(instance.getSelection())
   })
   instance.onTitleChange(raw => setPaneTitle(pane, setApplicationTitle(pane.title, raw)))
   instance.attachCustomKeyEventHandler(event => {
     // 终端自己的两条快捷键：Ctrl+F 开查找（Terminal.Find ← Find = control F，$default.xml:565-566）、
     // Ctrl+Shift+T 新建标签（Terminal.NewTab，intellij.terminal.frontend.xml:242-243）。
     // 这里只吃掉面板真能做的这两条，其它键照常交给 shell（包括无选区的 Ctrl+C，见 terminalClipboard.ts）。
-    const actionKey = terminalActionKeyFor(event)
+    const actionKey = terminalActionKeyFor(event, { moveFocusToEditorWithEscape: moveFocusWithEscape.value })
     if (actionKey === 'search') {
       if (event.type === 'keydown') toggleSearch()
       return false
@@ -548,6 +584,24 @@ function attachHandlers(pane: Pane, instance: Terminal) {
       if (event.type === 'keydown') void spawn()
       return false
     }
+    // Terminal.PageUp / PageDown（shift PAGE_UP / shift PAGE_DOWN，frontend.xml:205-212）：滚这个窗格的一整页输出。
+    // 备用屏里上游这四条本来就不启用（isOutputModelEditor），所以**return true 把键交回全屏程序**，
+    // 不带 Shift 的 PageUp/PageDown 也一律交回 shell（less / man 靠它们翻页）。
+    if (actionKey === 'pageUp' || actionKey === 'pageDown') {
+      if (!terminalScrollingApplies(isAlternateScreen(pane))) return true
+      if (event.type === 'keydown') terminalScrollBy(pane.instance, 'page', actionKey === 'pageUp' ? -1 : 1)
+      return false
+    }
+    // Terminal.LineUp / LineDown（control UP / control DOWN，frontend.xml:197-204）：滚一行。
+    // 贴底（正在命令行上敲）时这把键归 shell —— 上游同一件事交给 SendShortcutToTerminalAction，理由与
+    // 这条代理为什么不等价都写在 src/terminalScrolling.ts 文件头；裸 ↑/↓ 不在这张表里，永远归 shell。
+    if (actionKey === 'lineUp' || actionKey === 'lineDown') {
+      if (!terminalLineScrollKeyApplies(isAlternateScreen(pane), !terminalViewportAtBottom(pane.instance.buffer.active))) return true
+      if (event.type === 'keydown') terminalScrollBy(pane.instance, 'line', actionKey === 'lineUp' ? -1 : 1)
+      return false
+    }
+    // Terminal.SwitchFocusToEditor：只有真的把焦点交到那个可见编辑器了才吃这一下 Esc（否则原样给 shell）。
+    if (actionKey === 'focusEditor') return focusActiveEditor() ? false : true
     const intent = terminalClipboardKeyFor(event)
     if (intent === null) return true
     if (intent === 'copy') {
@@ -740,7 +794,7 @@ onBeforeUnmount(() => {
       <div class="terminal-tabs">
         <div v-for="pane in panes" :key="pane.id" class="terminal-tab" :class="{ selected: selected === pane, exited: pane.exited }">
           <button class="terminal-select" :title="`${paneTooltip(pane)}（双击重命名）`" @click="select(pane)" @dblclick.stop="beginRename(pane)">
-            <SquareTerminal :size="iconSize.dense" /><span>{{ paneLabel(pane) }}</span><Columns2 v-if="isSplit(pane)" :size="iconSize.dense" /><span v-if="pane.exited" class="terminal-exit">exit {{ pane.exitCode }}</span>
+            <SquareTerminal aria-hidden="true" :size="iconSize.dense" /><span>{{ paneLabel(pane) }}</span><Columns2 aria-hidden="true" v-if="isSplit(pane)" :size="iconSize.dense" /><span v-if="pane.exited" class="terminal-exit">exit {{ pane.exitCode }}</span>
           </button>
           <button v-if="pane.exited && shownAs('terminal.restart')" class="icon-button" :title="why('terminal.restart', '重启该终端')" :aria-label="`重启 ${paneLabel(pane)}`" @click="restart(pane)"><RotateCw :size="iconSize.dense" /></button>
           <button class="icon-button" title="关闭终端" :aria-label="`关闭 ${paneLabel(pane)}`" @click="close(pane)"><X :size="iconSize.dense" /></button>
@@ -751,7 +805,7 @@ onBeforeUnmount(() => {
       <!-- Terminal.MoveToolWindowTabLeft / Right（plugin.xml:125-126）：挪的是当前选中的那一条标签。 -->
       <button v-if="shownAs('terminal.tab.left')" class="icon-button" :title="why('terminal.tab.left', '向左移动标签')" :aria-label="why('terminal.tab.left', '向左移动标签')" :disabled="!can('terminal.tab.left')" @click="selected && moveTab(selected, false)"><ArrowLeft :size="iconSize.menu" /></button>
       <button v-if="shownAs('terminal.tab.right')" class="icon-button" :title="why('terminal.tab.right', '向右移动标签')" :aria-label="why('terminal.tab.right', '向右移动标签')" :disabled="!can('terminal.tab.right')" @click="selected && moveTab(selected, true)"><ArrowRight :size="iconSize.menu" /></button>
-      <button v-if="shownAs('terminal.search')" class="icon-button" :class="{ active: searchOpen }" :title="why('terminal.search', '在终端中查找')" :aria-label="why('terminal.search', '在终端中查找')" :disabled="!can('terminal.search')" @click="toggleSearch"><Search :size="iconSize.control" /></button>
+      <button v-if="shownAs('terminal.search')" class="icon-button" :class="{ active: searchOpen }" :aria-pressed="searchOpen" :title="why('terminal.search', '在终端中查找')" :aria-label="why('terminal.search', '在终端中查找')" :disabled="!can('terminal.search')" @click="toggleSearch"><Search :size="iconSize.control" /></button>
       <span v-if="shownAs('terminal.font.reset')" class="terminal-font" :title="terminalFontSizeTitle(fontSizeShown, baseFontSize)">{{ fontSizeShown }}px</span>
       <button v-if="shownAs('terminal.font.decrease')" class="icon-button" :title="why('terminal.font.decrease', '缩小终端字号')" :aria-label="why('terminal.font.decrease', '缩小终端字号')" :disabled="!can('terminal.font.decrease')" @click="stepFontSize('terminal.font.decrease')"><ZoomOut :size="iconSize.control" /></button>
       <button v-if="shownAs('terminal.font.increase')" class="icon-button" :title="why('terminal.font.increase', '放大终端字号')" :aria-label="why('terminal.font.increase', '放大终端字号')" :disabled="!can('terminal.font.increase')" @click="stepFontSize('terminal.font.increase')"><ZoomIn :size="iconSize.control" /></button>
@@ -782,9 +836,16 @@ onBeforeUnmount(() => {
         </div>
         <button v-if="shownAs('terminal.select.all')" class="terminal-menu-row" :disabled="!can('terminal.select.all')" :title="why('terminal.select.all', '全选')" @click="selectAll">全选</button>
         <button v-if="shownAs('terminal.clear.buffer')" class="terminal-menu-row" :disabled="!can('terminal.clear.buffer')" :title="why('terminal.clear.buffer', '清空终端缓冲区')" @click="clearBuffer">清空终端缓冲区</button>
+        <!-- Terminal.PageUp / PageDown：紧跟 ClearBuffer，与上游那条菜单同序（intellij.terminal.frontend.xml:266-268）。 -->
+        <button v-if="shownAs('terminal.page.up')" class="terminal-menu-row" :disabled="!can('terminal.page.up')" :title="why('terminal.page.up', '向上翻页')" @click="scrollPage(-1)">向上翻页</button>
+        <button v-if="shownAs('terminal.page.down')" class="terminal-menu-row" :disabled="!can('terminal.page.down')" :title="why('terminal.page.down', '向下翻页')" @click="scrollPage(1)">向下翻页</button>
+        <!-- Terminal.LineUp / LineDown：上游在 PageDown 之后另起一段（frontend.xml:269-271，:269 是 <separator/>；
+             本仓这份菜单没有分隔符那一档，条目顺序照搬）。SwitchFocusToEditor **不在**这条菜单里（上游也没有，:256-274 没它）。 -->
+        <button v-if="shownAs('terminal.line.up')" class="terminal-menu-row" :disabled="!can('terminal.line.up')" :title="why('terminal.line.up', '向上滚动一行')" @click="scrollLine(-1)">向上滚动一行</button>
+        <button v-if="shownAs('terminal.line.down')" class="terminal-menu-row" :disabled="!can('terminal.line.down')" :title="why('terminal.line.down', '向下滚动一行')" @click="scrollLine(1)">向下滚动一行</button>
         <button v-if="shownAs('terminal.unsplit')" class="terminal-menu-row" :disabled="!can('terminal.unsplit')" :title="why('terminal.unsplit', '取消分屏')" @click="unsplit">取消分屏</button>
-        <button v-if="shownAs('terminal.pane.previous')" class="terminal-menu-row" :disabled="!can('terminal.pane.previous')" :title="why('terminal.pane.previous', '跳到上一个窗格')" @click="gotoPane(false)"><ChevronLeft :size="iconSize.dense" />上一个窗格</button>
-        <button v-if="shownAs('terminal.pane.next')" class="terminal-menu-row" :disabled="!can('terminal.pane.next')" :title="why('terminal.pane.next', '跳到下一个窗格')" @click="gotoPane(true)"><ChevronRight :size="iconSize.dense" />下一个窗格</button>
+        <button v-if="shownAs('terminal.pane.previous')" class="terminal-menu-row" :disabled="!can('terminal.pane.previous')" :title="why('terminal.pane.previous', '跳到上一个窗格')" @click="gotoPane(false)"><ChevronLeft aria-hidden="true" :size="iconSize.dense" />上一个窗格</button>
+        <button v-if="shownAs('terminal.pane.next')" class="terminal-menu-row" :disabled="!can('terminal.pane.next')" :title="why('terminal.pane.next', '跳到下一个窗格')" @click="gotoPane(true)"><ChevronRight aria-hidden="true" :size="iconSize.dense" />下一个窗格</button>
       </AnchoredMenu>
     </div>
   </div>
@@ -792,25 +853,27 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .terminal-host { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--editor); }
-.terminal-bar { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); }
-.terminal-tabs { flex: 1; min-width: 0; display: flex; gap: var(--space-1); overflow-x: auto; }
-.terminal-tab { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; padding: 3px var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--elevated); color: var(--secondary); font: 12px var(--font-mono); transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
-.terminal-tab:hover { background: var(--hover); }
-.terminal-tab.selected { background: var(--selected); color: var(--text); border-color: var(--line-strong); }
+.terminal-bar { display: flex; align-items: center; gap: var(--space-1); min-height: var(--tool-window-header-h); box-sizing: border-box; padding: 0 var(--space-3); border-bottom: 1px solid var(--line); background: var(--panel); }
+.terminal-tabs { align-self: stretch; flex: 1; min-width: 0; display: flex; gap: 0; overflow-x: auto; }
+.terminal-tab { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; min-height: calc(var(--ctrl-height-sm) + var(--space-1)); margin: auto 0; padding: var(--space-1) var(--space-2); border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--secondary); font: 12px var(--font-mono); transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+.terminal-tab:hover { background: var(--hover); color: var(--bright); }
+.terminal-tab.selected { border-bottom-color: var(--accent); color: var(--bright); }
+.terminal-tab.selected:hover { background: var(--selected); }
 .terminal-tab.exited { opacity: 0.75; }
 .terminal-exit { color: var(--muted); font-size: 10px; }
 .terminal-select { display: flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
+.terminal-select:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .terminal-tab > .icon-button { width: 18px; height: 18px; }
 .terminal-tab > .icon-button:hover { color: var(--error); }
 .terminal-rename { width: 9em; min-height: 18px; padding: 0 var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--accent); border-radius: var(--radius-xs); font: 12px var(--font-mono); }
-.terminal-search { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); background: var(--rail); }
+.terminal-search { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); background: var(--panel); }
 .terminal-search-input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 12px var(--font-mono); }
-.terminal-search-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.terminal-search-input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .terminal-search-miss { color: var(--muted); font-size: 11px; }
 .terminal-bar > .icon-button.active { color: var(--accent); }
 .terminal-font { min-width: 3.2em; color: var(--muted); font: 11px var(--font-mono); text-align: right; }
 .terminal-stage { flex: 1; min-width: 0; min-height: 0; display: grid; }
-.terminal-stage :deep(.terminal-view) { min-width: 0; min-height: 0; padding: 6px 10px; }
+.terminal-stage :deep(.terminal-view) { min-width: 0; min-height: 0; padding: var(--space-2) var(--space-3); }
 .terminal-stage :deep(.terminal-view.terminal-split) { overflow: hidden; }
 .terminal-stage :deep(.terminal-view.terminal-edge-right) { border-right: 1px solid var(--line); }
 .terminal-stage :deep(.terminal-view.terminal-edge-bottom) { border-bottom: 1px solid var(--line); }

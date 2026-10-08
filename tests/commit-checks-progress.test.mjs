@@ -2,7 +2,7 @@
 //
 // 上游 `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecksProgressIndicator.kt`：
 //   · `CommitChecksTaskInfo`（`:18-23`）：标题 `progress.title.commit.checks`、可取消；
-//   · `StatusBarProgressIndicator.setText`（`:105-125`）：按"只跑检查 / 提交中"两档折算正文；
+//   · `StatusBarProgressIndicator`（`:107-136`）的 `setText`（`:122-134`；留痕：原写 `:105-125` —— `:105` 是上一个类的闭括号）：按"只跑检查 / 提交中"两档折算正文；
 //   · `fixDoubleEllipsis`（`:71-86`）：正文尾部省略号与副文本头部省略号撞车时去掉正文那个；
 //   · `label.commit.checks.not.available.during.indexing`（`VcsBundle.properties:20`，中文包 :648）：
 //     项目分析期间那条警告（上游挂在 `CommitProgressPanel.kt:310`）。

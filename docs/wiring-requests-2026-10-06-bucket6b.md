@@ -115,3 +115,11 @@
 
 ⇒ 这条**不需要动保留文件**，也不需要请求；判词的「缺」应当从 audio-cues 那一行里去掉（改判词要动
 `scripts/verdict_table.py`，按 §9 我没有动 `docs/inventory/verdict-*.md` 的生成物）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **请求 1 已接线**：`src/App.vue:867` `projectRoot: () => workspace.value?.root ?? ''`、`:869` `powerSave: { enabled, turnOff }`；`:694` 注释记明自制文案已删（开关文案归通知链）。
+- **请求 2 已接线**：`src/App.vue:1549` `projectContext: () => workspace.value ? { name, root, trusted: isProjectTrusted(...) } : null`。
+- **请求 3** —— 登记项（他人域门禁红），非接线。
+
+结论：**零待接**，未改任何文件。

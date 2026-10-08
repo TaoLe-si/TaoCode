@@ -15,6 +15,10 @@
 // 本仓的气球是 `App.vue` 里那一个 `notice` 字符串，所以这四种类型落到一个**可判定的差别**上：
 // 该组要不要占用这个气球（见 src/notifications.ts 的 notify()）。
 import type { NoticeEntry } from './notices.ts'
+// 通知组的扩展点宿主（上游 `NotificationGroupEP`，`platform/ide-core-impl/resources/intellij.platform.ide.core.impl.xml:27`）：
+// 本仓这张内建表作为 bundled 贡献登记进同名 EP，第三方（原版 IDEA 插件）按同一 displayId 挂的
+// 通知组与内建组走**同一条查询路径**（见文件末尾的 `notificationGroup()`）。
+import { notificationGroupContribution, registerNotificationGroup } from './ideViewExtensionPoints.ts'
 
 /** 上游 `com.intellij.notification.NotificationDisplayType` 的四档（本仓另认 TOOL_WINDOW 一档）。 */
 export type NotificationDisplayType = 'BALLOON' | 'STICKY_BALLOON' | 'TOOL_WINDOW' | 'NONE'
@@ -131,9 +135,33 @@ export const NOTIFICATION_GROUPS: readonly NotificationGroupView[] = [
 
 const BY_ID = new Map(NOTIFICATION_GROUPS.map(group => [group.id, group]))
 
+// 把这张内建表登记进 `com.intellij.notificationGroup` EP（bundled 贡献，重复装配只覆盖同 id）。
+// 于是「注册在 XML 里的内建组」与「第三方按 id 挂的组」在 EP 里是同一批条目，消费侧只有一条路径。
+for (const group of NOTIFICATION_GROUPS) {
+  registerNotificationGroup({
+    id: group.id,
+    getDisplayId: () => group.id,
+    getDisplayType: () => group.displayType,
+    isLogByDefault: () => group.isLogByDefault,
+    getToolWindowId: () => group.toolWindowId,
+    getTitle: () => group.title,
+  })
+}
+
 /** 查注册项；未知 id 返回 undefined（**不是**先造一个组 —— 上游未注册就拿不到设置）。 */
 export function notificationGroup(id: string): NotificationGroupView | undefined {
-  return BY_ID.get(id)
+  const known = BY_ID.get(id)
+  if (known) return known
+  // 内建表里没有的：查 EP 里第三方挂的组（同一份 `ExtensionPointHost`，与内建走同一条查询路径）。
+  const contributed = notificationGroupContribution(id)
+  if (!contributed) return undefined
+  return {
+    id: contributed.getDisplayId(),
+    displayType: contributed.getDisplayType(),
+    isLogByDefault: contributed.isLogByDefault(),
+    title: contributed.getTitle(),
+    ...(contributed.getToolWindowId?.() ? { toolWindowId: contributed.getToolWindowId() } : {}),
+  }
 }
 
 /**
@@ -163,6 +191,9 @@ export function showsBalloon(displayType: NotificationDisplayType): boolean {
  */
 const GROUP_BY_DISPLAY_PREFIX: ReadonlyArray<readonly [string, string]> = [
   ['lsp:message:', 'LSP window/showMessage'],
+  // info/trace 那一档必须排在 `lsp:log:` **前面**（表是首个命中，顺序就是优先级），否则会被抢进 errors/warnings 组。
+  // 上游 `LspServerNotificationsHandlerImpl.kt:402-403`（Info/Log 级落 LOG_INFO_TRACE）与 `:476`（组 id 字面值）。
+  ['lsp:log:info:', 'LSP window/logMessage: info, log; $/logTrace'],
   ['lsp:log:', 'LSP window/logMessage: errors, warnings'],
   ['gradle:', 'Gradle Notification Group'],
   ['vcs.commit', 'Vcs Notifications'],

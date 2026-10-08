@@ -43,6 +43,8 @@
 // 吃的是原始 `lspDiagnostics` 表；这里是**问题视图/配置面**的身份模型，吃 `ProblemRow`。
 // 两者共用本模块的 `problemKindOf`，不再各写一份 tags 判定。
 import type { ProblemRow } from './problems.ts'
+// 诊断身份键 → 检查项合并后的键（`com.intellij.inspectionElementsMerger` EP 的消费面）。
+import { mergedToolNamesFor } from './daemonExtensionPoints.ts'
 
 /** LSP `DiagnosticTag.Unnecessary` 的线上取值（上游消费点 `LspDiagnosticsCustomizer.kt:94`）。 */
 export const DIAGNOSTIC_TAG_UNNECESSARY = 1
@@ -149,4 +151,23 @@ export function inspectionIdentityOf(input: DiagnosticIdentityInput): Inspection
 /** `ProblemRow` 的身份（面板、分组、profile 清单都用这一把入口）。 */
 export function identityOfRow(row: Pick<ProblemRow, 'source' | 'code' | 'tags'>): InspectionIdentity {
   return inspectionIdentityOf({ source: row.source, code: row.code, tags: row.tags })
+}
+
+/**
+ * 候选键的**展开版**：在内建候选键之后，追加 `com.intellij.inspectionElementsMerger` EP 给出的
+ * 「旧检查项短名 → 新合并短名」（上游 `InspectionElementsMerger.getMergedToolNames(id)`，
+ * `platform/analysis-api/src/com/intellij/codeInspection/ex/InspectionElementsMerger.java:74-78`）。
+ *
+ * 为什么需要：上游把几个旧检查项并进一个新检查项时，用户 profile 里存的还是旧短名
+ * （`InspectionElementsMerger.java:20-27` 的类注释：「keeps existing @SuppressWarnings annotations
+ * working … without the user needing to configure it again」）。本仓的 profile 也是按旧键存的，
+ * 所以 `src/inspectionProfile.ts` 的门控要能把「诊断身份键」补上合并后的新键，老设置才继续生效。
+ * 没有登记合并器时返回 `identity.keys` 的副本（行为与展开前完全一致）。
+ */
+export function inspectionKeyCandidates(identity: InspectionIdentity): string[] {
+  const out = [...identity.keys]
+  for (const key of identity.keys) {
+    for (const merged of mergedToolNamesFor(key)) if (!out.includes(merged)) out.push(merged)
+  }
+  return out
 }

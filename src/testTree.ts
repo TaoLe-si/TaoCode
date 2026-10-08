@@ -277,6 +277,64 @@ export class TestTreeBuilder {
     return full === this.resultId(key) ? null : full
   }
 
+  /**
+   * 报过 `testStarted`、却还没有任何结束事件的测试 —— 「重跑失败项」默认档里「非通过」那一档的
+   * **取数处**：上游 `AbstractRerunFailedTestsAction.java:111` 是在 `model.getRoot().getAllTests()`
+   * 上判 `Filter.NOT_PASSED` 的，那些节点在树上（有代理）；本仓的结果只在
+   * `testFinished`/`testFailed`/`testIgnored` 时才产生（`src/testEventChannel.ts:141-144` 明确不产出），
+   * 所以这一批还进不了 `build()` 的树，只能从这里取。名字取路径尾段（与 `build()` 给测试节点
+   * 取名同一裁法）。判据 `tests/junit-rerun-failed-scope.test.mjs`。
+   */
+  notFinished(): { id: string; name: string }[] {
+    const out: { id: string; name: string }[] = []
+    for (const id of this.started) {
+      const path = resultPath(this, id) ?? id.slice(3)
+      const dot = path.lastIndexOf('.')
+      out.push({ id, name: dot < 0 ? path : path.slice(dot + 1) })
+    }
+    return out
+  }
+
+  /**
+   * 报过 `suiteStarted`、**既没长出任何子节点也还没闭合**的 suite —— 上游默认档里 "Non-Started"
+   * 那一支（压根没跑起来的类）在本仓的取数处。判据 `tests/junit-rerun-failed-scope.test.mjs`，
+   * 上游三条对照（本仓逐条开参考树核实，见 `docs/batch-2026-10-06-rerunscope2.md` §1③）：
+   *   · 「没有孩子」= `platform/smRunner/src/com/intellij/execution/testframework/sm/runner/SMTestProxy.java:238-240`
+   *     的 `isLeaf()`（孩子数是 `myChildren == null || isEmpty()`）—— 有孩子的 suite 被
+   *     `java/execution/impl/src/com/intellij/execution/actions/JavaRerunFailedTestsAction.java:22-30`
+   *     那条 `and(LEAF)` 挡在重跑集外，所以这里只交真正空的那几层；
+   *   · 「还没闭合」= 闭合的空 suite 在上游是
+   *     `platform/smRunner/src/com/intellij/execution/testframework/sm/runner/states/SuiteFinishedState.java:94`
+   *     的 EMPTY_SUITE（实现 `:140-143` 给 COMPLETE_INDEX），`isPassed()` 为真 ⇒ 连 `NOT_PASSED` 都过不了。
+   *     本仓的「闭合」证据只有 `suiteFinished` 盖进 `ends` 的那一次（见上面 `apply()` 的 suiteFinished 分支），
+   *     所以必须排掉它 —— 否则「跑完了但本来就没有测试」的类会被当失败重跑（过度重跑，比原缺口更糟）；
+   *   · 「报过 suiteStarted」= 上游的代理只在 `SMTestProxy.setSuiteStarted():474-482` 那一刻拿到
+   *     RUNNING 状态；本仓从结果路径长出来的**隐式**层级没有代理，所以不在 `suitePaths` 里、也就不会
+   *     凭空多出一条候选。
+   * 名字取路径尾段（类名），与 `notFinished()` 同一裁法：JUnit 的 `-Dtest=` 收到类名正好重跑那个类。
+   */
+  notStartedSuites(): { id: string; name: string; path: string }[] {
+    // 孩子的来源既包括测试也包括下层 suite：上游判的是摊平整棵树（`getAllTests()`），
+    // 父层只要有一个子代理就不是叶子。
+    const withChildren = new Set<string>()
+    const markAncestors = (path: string): void => {
+      for (let dot = path.lastIndexOf('.'); dot > 0; dot = path.lastIndexOf('.', dot - 1)) {
+        withChildren.add(path.slice(0, dot))
+      }
+    }
+    for (const path of this.paths.values()) markAncestors(path)
+    for (const path of this.suitePaths) markAncestors(path)
+    const out: { id: string; name: string; path: string }[] = []
+    for (const path of this.suitePaths) {
+      if (out.length >= TREE_NODE_LIMIT) break
+      if (withChildren.has(path)) continue
+      if (this.ends.has(suiteNodeId(path))) continue
+      const dot = path.lastIndexOf('.')
+      out.push({ id: suiteNodeId(path), name: dot < 0 ? path : path.slice(dot + 1), path })
+    }
+    return out
+  }
+
   reset(): void {
     this.channel.reset()
     this.suitePaths.clear()

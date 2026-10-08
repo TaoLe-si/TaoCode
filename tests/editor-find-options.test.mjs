@@ -128,8 +128,8 @@ test('regexMatchAt finds the occurrence that starts exactly at the offset', () =
 test('the controller expands the template before applying preserve case', () => {
   const controller = read('src/editorFindController.ts')
   assert.match(controller, /replacementFromMatch\(text, match, match\.groups\)/)
-  assert.match(controller, /state\.preserveCase \? replaceWithCaseRespect\(text, found\) : text/,
-    '顺序：先展开 $1，再套命中文本的形态')
+  assert.match(controller, /state\.preserveCase \? preserveCaseReplacement\(found, text\) : text/,
+    '顺序：先展开 $1，再按上游默认档（逐词 applyCase）套命中文本的形态')
   assert.match(controller, /annotations: isolateHistory\.of\('before'\)/, '替换要切成独立的撤销步')
   assert.equal((controller.match(/annotations: isolateHistory\.of\('before'\)/g) ?? []).length, 2, '替换一处与全部替换各一处')
 })

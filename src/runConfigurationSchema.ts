@@ -29,8 +29,10 @@ export type RunConfigTypeId = NonNullable<RunConfig['type']> | typeof JAR_RUN_CO
 /** 家族清单：上游注册的类型里本仓模块侧已经做完的那些（顺序 = 左树里的固定顺序，也是宿主文案念出来的顺序）。 */
 export const RUN_CONFIG_TYPE_FAMILY_IDS: readonly RunConfigTypeId[] = ['shell', 'application', 'debug', 'compound', JAR_RUN_CONFIG_TYPE_ID]
 
-/** 家族里等宿主两处接线的那几个；宿主接完就把这一项删掉（`docs/wiring-requests-2026-10-06-runcfg3.md` 的 J1）。 */
-export const RUN_CONFIG_TYPE_IDS_HOST_PENDING: readonly RunConfigTypeId[] = [JAR_RUN_CONFIG_TYPE_ID]
+/** 家族里等宿主两处接线的那几个；宿主接完就把这一项删掉（`docs/wiring-requests-2026-10-06-runcfg3.md` 的 J1）。
+ *  2026-10-06 收口：JAR 的宿主两处（`settingsModel.ts` 的联合 + `native/settings_schema.cpp` 的白名单）已同批落地 ⇒ 本表清空。
+ *  这一条**留着**：它是「前端先接、宿主没接」那个老形状的唯一拦截点（下一批加类型时往里填一项即可）。 */
+export const RUN_CONFIG_TYPE_IDS_HOST_PENDING: readonly RunConfigTypeId[] = []
 
 /** 今天真能落盘的清单 = 家族 − 宿主未接。表单、左树、schema、执行参数都以它为准。
  *  元素类型取 `settingsModel.ts` 的联合（那条 `id is …` 判据就是「不在 pending 里 ⇒ 宿主接得了」）：
@@ -60,7 +62,12 @@ export function normalizeRunConfigurations(raw: unknown): RunConfig[] {
     typeof value === 'string' && (!nonempty || value.length > 0) && encoder.encode(value).length <= max
   const list = (value: unknown, max: number, itemMax: number) =>
     Array.isArray(value) && value.length <= max && value.every(entry => text(entry, itemMax))
-  const keys = new Set(['name', 'type', 'command', 'program', 'args', 'cwd', 'env', 'beforeLaunch', 'adapter', 'folder', 'allowRunningInParallel', 'configurations'])
+  const keys = new Set(['name', 'type', 'command', 'program', 'args', 'cwd', 'env', 'beforeLaunch', 'adapter', 'folder',
+    // 「启动时打开运行面板」/「启动时把焦点移到运行面板」——上游挂在**每条配置**上
+    // （`RunnerAndConfigurationSettings.java:235/:242/:249/:256`，存
+    // `RunnerAndConfigurationSettingsImpl.kt:108-109`、属性名同文件 `:61-62`）⇒ 本仓的存放处就是这条记录，
+    // 读写与判定都收在 `src/runStartupFocus.ts`（唯一真源，见该文件头部的判决段）。
+    'activateToolWindowBeforeRun', 'focusToolWindowBeforeRun', 'allowRunningInParallel', 'configurations'])
   if (!Array.isArray(raw) || raw.length > 40) throw new Error('运行配置必须是数组，最多 40 个。')
   const configs = raw as RunConfig[]
   // JAR 那一族的**入口判据排在最前**（`src/jarRun.ts` 的 `jarRunConfigProblem`）：
@@ -86,6 +93,11 @@ export function normalizeRunConfigurations(raw: unknown): RunConfig[] {
     || (config.adapter !== undefined && !text(config.adapter, 64))
     || (config.folder !== undefined && (!text(config.folder, 80) || /[\r\n\t]/.test(config.folder)))
     || (config.allowRunningInParallel !== undefined && typeof config.allowRunningInParallel !== 'boolean')
+    // 那两个启动时聚焦开关与宿主同一条口径（`native/settings_schema.cpp` 的 known_keys + 布尔校验）：
+    // 只认布尔，脏值在这层就报人看得懂的错，不落进「字段无效」那一句里；**缺键是合法的**（按上游默认补，
+    // 见 `src/runStartupFocus.ts` 的 `resolveRunStartupFocusFlags`），不许因为少键就把整份存档判坏。
+    || (config.activateToolWindowBeforeRun !== undefined && typeof config.activateToolWindowBeforeRun !== 'boolean')
+    || (config.focusToolWindowBeforeRun !== undefined && typeof config.focusToolWindowBeforeRun !== 'boolean')
     || (config.beforeLaunch !== undefined && (!Array.isArray(config.beforeLaunch) || config.beforeLaunch.length > 16
       || config.beforeLaunch.some(step => !step || typeof step !== 'object' || Array.isArray(step)
         || Object.keys(step).some(key => key !== 'name' && key !== 'command') || !text(step.name, 80, true) || !text(step.command, 4096, true)))))) {

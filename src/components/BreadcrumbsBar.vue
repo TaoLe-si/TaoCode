@@ -116,17 +116,29 @@ function symbolSiblings(index: number): BreadcrumbSegment[] {
 interface PopupRow { label: string; navigates: boolean; hasChildren: boolean; segment: BreadcrumbSegment }
 const popup = ref<{ index: number; rows: PopupRow[] } | null>(null)
 const popupRows = computed(() => popup.value?.rows ?? [])
+function rowsForSegment(segment: BreadcrumbSegment): PopupRow[] {
+  const children = segment.kind === 'symbol' ? [] : childCrumbs(segment.path ?? '')
+  if (!children.length) {
+    return [{ label: segment.name, navigates: navBarNavigatesOnClick([], elementOf(segment)), hasChildren: false, segment }]
+  }
+  return children.map(one => {
+    const grandchildren = one.kind === 'path' ? childCrumbs(one.path ?? '') : []
+    return {
+      label: one.name,
+      navigates: navBarNavigatesOnClick([], elementOf(one)),
+      hasChildren: grandchildren.length > 0,
+      segment: one,
+    }
+  })
+}
 function rowsFor(index: number): PopupRow[] {
   const segment = crumbs.value[index]
   if (!segment) return []
-  const navigates = navigatesOf(index)
   if (segment.kind === 'symbol') {
     const rows = symbolSiblings(index)
     return rows.length ? rows.map(one => ({ label: one.name, navigates: true, hasChildren: false, segment: one })) : []
   }
-  const children = segment.kind === 'file' ? [] : childCrumbs(segment.path ?? '')
-  if (!children.length) return [{ label: segment.name, navigates, hasChildren: false, segment }]
-  return children.map(one => ({ label: one.name, navigates: one.kind === 'file', hasChildren: one.kind === 'path', segment: one }))
+  return rowsForSegment(segment)
 }
 
 function activate(segment: BreadcrumbSegment) {
@@ -139,9 +151,8 @@ function activate(segment: BreadcrumbSegment) {
 function pick(row: PopupRow) {
   // `NavBarItemExpandResult.kt:12-15`：能导航就导航，否则开下一层；没有子项时一律导航。
   if (popupSelectionAction(row.navigates, row.hasChildren) === 'nextPopup') {
-    const index = crumbs.value.findIndex(one => one.name === row.label && one.kind === row.segment.kind)
-    const at = index < 0 ? (selectedIndex.value < 0 ? -1 : selectedIndex.value) : index
-    if (at >= 0) openPopup(at)
+    const current = popup.value
+    if (current) popup.value = { index: current.index, rows: rowsForSegment(row.segment) }
     return
   }
   popup.value = null

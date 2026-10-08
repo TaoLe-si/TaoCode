@@ -2,12 +2,15 @@
 import type { DiffSides } from './bridge'
 export interface GitChange { path: string; indexStatus: string; workStatus: string; staged: boolean; untracked: boolean; renameFrom: string; /** 被 .gitignore 忽略（只有开着「忽略的文件」那一档才会列出来）。 */ ignored?: boolean }
 export interface GitUser { name: string; email: string }
-export interface GitStatus { available: boolean; head?: string; branches?: string[]; changes?: GitChange[] }
+export interface GitBranchTrackInfo { localBranch: string; remoteName: string; remoteBranch: string }
+export interface GitStatus {
+  available: boolean; head?: string; branches?: string[]; branchTrackInfos?: GitBranchTrackInfo[]; isOnBranch?: boolean; changes?: GitChange[]
+}
 export interface GitDiff { diff: string }
 export interface GitCommit { hash: string; shortHash: string; author: string; date: string; subject: string }
 export interface GitLog { commits: GitCommit[] }
 export interface GitRef { name: string; type: 'local' | 'remote' | 'tag' | 'head' }
-export interface GitFullCommit { hash: string; shortHash: string; author: string; date: string; subject: string; parents: string[]; refs: GitRef[] }
+export interface GitFullCommit { hash: string; shortHash: string; author: string; date: string; committerDate: string; subject: string; parents: string[]; refs: GitRef[] }
 export interface GitFullLog { commits: GitFullCommit[]; offset: number; limit: number; hasMore: boolean }
 /** 提交图排序档（`PermanentGraph.SortType`）：`topological` = 拓扑序，`date` = 按提交日期。 */
 export type GitLogSort = 'date' | 'topological'

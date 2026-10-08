@@ -21,7 +21,23 @@
 //     "一组一个控制器"，本仓只有全局的停止全部。
 //
 // 纯函数 + 组件接线，判据 tests/run-dashboard.test.mjs。
+//
+// 2026-10-06（runinst2）：行不再自己算一遍，**从 `src/runInstances.ts` 的行模型投影**。
+// 上一轮（runinst）已经把「正在运行」清单改成从 `runInstanceRows()` 投影，理由写在
+// `src/runInstances.ts:456-460`：上游标签条与清单读的是**同一个字符串**
+// （`platform/execution/src/com/intellij/execution/ui/RunContentDescriptor.java` 的
+// `getDisplayName()`），所以「同一个实例在标签上叫运行 1、在别的列表里叫运行 2」本来就是错的。
+// 当时漏了仪表盘这第三处 —— 它按 `instance.id` 数名字，而记录被 `forget()` 删掉之后
+// id 与「按 id 升序的下标」就会分叉（`src/runInstances.ts:161-175`：清单排除 `closed`、
+// 记录删除后 id 不连续）。现在三处同一个来源。
+// 顺带把「这一格能不能停 / 是不是 Kill process / 停止文案」也交给行模型：
+// `StopAction` 的 `canBeStopped` 与 kill 两档（`src/runInstances.ts:589-595`、`:631`）读的是
+// 实例的 `stopping`/`closed`，仪表盘自己只看 `running` 是算不出「正在结束途中」那一档的。
 import { RUN_CONFIG_TYPES, runConfigTypeLabel } from './runConfigTree.ts'
+import {
+  STOP_LABELS, runInstanceRows, runInstanceState, runInstanceStatusText,
+  type RunInstanceRow, type RunInstanceRowState,
+} from './runInstances.ts'
 
 /** 配置表里认不出 / 实例没有对应配置时落进的组（上游没有这一档，本仓必须给个去处）。 */
 export const RUN_DASHBOARD_OTHER_TYPE = 'other'
@@ -47,13 +63,29 @@ export interface RunDashboardInput {
 export interface RunDashboardRow {
   id: number
   title: string
-  /** running = 在跑；ok = 正常退出（code 0）；failed = 非零退出；stopped = 被停止（-1）。 */
-  state: 'running' | 'ok' | 'failed' | 'stopped'
+  /** running = 在跑；ok = 正常退出（code 0）；failed = 非零退出；stopped = 被停止。 */
+  state: RunInstanceRowState
   statusText: string
   elapsedText: string
   pid: number
   /** 分组键：`RunConfig['type']`，认不出就是 `RUN_DASHBOARD_OTHER_TYPE`。 */
   type: string
+  /**
+   * 这一格的「停止」可不可点（上游 `StopAction.canBeStopped`，本仓单源在
+   * `src/runInstances.ts:589-595`）。与 `state === 'running'` 不同源 ⇒ 以前仪表盘自己按
+   * `running` 数，现在取行模型 ⇒ 同一实例在两处不会出现「一处能停一处不能停」。
+   */
+  stoppable: boolean
+  /** 进程已在结束途中 ⇒ 这一格的动作是 Kill process（`ExecutionBundle.properties:203`）。 */
+  kill: boolean
+  /** 停止那一格的文案单源：`Stop ''{0}''`（`:208`）/ 正在结束那档换 `Kill process`（`:203`）。 */
+  stopText: string
+  /**
+   * 同名行之间的区分描述（上游 `process.id.tooltip`，`ExecutionBundle.properties:204`，
+   * 只在进程活着时设、结束时清掉 —— `RunContentManagerImpl.kt:369-376` 与 **:401**）。
+   * 空串 = 没有 ⇒ 宿主那一行不渲染（不假造区分信息）。
+   */
+  description: string
 }
 
 /** 时长文案：`12s` / `1m 05s` / `2h 03m`（与状态栏的粗粒度一致，不显示毫秒）。 */
@@ -66,37 +98,62 @@ export function formatRunDuration(ms: number): string {
   return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`
 }
 
-function stateOf(instance: RunDashboardInput): RunDashboardRow['state'] {
-  if (instance.running) return 'running'
-  if (instance.exit === null) return 'running'
-  if (instance.exit === 0) return 'ok'
-  if (instance.exit === -1) return 'stopped'
-  return 'failed'
+/**
+ * 状态档位的**唯一来源**是行模型（`src/runInstances.ts` 的 `runInstanceState`）。
+ * 这条规则原先在本文件与 `runInstances.ts:554-560` 各写了一遍（那边 `:518` 的注释自己就写着
+ * 「两处不能各说一遍」⇒ 原写「各写一份」、实际本批收敛成一份，留痕见报告）。
+ *
+ * 上游派生（`RunDashboardRunConfigurationStatus.getStatus`，
+ * `platform/lang-api/src/com/intellij/execution/dashboard/RunDashboardRunConfigurationStatus.java:59-76`）：
+ * `exitCode == null` ⇒ STARTED（在跑，`:67-69`）、`exitCode == 0 || TERMINATION_REQUESTED` ⇒ STOPPED
+ * （`:71-73`）、否则 FAILED（`:75`）；四档名与图标在同文件 `:21-28`，文案键
+ * `run.dashboard.*.group.name` 在 `ExecutionBundle.properties:373-376`。
+ * 本仓把上游的 STOPPED 一档又拆成「已完成 / 已停止」两档（上游只有 `Finished` 一档），
+ * 「是谁结束了进程」这一列的归因缺口如实记在报告 §6 D2（宿主 `aborted` 字段是重载的）。
+ */
+function stateOf(instance: RunDashboardInput): RunInstanceRowState {
+  return runInstanceState(instance.running, instance.exit)
 }
 
-function statusTextOf(state: RunDashboardRow['state'], exit: number | null): string {
-  switch (state) {
-    case 'running': return '正在运行'
-    case 'ok': return '已完成'
-    case 'stopped': return '已停止'
-    default: return `退出码 ${exit ?? '?'}`
-  }
+/** 文案同样单源（`runInstances.ts` 的 `runInstanceStatusText`，四档措辞两处必须一致）。 */
+function statusTextOf(state: RunInstanceRowState, exit: number | null): string {
+  return runInstanceStatusText(state, exit)
 }
 
-/** 仪表盘行：按 id 升序（起跑顺序），`now` 用于算在跑实例的时长。 */
-export function runDashboardRows(instances: readonly RunDashboardInput[], now: number): RunDashboardRow[] {
+/**
+ * 仪表盘行：按 id 升序（起跑顺序），`now` 用于算在跑实例的时长。
+ *
+ * `model` 是行模型（id → `RunInstanceRow`）；省略时就地从 `runInstanceRows()` 取 ——
+ * 显示名、可停性、kill 档、停止文案、pid 描述**全部**从它投影，仪表盘不再自己另算一遍。
+ * 传进来的 id 不在记录里（纯函数用法、单元测试）才按本列表的下标兜底，规则与
+ * `runInstanceDisplayName` 一致（`运行 N`，N 从 1 起）。
+ */
+export function runDashboardRows(
+  instances: readonly RunDashboardInput[],
+  now: number,
+  model?: ReadonlyMap<number, RunInstanceRow>,
+): RunDashboardRow[] {
+  const projected = model ?? new Map(runInstanceRows().map(row => [row.id, row]))
   return [...instances]
     .sort((left, right) => left.id - right.id)
-    .map(instance => {
+    .map((instance, index) => {
       const state = stateOf(instance)
+      const row = projected.get(instance.id)
+      const title = row?.title || instance.label || `运行 ${index + 1}`
+      const kill = row?.kill ?? false
       return {
         id: instance.id,
-        title: instance.label || `运行 ${instance.id}`,
+        title,
         state,
         statusText: statusTextOf(state, instance.exit),
         elapsedText: formatRunDuration(now - instance.startedAt),
         pid: instance.pid ?? 0,
         type: instance.type || RUN_DASHBOARD_OTHER_TYPE,
+        // 记录不在模型里（外来的纯输入）时退回「在跑就可停」，与拆之前一致，不臆造 kill。
+        stoppable: row?.stoppable ?? instance.running,
+        kill,
+        stopText: kill ? STOP_LABELS.kill : STOP_LABELS.one(title),
+        description: row?.tabDescription ?? '',
       }
     })
 }

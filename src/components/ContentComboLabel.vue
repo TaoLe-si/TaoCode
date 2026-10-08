@@ -12,12 +12,14 @@
 //     本仓用同义的「显示视图列表」；文案的「标签页 / 视图」两档来自
 //     `ShowContentAction.update`（`src/toolWindowContentUi.ts` 的 `contentCountLabel`）。
 //
-// 图标：工具窗口 id 走注册表（`src/toolWindowMeta.ts` 的 `toolIcons`）；引用那几条
-// （id 形如 `references:12`）与固定内容各给一个本仓已有的字形 —— 上游是内容自己的图标，
-// 这里的对应关系是形态差异，不是新造的状态。
+// 图标：工具窗口 id 走注册表（`src/toolWindowMeta.ts` 的 `toolIcons`，全部是 IDEA 原样图标）；
+// 固定内容那几格走 `components/icons/toolWindowIcons.ts` 的薄壳（出处逐条登记在
+// `components/icons/index.ts`）；只有引用那几条（`references:12`）用本仓的文件字形 ——
+// 那是"同一次搜索的多条结果"，IDEA 里每条用自己的文件图标，属于形态差异不是顶替。
 import { computed, nextTick, ref, type Component } from 'vue'
-import { Check, ChevronDown, FileCode2, ListTree, Play, SquareTerminal, TriangleAlert, Workflow, X } from 'lucide-vue-next'
+import { ChevronDown, FileCode2, X } from 'lucide-vue-next'
 import { toolIcons } from '../toolWindowMeta.ts'
+import { IdeaCheckedIcon, IdeaHierarchyIcon, IdeaMessagesIcon, IdeaProblemsIcon, IdeaRunIcon, IdeaTerminalIcon } from './icons/toolWindowIcons.ts'
 import { contentCountLabel, type ToolWindowContentUiType } from '../toolWindowContentUi.ts'
 import { usePopupLayer } from '../popupStack.ts'
 import { speedSearchStepForKey, stepVisibleIndex } from '../speedSearch.ts'
@@ -91,7 +93,15 @@ usePopupLayer(menu, open, () => { open.value = false }, {
 const active = ref(0)
 const selectedIndex = computed(() => Math.max(0, props.options.findIndex(option => option.id === props.value)))
 const selected = computed(() => props.options.find(option => option.id === props.value) ?? props.options[0])
-const FIXED_ICONS: Record<string, Component> = { output: Workflow, run: Play, problems: TriangleAlert, hierarchy: ListTree, terminal: SquareTerminal }
+// 固定内容那几格 = IDEA 的原样图标（`components/icons/index.ts` 的 `BOTTOM_CONTENT_IDEA_ICON`
+// 逐条写了上游出处：output→Messages 工具窗口、run→ToolWindowRun、problems→ToolWindowProblems、
+// hierarchy→ToolWindowHierarchy、terminal→TerminalIcons.OpenTerminal_13x13）。
+// 引用那几条（`references:<n>`）是**同一次搜索的多条结果**，IDEA 里每条用自己的文件图标，
+// 所以这里统一给一个"文件"字形 —— 那是形态差异，不是拿它顶某个 IDEA 图标。
+const FIXED_ICONS: Record<string, Component> = {
+  output: IdeaMessagesIcon, run: IdeaRunIcon, problems: IdeaProblemsIcon,
+  hierarchy: IdeaHierarchyIcon, terminal: IdeaTerminalIcon,
+}
 function iconOf(id: string): Component | null {
   if (FIXED_ICONS[id]) return FIXED_ICONS[id]!
   if (id.startsWith('references:')) return FileCode2
@@ -172,7 +182,7 @@ function onKeydown(event: KeyboardEvent) {
       <button v-for="(option, index) in options" v-show="rows.includes(index)" :key="option.id" type="button" class="menu-button content-combo-row"
               role="option" :aria-selected="option.id === value" :class="{ 'is-active': index === active }"
               @mouseenter="active = index" @click="pick(option.id)">
-        <span class="menu-item-icon"><Check v-if="option.id === value" :size="iconSize.menu" aria-hidden="true" /><component v-else :is="iconOf(option.id)" :size="iconSize.menu" aria-hidden="true" /></span>
+        <span class="menu-item-icon"><IdeaCheckedIcon v-if="option.id === value" :size="iconSize.menu" aria-hidden="true" /><component v-else :is="iconOf(option.id)" :size="iconSize.menu" aria-hidden="true" /></span>
         <span>{{ option.label }}</span>
       </button>
       <p v-if="!options.length" class="content-combo-empty"><X :size="iconSize.dense" aria-hidden="true" /> 没有内容。</p>

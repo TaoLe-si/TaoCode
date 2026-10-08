@@ -35,6 +35,11 @@
 // 判据 `tests/hierarchy-renderer.test.mjs`。
 import type { Component } from 'vue'
 import { Box, Boxes, FunctionSquare, Hash, Square, SquareDashed, Type, Variable } from 'lucide-vue-next'
+// 折叠按钮的文案规则**不与用法树各写一份**：`src/usageViewTreeModel.ts:185-187` 的
+// `usageTreeToggleLabel(collapsed, label)` 就是「收起 X / 展开 X」那一条（既有判据钉着它，
+// `tests/usage-view-panel-rows.test.mjs:73`），层级侧原来是自己在 `:136` 又拼了一遍。
+// 极性对齐：层级节点存的是 `expanded`，用法侧收的是 `collapsed` ⇒ 传 `!expanded`。
+import { usageTreeToggleLabel } from './usageViewTreeModel.ts'
 
 /** 层级行的一个文本段。`tone` 两档：主文本 / 次要色（上游 `getUsageCountPrefixAttributes()`）。 */
 export interface HierarchyTextSegment { text: string; tone: 'base' | 'muted' }
@@ -133,6 +138,6 @@ export function hierarchyRowModel(
     icon: hierarchyKindIcon(node.item.kind),
     position: hierarchyPositionText(node.item),
     trailing: hierarchyTrailingText({ loading: node.loading, recursive: node.recursive, error: node.error, expanded: node.expanded, childCount: node.children?.length }),
-    toggleLabel: `${node.expanded ? '收起' : '展开'} ${label}`.trim(),
+    toggleLabel: usageTreeToggleLabel(!node.expanded, label).trim(),
   }
 }

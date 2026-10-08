@@ -218,3 +218,14 @@ const emit = defineEmits<{
    （`src/searchEverywhereBalancer.ts`、`src/searchEverywhereTopHit.ts`）。
    仍然真缺的是：IDE / Autocompletion 两个档、`SeTabsCustomizer`/`SeAsyncTabsProvider` 的
    tab 定制与异步供给、`SeUsageEventsLogger`（本仓不收集遥测，故意的）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1'（代码块导航结构支持）** —— 见 searchdiff W-1（原文自述已落地）。**W-2'（Run Anything 上下文选择器）已接线**：`src/App.vue:2658` 已传 `:module-roots` + `payload.cwd`（见 runctx 处理结果）。
+
+结论：W-2' 已接线。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W-2' 已接线。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

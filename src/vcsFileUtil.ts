@@ -153,13 +153,17 @@ export function hasBom(text: string): boolean {
   return text.startsWith(BOM)
 }
 
-/** 主行尾：CRLF 优先判（`\r\n` 里也含 `\n`）、再 CR、最后 LF。 */
+/** 主行尾；与 IDEA `LoadTextUtil.ConvertResult.majorLineSeparator` 的分隔符计数一致。 */
 export function detectLineSeparator(text: string): '\r\n' | '\r' | '\n' {
-  const crlf = text.indexOf('\r\n')
-  if (crlf >= 0) return '\r\n'
-  const cr = text.indexOf('\r')
-  const lf = text.indexOf('\n')
-  if (cr >= 0 && (lf < 0 || cr < lf)) return '\r'
+  let crlf = 0, cr = 0, lf = 0
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\r') {
+      if (text[i + 1] === '\n') { crlf++; i++ }
+      else cr++
+    } else if (text[i] === '\n') lf++
+  }
+  if (crlf > cr && crlf > lf) return '\r\n'
+  if (cr > lf) return '\r'
   return '\n'
 }
 
@@ -171,6 +175,48 @@ export function normalizeLineSeparators(text: string, separator = '\n'): string 
 /** 二进制启发：含 NUL 字节（上游按内容判二进制的那条最常用的信号）。 */
 export function looksBinary(text: string): boolean {
   return text.includes('\u0000')
+}
+
+/**
+ * 把文本按**行分隔符**切成行：上游 `LineTokenizer` 的等价物
+ * （`platform/util/base/multiplatform/src/com/intellij/openapi/util/text/LineTokenizer.kt:27`
+ * 的 `advance()` 认 `\r`、`\n`、`\r\n` 三种分隔符；`:81-85` 那一支是 `includeSeparators = false`
+ * ⇒ 分隔符**不进**行内容；入口 `tokenize(text, false)` 在 `:63-66`）。
+ *
+ * 上游两侧用的是同一个切法：读补丁 `PatchReader.java:66`，切目标文件
+ * `apply/GenericPatchApplier.java:64`；而 `platform/diff-impl/src/com/intellij/diff/tools/util/text/`
+ * `LineOffsetsUtil.java:11-12` 明写「NB: Does not support CRLF separators, use
+ * StringUtil.convertLineSeparators」，`BaseRevisionTextPatchEP.java:99` 就是把基线内容那么归一。
+ * 本仓原来只在补丁那一侧归一（`parseUnifiedPatch` 里调 `normalizeLineSeparators`），目标文件仍按
+ * `split('\n')` 切 ⇒ CRLF 文件的每一行都多带一个 `\r`，任何补丁都在第 1 行就报「上下文对不上」。
+ *
+ * 两处刻意差别（都写进判据）：
+ *   · 结尾那个空元素**保留**（上游 `:90` 的 `skipLastEmptyLine` 默认真把它丢掉），因为本仓的应用器
+ *     靠 `join(分隔符)` 复现文件结尾的行尾，`tests/patch-apply.test.mjs:100-101` 钉的就是这套形态；
+ *   · 纯 LF 文本的结果与 `text.split('\n')` **逐字相同**（只有 CR 才可能改变结果），
+ *     所以这条改动对既有 LF 用例是零影响。
+ */
+export function splitPatchLines(text: string): string[] {
+  return text.split(/\r\n|\r|\n/)
+}
+
+/**
+ * 块在**原文**里的起始行下标（0 基）。
+ *
+ * `git` 的 `@@ -l,s +l,s @@` 语义里 `l` 是「这一块第一行原文的行号」（1 基 ⇒ 下标 `l - 1`）。
+ * 但 `s = 0` 时**没有**「第一行原文」：那是纯插入块，`l` 报的是「插在第 `l` 行之后」⇒ 下标就是 `l`。
+ * 真 git 实测（文件 `1..5`，在第 4 行之后插一行）：`git diff -U0` 出 `@@ -4,0 +5 @@`，
+ * `git apply` 就落在那一行之后；`l = 0`（新文件 `@@ -0,0 +1,n @@`）两种算法都落到 0，`max` 兜住。
+ *
+ * 上游 `PatchReader.java:363-364` 是 `-1` 之后当索引用的
+ * （`new PatchHunk(startLineBefore - 1, startLineBefore + linesBefore - 1, ...)`），于是 `s = 0`
+ * 那一档拿到的是**反向**区间（`-4,0` ⇒ 3..2），`apply/PlainSimplePatchApplier.java:48` 的
+ * `appendUnchangedLines(getStartLineBefore())` 因此少抄一行 ⇒ 上游这条路与 git 差一行。
+ * 本仓按 git 的规范收（派单 ③ 指定的口径），判据是 `tests/patch-hunk-counts.test.mjs` 里那条
+ * 「同一份补丁，本仓应用的结果必须与真 `git apply` 的结果逐字节相同」。
+ */
+export function patchHunkStartIndex(beforeStart: number, beforeCount: number): number {
+  return Math.max(0, beforeCount === 0 ? beforeStart : beforeStart - 1)
 }
 
 // ── 批量文件进度（上游 `FilesProgress.java`）───────────────────────────────────────────

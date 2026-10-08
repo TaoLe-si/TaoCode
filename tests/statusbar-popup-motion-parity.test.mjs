@@ -6,6 +6,10 @@
 //   1. 注册表里没有「勾了不生效」的死条目（铁律：状态栏 widget 必须真消费）。KNOWN_GAPS 现为空 =
 //      本域没有已知的死条目（`bridge` 那一条 2026-10-06 桶 status2 已从注册表删除，判定见
 //      `src/statusWidgets.ts` 表头）；新增死条目会当场红，而不是等用户点出空按钮。
+//   1b.（2026-10-06 lane statusclose 补）**反方向**：模板里的每个 `showWidget('<id>')` 挂点都必须有注册表行，
+//      并且未登记的 id 在 `findWidgetFactory`/`showWidget`/`widgetChecked`/`widgetClickable`/`toggleWidget`
+//      五个口上都是"没有这条状态"（默认拒绝 + 不污染存档）——这一侧失效是静默的：组件永远不出现，
+//      右键清单也列不出来，编译与测试都不会红，所以必须显式钉。
 //   2. 不可点的组件确实不可点：`VfsRefreshIndicatorWidgetFactory` 的组件是 `setEnabled(false)`
 //      的 JLabel（`:106`），所以本仓落成只读 span；反过来，可点的条目都带真动作。
 //   3. 主题水纹（`startViewTransition` + clip-path 揭示）认**两道**降级闸：系统
@@ -19,7 +23,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { STATUS_WIDGETS } from '../src/statusWidgets.ts'
+import { STATUS_WIDGETS, findWidgetFactory, showWidget, widgetChecked, widgetClickable, widgetOverrides, toggleWidget } from '../src/statusWidgets.ts'
 import { themeRipple } from '../src/themeRipple.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -54,6 +58,44 @@ test('注册表里没有新的死条目：每个 id 都被状态栏模板真正�
     assert.ok(!consumed.has(id) && STATUS_WIDGETS.some(widget => widget.id === id),
       `KNOWN_GAPS 里的 ${id} 已经不再是死条目（要么接上了，要么从注册表删了）—— 把它从 KNOWN_GAPS 移除`)
   }
+})
+
+// 2026-10-06 lane statusclose 补：上一条只钉**正向**（注册表的每条都得被模板消费），
+// 反方向当时没人管 —— 而这一侧失效是**静默**的，比假控件更难发现：
+//   · `src/statusWidgets.ts:180-184` 的 `showWidget(id)` 是默认拒绝（`BY_ID.get(id)` 认不出就 `return false`），
+//     所以「模板里写了 `showWidget('新组件')`、注册表忘了加那一行」不抛错、不红编译，
+//     只让那颗组件**永远不出现**，右键勾选清单里也列不出来（`listWidgets()` 遍历的是注册表）；
+//   · 上游的对应关系是"工厂注册 = 组件存在"
+//     （`platform/platform-impl/resources/intellij.platform.ide.impl.xml:1618-1644` 十五条 `statusBarWidgetFactory`，
+//     `StatusBarWidgetsManager` 按 EP 列表建组件），本仓的注册表就是那份 EP 清单
+//     ⇒ 挂点而没有清单行 = 一个连上游都对不上的名字。
+// ⇒ 这里钉两件：① 模板解析到的每个 id 都在注册表里（子集判据，不是数量对比）；
+//   ② 认不出的 id 在四个读写口上都是"没有这条状态"（默认拒绝不许被改成默认放行，也不许污染存档）。
+test('反向奇偶：模板里的每个 showWidget 挂点都必须在注册表里（漏登记 = 永远画不出来）', () => {
+  const template = read('src/App.vue')
+  const consumed = [...new Set([...template.matchAll(/showWidget\('([A-Za-z]+)'\)/g)].map(match => match[1]))]
+  const registered = STATUS_WIDGETS.map(widget => widget.id)
+  const unregistered = consumed.filter(id => !registered.includes(id))
+  assert.deepEqual(unregistered, [],
+    `状态栏模板里有 ${unregistered.length} 个挂点没在 STATUS_WIDGETS 登记：${unregistered.join(', ')} —— `
+    + 'showWidget 对认不出的 id 返回 false，用户看不见也关不掉，右键清单里也不会出现这一行。')
+  // 判据自身不许失效：解析必须真的解析到东西（模板那一段被写成正则不认的形状时，上面那条会空转通过）。
+  assert.ok(consumed.length >= 15, `只解析到 ${consumed.length} 个 showWidget 挂点，判据本身失效了`)
+  assert.equal(consumed.filter(id => registered.includes(id)).length, consumed.length,
+    '子集判据与这份计数自相矛盾（解析结果被动过？）')
+
+  // ② 默认拒绝的四道读写口：认不出的 id 一律"没有这条状态"。
+  const ghost = 'notARegisteredWidgetId'
+  assert.equal(findWidgetFactory(ghost), undefined, '反查必须认不出未登记的 id')
+  assert.equal(showWidget(ghost), false, '未登记的 id 不得画（默认拒绝）')
+  assert.equal(widgetChecked(ghost), false, '未登记的 id 不得凭空有勾选态')
+  assert.equal(widgetClickable(ghost, true), false, '未登记的 id 不得出现在可点状态里')
+  // `toggleWidget` 对未登记的 id 必须当场返回（`src/statusWidgets.ts:207-212` 的 `if (!widget) return`），
+  // 既不写覆盖表也不落存档 —— 否则会给一个不存在的组件留下持久化残留键。
+  const before = JSON.stringify(widgetOverrides.value)
+  toggleWidget(ghost)
+  assert.equal(JSON.stringify(widgetOverrides.value), before,
+    '未登记的 id 不该往持久化覆盖里写任何东西')
 })
 
 test('不可点的组件不可点，可点的组件有真动作：两边都照上游那句判据', () => {

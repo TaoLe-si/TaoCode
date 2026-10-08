@@ -195,3 +195,17 @@ const problemsFocus = ref<{ grouping: string; key: string; label: string } | nul
 > 提醒下一位：R1/R2/R3/R4 的落点本轮**都在别人名下或保留文件**，status3 一个字没动。
 > 另登记一条同族的新观察（不在本请求里）：`src/inspectionReport.ts:29-30` 是本仓**第三份**严重度→名字/样式映射，
 > 与 `src/highlightLevels.ts` 的 `levelForSeverity` 平行；建议改读那一份，理由与 `docs/wiring-requests-2026-10-06-prob3.md` 的 R1 同族。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（`relatedInformation` 透传）** —— 与 bucket2b / msgaudit 同一条：前端已接，native/bridge 未透传。需 native/bridge owner。
+- **R2（状态栏「按检查项」入口）** —— 目标 `src/App.vue` 状态栏（本 lane），登记为待办（可选）。
+- **R3（面板选中行 Alt+Enter）** —— 目标 `src/keymapBindings.ts` + `src/actionRegistry.ts`（保留文件）。需 action/keymap owner。
+- **R4（面板焦点态抛状态栏）** —— 目标 `src/App.vue`（本 lane），`ProblemsPanel.vue:101/:143` 的 `focusChange` 已就绪。登记为待办。
+
+结论：零接线（R1 前端已接；R2/R4 登记，R3 转 owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（R1 前端已接；R2/R4 登记，R3 转 owner）。」。
+本 lane 本轮接线：**R2 已接**（`src/App.vue` 加 `unusedDeclarationCount`（`problemKindOf` 判 tags）+ 状态栏「未使用 N」芯片，import `./inspectionIdentity`）与 **R4 已接**（`ProblemsPanel` 挂载加 `@focus-change="problemsFocus = $event"` + `problemsFocus` ref + 状态栏「只看：…」芯片）。R1 需 native/bridge owner；R3 需 `src/actionRegistry.ts` / `src/keymapBindings.ts`（非本 lane 面）。

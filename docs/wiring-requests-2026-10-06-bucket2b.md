@@ -28,3 +28,11 @@
 
 - 桶 2 判词里「状态栏的 profile 切换器」已经有落点：`src/components/InspectionProfileSwitcher.vue`（36 行，切根 profile），主代理复核说已挂在 `App.vue:2307` —— 本轮**没有**再交这条请求。
 - 本轮新增的 `src/inspectionIdentity.ts` **零保留文件依赖**：它被 `src/problemsView.ts`、`src/inspectionProfile.ts`、`src/components/ProblemsPanel.vue`、`src/annotatorHighlights.ts` 四处消费，`node .tools/find-orphan-modules.mjs --gate` 里没有它。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（`relatedInformation` / `codeDescription.href` 透传）部分** —— 前端侧**已接**：`src/problems.ts:30-71` 已有 `related` 折叠面（两种线上形态都认），`src/components/ProblemsPanel.vue:59/:271-282/:788-797` 已有行菜单「相关位置」一节 + 点开跳源。**native 侧 `native/lsp_support.cpp` 的 `shape_diagnostics` 仍未透传**（本 lane `grep related native/lsp_support.cpp` 0 命中），而 `src/bridge.ts` 也未加这两个字段 ⇒ 宿主没给时 `related` 恒空。需 **native owner + bridge owner** 同批透传（前端消费链已就绪，透传即生效）。
+- **R2（按检查项入口）** —— 请求原文自述「App.vue 不改就没有额外要做的事」。面板自带 `<option value="inspection">`，无挂载点缺口。
+- **R3** —— 状态说明，`InspectionProfileSwitcher` 已挂 `App.vue`。
+
+结论：前端侧零待接；native/bridge 那半转给对应 owner。

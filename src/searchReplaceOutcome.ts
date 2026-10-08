@@ -32,3 +32,42 @@ export function incompleteNote(result: SearchReplaceResult): string {
   if (!reasons.length) return ''
   return `⚠ 替换不完整：${reasons.join('；')}。请检查相关文件后重做。`
 }
+
+/**
+ * 「替换全部」第一段要说的那句确认（只说话，不动文件；第二次点「全部替换」才真替换）。
+ *
+ * 上游是模态框：`find.replace.all.confirmation` = `Replace {0} occurrences of ''{1}''<br>across
+ * {2} files with ''{3}''?`（`platform/analysis-impl/resources/messages/FindBundle.properties:108`，
+ * 长串另有 `:109` 一档；调用点 `platform/lang-impl/src/com/intellij/find/replaceInProject/ReplaceInProjectManager.java:258,262`）。
+ * 四样信息一样不少：**处数、被查的串、跨几个文件、替换成的串**。本仓没有模态框，就用面板的两段式确认
+ * 承接同一份信息 —— 少报任何一样都比上游低一档（先前那句只说「将替换工作区内全部匹配」，四样全无）。
+ *
+ * 两种「没数据」不能写成结论：
+ *   · `listed === 0`：确认可以出现在**还没搜过**的时候（面板的 `canSearch` 只要求查询词非空），
+ *     那时的 0 处 / 0 个文件是"没列过"，不是"没有匹配"，报成数字就是把没做过的事报成做过。
+ *   · 有作用域 vs 没有：范围内只能改**列出来的**那些（原生一个 include 列表表达不了
+ *     「作用域 ∩ 文件掩码」）；范围外那一支原生会重扫，未列出的匹配**同样会被改写**。
+ */
+export interface ReplaceAllConfirmInfo {
+  /** 本次搜索列出的处数（0 = 还没搜过）。 */
+  listed: number
+  /** 本次搜索涉及的文件数（作用域过滤后重算过的那个数）。 */
+  files: number
+  query: string
+  replacement: string
+  truncated: boolean
+  /** 空串 = 「项目」（不限定作用域）。 */
+  scope: string
+}
+
+export function replaceAllConfirmNote(info: ReplaceAllConfirmInfo): string {
+  const scoped = Boolean(info.scope)
+  const head = scoped ? `作用域“${info.scope}”内` : '工作区内'
+  const pair = `「${info.query}」→「${info.replacement}」`
+  const listed = Math.max(0, Math.trunc(info.listed))
+  const files = Math.max(0, Math.trunc(info.files))
+  if (!listed) return `将替换${head}全部匹配 ${pair}。本次还没搜过，处数与文件数以实际扫描为准。再次点击“全部替换”确认。`
+  const counts = `${listed} 处${pair}，涉及 ${files} 个文件`
+  const caveat = scoped ? '；范围限定下不会改写未列出的文件' : (info.truncated ? '（含未列出的部分）' : '')
+  return `将替换${scoped ? `${head}已列出的 ` : `${head} `}${counts}${caveat}。再次点击“全部替换”确认。`
+}

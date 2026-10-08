@@ -22,7 +22,7 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 /* Compact mode (IDEA AppearanceConfigurable "UI elements take up less screen space"):
    control heights, panel headings and tab strips shrink. Only density variables are
    touched, so layout rules never fork. */
-html[data-density='compact'] { --ctrl-height-sm: 20px; --ctrl-height: 24px; --ctrl-height-lg: 27px; --panel-heading-h: 26px; --tab-h: 28px; --chrome-height: 32px; }
+html[data-density='compact'] { --ctrl-height-sm: 20px; --ctrl-height: 24px; --ctrl-height-lg: 27px; --panel-heading-h: 26px; --tool-window-header-h: 31px; --tab-h: 28px; --chrome-height: 32px; }
 /* IDEA "Display icons in menu items" off: the icon column collapses so the titles
    move to the left, exactly like a Swing menu without icons. */
 html[data-menu-icons='off'] .menu-item-icon { display: none; }
@@ -44,7 +44,7 @@ html[data-tool-stripes='off'] .activity-bar { display: none; }
 /* IDEA "Show tool window numbers": Alt+1..9 mnemonics sit on the stripe buttons. */
 .activity-number { display: none; }
 html[data-tool-numbers='on'] .activity-button { position: relative; }
-html[data-tool-numbers='on'] .activity-number { position: absolute; top: 1px; right: 2px; display: inline-flex; align-items: center; justify-content: center; min-width: 12px; height: 12px; padding: 0 2px; border-radius: 6px; background: var(--selected); color: var(--secondary); font: 600 9px/1 var(--font-mono); }
+html[data-tool-numbers='on'] .activity-number { position: absolute; top: 1px; right: 2px; display: inline-flex; align-items: center; justify-content: center; min-width: 12px; height: 12px; padding: 0 2px; border-radius: var(--radius-pill); background: var(--selected); color: var(--secondary); font: 600 9px/1 var(--font-mono); }
 html[data-tool-numbers='on'][data-tool-names='on'] .activity-number { top: 2px; right: 4px; }
 .dock-split { flex-shrink: 0; height: 1px; background: var(--line-strong); margin: var(--space-1) 0; }
 .side-by-side-tree { flex: 1 1 40%; min-height: 120px; }
@@ -53,7 +53,7 @@ select { font: inherit; }
 option { background-color: Canvas; color: CanvasText; }
 button { color: inherit; cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), box-shadow var(--dur-2) var(--ease); }
 button:disabled { cursor: default; opacity: .4; }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 ::selection { background: var(--selection); color: var(--bright); }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar); border: 2px solid transparent; background-clip: padding-box; border-radius: 8px; transition: background-color var(--dur-1) var(--ease); }
@@ -85,6 +85,7 @@ html[data-window-active='inactive'] .topbar { background-color: var(--header-bg-
    Gray1），悬停底色 = --header-hover（Icon.hoverBackground / pressedBackground 这一对，
    两份主题都只给一个值）。控件是"图标 + 文字"，字色跟着顶栏前景走才不会在两层面上打架。 */
 .topbar .menu-button, .topbar .header-widget, .topbar .icon-button { color: var(--header-fg); }
+.topbar .brand { color: var(--header-fg); }
 .topbar .menu-button:hover, .topbar .menu-button[aria-expanded=true],
 .topbar .header-widget:hover, .topbar .icon-button:hover:not(:disabled) { background: var(--header-hover); color: var(--header-fg); }
 .topbar .header-widget:active, .topbar .icon-button:active:not(:disabled) { background: var(--header-hover); }
@@ -113,7 +114,7 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
    居中，真机上一列菜单行看着是「每条各自居中」而不是一张左对齐的表。量
    `getBoundingClientRect().left` 看不出来，只有截图能看出来，所以把它压到基类上一次解决。
    内容宽度的按钮（顶栏菜单、设置标签）本来就是自身宽度，左对齐与居中等价，不会被这条改坏。 */
-.menu-button { background: transparent; border: 0; padding: var(--space-1) var(--space-2); min-height: 28px; color: var(--secondary); border-radius: var(--radius-xs); text-align: left; }
+.menu-button { background: transparent; border: 0; padding: var(--space-1) var(--space-2); min-height: var(--menu-row-height); color: var(--secondary); border-radius: var(--radius-xs); text-align: left; }
 .menu-button:hover, .menu-button[aria-expanded=true] { color: var(--bright); background: var(--hover); }
 .menu-anchor { position: relative; }
 .dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; width: max-content; min-width: 244px; max-width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 80px); overflow: auto; z-index: 20; background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); padding: var(--space-1); color: var(--popup-foreground); box-shadow: var(--popup-shadow); transform-origin: top left; }
@@ -152,14 +153,14 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .zen-exit:hover { color: var(--bright); background: var(--hover); }
 .menu-item-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 14px; color: var(--secondary); }
 .menu-item-title, .recent-menu-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.menu-item > kbd { margin-left: 20px; font-size: 10px; color: var(--muted); }
+.menu-item > kbd { margin-left: var(--space-5); font-size: 10px; color: var(--muted); }
 .dropdown > .menu-item:disabled { opacity: 1; color: var(--muted); }
 .dropdown > .menu-item:disabled > * { opacity: .55; }
-.menu-section-label { display: flex; align-items: center; gap: var(--space-2); min-height: 26px; padding: 5px 8px 3px 30px; color: var(--muted); font-size: 10px; font-weight: 400; letter-spacing: .03em; line-height: 16px; user-select: none; }
+.menu-section-label { display: flex; align-items: center; gap: var(--space-2); min-height: 26px; padding: 5px var(--space-2) 3px 30px; color: var(--muted); font-size: 10px; font-weight: 400; letter-spacing: .03em; line-height: 16px; user-select: none; }
 .menu-section-label::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-.menu-rule { height: 1px; margin: 4px 8px; background: var(--line); }
+.menu-rule { height: 1px; margin: var(--space-1) var(--space-2); background: var(--line); }
 .menu-rule + .menu-section-label { padding-top: 2px; }
-.menu-empty { display: block; padding: 3px 8px 6px 30px; font-size: 11px; color: var(--muted); }
+.menu-empty { display: block; padding: 3px var(--space-2) 6px 30px; font-size: 11px; color: var(--muted); }
 /* IDEA New UI header widgets (RunToolbarWidgetAction / main.toolbar.git.Branches). */
 .topbar-widgets { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; }
 /* 工具栏按钮的 hover 圆角。HeaderToolbarButtonLook.kt:58-59 `getButtonArc()` 返回
@@ -195,13 +196,13 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .project-widget { position: relative; display: flex; align-items: center; flex-shrink: 0; }
 .project-widget-name { overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 .project-widget-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: flex; flex-direction: column; min-width: 300px; max-width: 420px; max-height: 360px; overflow: auto; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
-.project-widget-search { margin-bottom: var(--space-2); padding: 4px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel); color: var(--bright); font-size: 11px; }
-.project-widget-group { padding: 4px var(--space-2) 2px; color: var(--muted); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+.project-widget-search { margin-bottom: var(--space-2); padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel); color: var(--bright); font-size: 11px; }
+.project-widget-group { padding: var(--space-1) var(--space-2) 2px; color: var(--muted); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 .project-widget-row { display: flex; align-items: flex-start; gap: var(--space-2); width: 100%; text-align: left; }
 .project-widget-details { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .project-widget-title { color: var(--bright); font-size: 12px; }
 .project-widget-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
-.project-widget-branch { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
+.project-widget-branch { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--muted); font-size: 10px; }
 /* 项目 widget 的下拉箭头翻转：与其它 caret（`.tree-chevron`）同一档反馈时长，
    原来写死 .15s 不走令牌，于是这一处比树展开快 30ms —— 肉眼能看出两处不同步。 */
 .project-widget-caret { transition: transform var(--dur-1) var(--ease); }
@@ -251,7 +252,7 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .filename-row > svg { flex-shrink: 0; }
 .filename-row-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .topbar-right { display: flex; flex: 1 0 0; justify-content: flex-end; gap: var(--space-2); align-items: center; }
-.icon-button { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--secondary); transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.icon-button { width: var(--ctrl-height); height: var(--ctrl-height); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--secondary); transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
 /* 主工具栏里的图标按钮 = 30x30（--toolbar-btn-size，上游 experimentalToolbarMinimumButtonSize）。
    通用 .icon-button 仍是 28x28，那是对话框/面板里的控件尺寸；用在工具栏上整行偏矮 2px。 */
 .topbar .icon-button, .topbar-menubar-row .icon-button { width: var(--toolbar-btn-size); height: var(--toolbar-btn-size); }
@@ -268,12 +269,12 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
    正好是"模板没声明"的那一支。`tests/ui-icons.test.mjs` 的「CSS 不许覆盖模板声明的图标尺寸」
    守着这条界线。 */
 .topbar .header-widget > svg, .topbar .icon-button > svg, .topbar-menubar-row .menu-button > svg { flex-shrink: 0; }
-.topbar .header-widget > svg:not(.lucide), .topbar .icon-button > svg:not(.lucide), .topbar-menubar-row .menu-button > svg:not(.lucide) { width: var(--toolbar-icon-size); height: var(--toolbar-icon-size); }
+.topbar .header-widget > svg:not(.lucide):not(.idea-icon), .topbar .icon-button > svg:not(.lucide):not(.idea-icon), .topbar-menubar-row .menu-button > svg:not(.lucide):not(.idea-icon) { width: var(--toolbar-icon-size); height: var(--toolbar-icon-size); }
 /* 停止/运行态的实心方块是状态指示而非主图标 —— 小一号（`--icon-size-control` = 14，
    与 `IntUiBridgeMenu.kt:107` 那一族同档）。同样只兜底不覆盖：模板写的是
    `:size="iconSize.control"`，CSS 不再有权把它改成别的数。 */
 .topbar .run-button > svg, .topbar .stop-button > svg { flex-shrink: 0; }
-.topbar .run-button > svg:not(.lucide), .topbar .stop-button > svg:not(.lucide) { width: var(--icon-size-control); height: var(--icon-size-control); }
+.topbar .run-button > svg:not(.lucide):not(.idea-icon), .topbar .stop-button > svg:not(.lucide):not(.idea-icon) { width: var(--icon-size-control); height: var(--icon-size-control); }
 /* 项目 widget 里的下拉箭头（`--icon-size-dense` = 12）：模板声明的是 `iconSize.dense`，
    这里只给非 lucide 的手写 svg 兜底，不再覆盖。 */
 .topbar .project-widget-caret, .topbar-menubar-row .project-widget-caret { width: var(--icon-size-dense); height: var(--icon-size-dense); }
@@ -282,7 +283,6 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .topbar .run-caret-glyph { width: var(--icon-size-dense); height: var(--icon-size-dense); }
 .icon-button:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .theme-toggle { color: var(--text); }
-.preview-banner { min-height: 29px; flex-shrink: 0; padding: var(--space-1) var(--space-3); display: flex; align-items: center; gap: var(--space-2); background: var(--warning-bg); border-bottom: 1px solid var(--line); color: var(--warning); font-size: 11px; }
 .preview-dot, .status-dot { display: inline-block; width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2px var(--success-bg); }
 .preview-dot { background: var(--warning); box-shadow: 0 0 0 2px var(--warning-bg); }
 .preview-description { min-width: 0; margin-left: var(--space-2); }
@@ -294,11 +294,15 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
    → ActionToolbar.java:84 → JBUI CurrentTheme.Toolbar.experimentalToolbarButtonSize()
    → JBUI.java:1276 `defaultExperimentalToolbarButtonSize() = size(30, 30)`。
    也就是 stripe 按钮和主工具栏按钮**同尺寸 30x30**（原先 40x40 每格高了 10px）。
-   图标 20px = JBUI.java:1334 `defaultStripeToolbarButtonIconSize() = 20`。 */
-.activity-bar { position: relative; width: 31px; min-width: 31px; min-height: 0; flex-shrink: 0; display: flex; align-items: center; flex-direction: column; gap: 3px; background: var(--rail); border-right: 1px solid var(--line); padding: var(--space-1) 0; }
+   图标 20px = JBUI.java:1334 `defaultStripeToolbarButtonIconSize() = 20`。
+   **按钮之间没有间距**：`AbstractDroppableStripe.layoutButton`（`:477-506`）把 `data.eachY`
+   一步推进 `preferredSize.height`，逐个相接（`gap` 只用在「前半组 / 后半组」那道拆分缝上，
+   不是按钮间距）。原先这里给每个按钮留 3px 间隙，6 个按钮就往下漂了 18px —— 与上游的
+   30px 步长对不上。 */
+.activity-bar { position: relative; width: 31px; min-width: 31px; min-height: 0; flex-shrink: 0; display: flex; align-items: center; flex-direction: column; gap: 0; background: var(--header-bg); border-right: 1px solid var(--header-line); padding: var(--space-1) 0; }
 /* 按钮列表自己滚：轨道不能滚 —— 宽度分隔线要整条贴着轨道内沿（IDEA 的 `mySplitter` 就在
    `ToolWindowToolbar` 上，位置由 `layoutContainer` 钉在 `width - 1` / `0`）。 */
-.stripe-list { flex: 0 1 auto; min-height: 0; width: 100%; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.stripe-list { flex: 0 1 auto; min-height: 0; width: 100%; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 0; }
 /* 侧条宽度的分隔线（IDEA `ResizeStripeManager.mySplitter`，1px、平时不画）。命中区靠 ::before
    撑到 7px —— 1px 的线在 DOM 里抓不住（Swing 那边是拖拽事件直接命中）。 */
 .stripe-resize-handle { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 5; cursor: col-resize; background: transparent; touch-action: none; user-select: none; transition: background-color var(--dur-1) var(--ease); }
@@ -308,7 +312,7 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .stripe-resize-handle:hover, .stripe-resize-handle.dragging { background: var(--accent); }
 /* 「更多」弹层（`ShowMoreToolWindowsAction`）：`minPopupWidth = JBUI.scale(300)`，位置由宿主按
    按钮矩形给（左条贴轨道外沿，右条 -300）。外观不另立配方，复用浮层族的 --popup-*。 */
-.stripe-popup { position: fixed; z-index: 60; display: flex; flex-direction: column; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.stripe-popup { position: fixed; z-index: 60; display: flex; flex-direction: column; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .stripe-popup-more { min-width: 300px; }
 .stripe-popup-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; justify-content: flex-start; text-align: left; }
 .stripe-popup-key { margin-left: auto; color: var(--muted); font: 11px var(--font-mono); }
@@ -317,30 +321,58 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
    被吃掉 12px 只剩 18px 内容宽，svg 又是 flex 项（默认 flex-shrink: 1），于是真机里活动条
    图标渲染成 18×20 而不是 20×20（CDP 取证：svg width 算出 18px，height 20px）。
    `flex-shrink: 0` 是同一件事的第二道保险 —— 尺寸不能被兄弟节点挤掉。 */
-.activity-button { position: relative; height: 30px; width: 30px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; padding: 0; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--muted); transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
+.activity-button { position: relative; height: 30px; width: 30px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; padding: 0; background: transparent; border: 0; color: color-mix(in srgb, var(--header-fg) 62%, transparent); transition: color var(--dur-1) var(--ease); }
+/* hover / pressed 的底色**不是 30px 铺满**：上游 `SquareStripeButtonLook.paintBackground`
+   （`SquareStripeButtonLook.kt:71-76`）先用 `getIconPadding`（默认 `insets(5)`，
+   `JBUI.java:1349-1351`）把按钮矩形缩到 20x20 再画，圆角取 `stripeButtonArc`
+   （`JBUI.java:1360-1362`，默认 12 ⇒ 20px 的盒基本是个圆）。所以底色画在 ::after 上、inset 5px，
+   图标与文字再用 z-index 压在它上面。名称开着时底色铺满按钮（那支 look 是
+   `SquareStripeButtonLookHorizontalText`，带文字的按钮本来就是整块高亮）。 */
+.activity-button::after { content: ''; position: absolute; inset: var(--stripe-btn-icon-padding); z-index: 0; border-radius: var(--stripe-btn-arc); background: transparent; pointer-events: none; transition: background-color var(--dur-1) var(--ease); }
+.activity-button > * { position: relative; z-index: 1; }
+html[data-tool-names='on'] .activity-button::after { inset: 0; }
 /* 活动条的图标：20px 盒 = `--icon-size-rail`（与 JBUI.java:1297/:1313/:1337 三个入口一致，
-   也与 `.topbar` 那一族同值）。`flex-shrink: 0` 与 `stroke-width: 2` 对 lucide 图标仍然有效 ——
-   20px 配 1.7 换算是 0.085em，而其余图标（13px 配 lucide 默认 2）是 0.154em，轨道上的笔画
-   细了近一倍，两边不像同一套图标。`width`/`height` 只兜底非 lucide 的手写 svg：
-   lucide 把尺寸渲染成属性（`lucide-vue-next/dist/esm/Icon.js`），CSS 写上去就会覆盖模板的 `:size`。 */
-.activity-button > svg { flex-shrink: 0; stroke-width: 2; }
-.activity-button > svg:not(.lucide) { width: var(--icon-size-rail); height: var(--icon-size-rail); }
-.activity-button::before { content: ''; position: absolute; left: -5px; width: 2px; height: 16px; border-radius: 2px; background: var(--accent); opacity: 0; transform: scaleY(.4); transition: transform var(--dur-2) var(--ease), opacity var(--dur-1) var(--ease); }
-.activity-button:hover { color: var(--text); background: var(--hover); }
-.activity-button.active { color: var(--accent); background: var(--selected); }
+   也与 `.topbar` 那一族同值）。`flex-shrink: 0` 对两条图标通道都有效。
+   两条通道的笔画归属**不同**，所以这里分开写：
+     · lucide 是 24 格描边图，笔画由 `stroke-width` 决定 —— 20px 配 1.7 换算是 0.085em，
+       而其余图标（13px 配 lucide 默认 2）是 0.154em，轨道上的笔画细了近一倍，
+       两边不像同一套图标，所以统一抬到 2（`ICON_STROKE`）。
+     · IDEA 的 expui 图标（`.idea-icon`）**自带笔画**（20 格那份写死 `stroke-width="1.5"`，
+       实心那几支根本不用描边）—— 上游就是这么画的，用 CSS 覆盖会把它改成另一套笔画。
+   `width`/`height` 只兜底非 lucide、非 idea-icon 的手写 svg：
+   lucide 把尺寸渲染成属性（`lucide-vue-next/dist/esm/Icon.js`），idea-icon 渲染成
+   `width`/`height` 属性（`components/icons/IdeaIcon.ts`），CSS 写上去就会覆盖模板的 `:size`。 */
+.activity-button > svg { flex-shrink: 0; }
+.activity-button > svg.lucide { flex-shrink: 0; stroke-width: 2; }
+.activity-button > svg:not(.lucide):not(.idea-icon) { width: var(--icon-size-rail); height: var(--icon-size-rail); }
+.activity-button::before { content: ''; position: absolute; left: -5px; width: 2px; height: 16px; border-radius: 2px; background: var(--header-accent); opacity: 0; transform: scaleY(.4); transition: transform var(--dur-2) var(--ease), opacity var(--dur-1) var(--ease); }
+.activity-button:hover { color: var(--header-fg); }
+.activity-button:hover::after { background: var(--header-hover); }
+.activity-button.active { color: var(--header-accent); }
+.activity-button.active::after { background: var(--header-hover); }
 .activity-button.active::before { opacity: 1; transform: scaleY(1); }
-.rail-divider { height: 1px; flex-shrink: 0; background: var(--line); width: 21px; margin: 12px 0; }
+/* 条纹里的分隔件（App.vue 那颗「处理记录」与下半组之间）= `StripeButtonSeparator`：
+   盒高 11（`StripeButtonSeparator.kt:22-23`），里面画一条 24x1、垂直居中的线（`:30-32`）——
+   原先写成 1px 的线 + 上下 12px 外边距（共 25px），比上游高了 14px，下半组整体往下漂。 */
+.rail-divider { height: var(--stripe-separator-height); width: 100%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.rail-divider::before { content: ''; width: var(--stripe-separator-line-width); height: var(--stripe-separator-line-thickness); background: var(--header-line); }
 .rail-bottom { margin-top: auto; padding-bottom: 13px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
-.local-avatar { display: inline-flex; width: 25px; height: 25px; border-radius: 50%; border: 1px solid var(--line-strong); justify-content: center; align-items: center; color: var(--secondary); font: 11px var(--font-brand); }
+.local-avatar { display: inline-flex; width: 25px; height: 25px; border-radius: 50%; border: 1px solid var(--header-line); justify-content: center; align-items: center; color: var(--header-fg); font: 11px var(--font-brand); }
 .explorer-panel { width: var(--explorer-width, 240px); min-width: 0; min-height: 0; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--panel); border-right: 1px solid var(--line); }
-/* Right-docked tool windows (IDEA ToolWindowAnchor.RIGHT): mirrored column. */
-.explorer-panel.right-dock { border-right: 0; border-left: 1px solid var(--line); }
+/* Right-docked tool windows (IDEA ToolWindowAnchor.RIGHT): mirrored column.
+   `order` 必不可少：右 dock 的 <aside> 在模板里位于左 dock **之前**（App.vue 那条
+   `activeAnchor === 'right'` 的分支写在左侧那一支前面），workbench 是 flex，
+   没有 order 时按 DOM 顺序排 ⇒ 右停靠的窗口会渲染在整行最左（Gradle/通知/Agent
+   全部中招，2026-10-07 由 Agent 窗口显形）。98 让它落在编辑器之后、右条纹（99）之前。 */
+.explorer-panel.right-dock { width: var(--right-dock-width, 240px); border-right: 0; border-left: 1px solid var(--line); order: 98; }
+/* 右 dock 的宽度分隔条：紧贴在右 dock 左侧 ⇒ order 排在它前一位（97）。 */
+.resize-right-dock { order: 97; }
 /* IDEA's right stripe: same narrow rail as the left activity bar, on the right. */
 .activity-bar.right-stripe { border-right: 0; border-left: 1px solid var(--line); order: 99; }
 /* The ⋮ strip on a tool window: title + Move to Left/Right/Bottom + Hide
    (UIBundle tool.window.move.to.action.group.name). */
-.tool-strip-heading { position: relative; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; min-height: var(--panel-heading-h); padding: 0 var(--space-2) 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; letter-spacing: .05em; border-bottom: 1px solid var(--line); }
-.tool-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 60; display: flex; flex-direction: column; min-width: 170px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.tool-strip-heading { position: relative; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; min-height: var(--tool-window-header-h); padding: 0 var(--space-2) 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; letter-spacing: .05em; border-bottom: 1px solid var(--line); }
+.tool-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 60; display: flex; flex-direction: column; min-width: 170px; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 /* 锚点菜单（底部 dock 标签右击）Teleport 到 body：位置由指针给出，所以不能吃 .tool-menu 的 absolute/top/right 那套"贴着父容器"的定位。 */
 .tool-anchor-menu { position: fixed; top: auto; right: auto; }
 /* 底部 dock 的齿轮弹层（ToolWindowGear.vue）：fixed + 往上长 —— `.output-panel` 是 overflow:hidden，
@@ -375,7 +407,8 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .panel-heading { height: var(--panel-heading-h); min-height: var(--panel-heading-h); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; border-bottom: 1px solid var(--line); }
 .panel-heading > span:first-child { display: inline-flex; align-items: center; gap: var(--space-2); }
 .heading-actions { display: flex; align-items: center; flex-shrink: 0; gap: var(--space-1); }
-.workspace-heading { display: flex; align-items: center; gap: var(--space-1); height: 30px; flex-shrink: 0; min-width: 0; padding: 0 var(--space-3); color: var(--text); font-size: 12px; }
+.workspace-heading { position: relative; display: flex; align-items: center; gap: var(--space-1); height: 30px; flex-shrink: 0; min-width: 0; padding: 0 var(--space-3); border-bottom: 1px solid var(--line); background: var(--rail); color: var(--bright); font-size: 12px; }
+.workspace-heading::before { content: ''; position: absolute; inset: 7px auto 7px 0; width: 2px; background: var(--accent); }
 .workspace-heading > svg { flex-shrink: 0; }
 .workspace-heading > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .local-tag { border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); padding: 1px var(--space-1); font-size: 10px; flex-shrink: 0; }
@@ -385,18 +418,19 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 /* Indentation contributes to the root's intrinsic width, never to name truncation. */
 .tree-list { list-style: none; padding: 0; margin: 0; min-width: 100%; width: 100%; }
 .tree-scroll > .tree-list { width: max-content; }
-.tree-entry { height: 26px; padding: 0 var(--space-3); border: 0; background: transparent; display: flex; align-items: center; gap: var(--space-1); min-width: 100%; width: 100%; text-align: left; color: var(--text); font-size: 12px; }
+.tree-entry { position: relative; height: var(--tree-row-h); padding: 0 var(--space-3); border: 0; background: transparent; display: flex; align-items: center; gap: var(--space-1); min-width: 100%; width: 100%; text-align: left; color: var(--text); font-size: 12px; }
 .tree-chevron { transition: transform var(--dur-2) var(--ease); }
 .tree-chevron.expanded { transform: rotate(90deg); }
 .tree-entry:hover { background: var(--hover); }
-.tree-entry.selected { background: var(--selected); color: var(--bright); }
+.tree-entry.selected { background: var(--accent-soft); color: var(--accent); }
+.tree-entry.selected::before { content: ''; position: absolute; inset: 5px auto 5px 0; width: 2px; background: var(--accent); }
 .tree-entry > svg, .tree-spacer { flex-shrink: 0; }
 .tree-spacer { width: 12px; }
 .tree-name { white-space: nowrap; flex-shrink: 0; }
 .folder-icon { color: var(--secondary); }
 .code-icon { color: var(--accent); }
 .empty-folder { padding: var(--space-1) 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
-.explorer-empty { padding: 28px 16px; color: var(--muted); text-align: center; line-height: 1.7; }
+.explorer-empty { padding: 28px var(--space-4); color: var(--muted); text-align: center; line-height: 1.7; }
 .subtle-button { border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); color: var(--text); padding: var(--space-1) var(--space-3); }
 .subtle-button:hover { background: var(--hover); color: var(--bright); }
 .explorer-footer { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; margin: var(--space-2) var(--space-3) var(--space-1); font-size: 11px; color: var(--secondary); }
@@ -408,7 +442,7 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .resize-explorer, .resize-trace { width: 4px; cursor: col-resize; }
 .resize-output { height: 4px; cursor: row-resize; }
 .resize-handle:hover, .resize-handle:focus-visible { background: var(--accent); }
-.resize-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.resize-handle:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .editor-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--editor); }
 /* 分屏容器：只装编辑器组与分隔条，底部工具窗口条在它外面（IDEA 的 split 是 EditorWindowSplitters）。 */
 .editor-groups { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -441,12 +475,13 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .editor-tabs { display: flex; height: var(--tab-strip-row); min-height: var(--tab-strip-row); flex-shrink: 0; background: var(--editor); border-bottom: 1px solid var(--line); overflow-x: auto; }
 .file-tab { display: flex; align-items: center; border-right: 1px solid var(--line); border-top: 2px solid transparent; padding: 0 5px 0 0; flex-shrink: 0; transition: background-color var(--dur-1) var(--ease), border-color var(--dur-2) var(--ease); }
 .file-tab.selected { background: var(--editor); border-top-color: var(--accent); }
+.file-tab:not(.selected):hover { background: var(--hover); }
 /* IDEA's pinned tab: the pin glyph replaces the file icon; bulk close skips it. */
 .file-tab.pinned .pin-mark { color: var(--accent); flex-shrink: 0; margin-left: var(--space-1); }
 .tab-select { display: flex; height: 100%; align-items: center; gap: var(--space-2); background: transparent; border: 0; color: var(--secondary); padding: 0 10px 0 14px; font-size: 12px; white-space: nowrap; }
 .file-tab.selected .tab-select { color: var(--bright); }
 .tab-select > svg { color: var(--accent); flex-shrink: 0; }
-.tab-close { background: transparent; border: 0; display: flex; align-items: center; justify-content: center; padding: 0; height: 24px; width: 24px; border-radius: var(--radius-xs); color: var(--muted); }
+.tab-close { background: transparent; border: 0; display: flex; align-items: center; justify-content: center; padding: 0; height: var(--ctrl-height-sm); width: var(--ctrl-height-sm); border-radius: var(--radius-xs); color: var(--muted); }
 .tab-close:hover { color: var(--bright); background: var(--hover); }
 .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 0 2px var(--warning-bg); }
 .tab-toolbar { margin-left: auto; position: sticky; right: 0; display: flex; flex-shrink: 0; align-items: center; gap: 2px; padding: 0 6px; background: var(--rail); border-left: 1px solid var(--line); }
@@ -468,7 +503,7 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .breadcrumb-chain { display: flex; align-items: center; min-width: 0; }
 .breadcrumb-slot { display: flex; align-items: center; min-width: 0; }
 .breadcrumb-seg { padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-.breadcrumb-seg:focus-visible { outline: none; box-shadow: var(--ring); }
+.breadcrumb-seg:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .crumb-bg-hovered { background: var(--hover); }
 .crumb-bg-current { background: var(--accent-soft); color: var(--accent); }
 .crumb-bg-inactive { color: var(--muted); }
@@ -515,7 +550,7 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .find-icon { display: inline-flex; align-items: center; padding: 0 2px; color: var(--muted); }
 .find-field-wrap { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
 .find-field { flex: 1 1 auto; min-width: 0; height: var(--ctrl-height-sm); padding: 0 var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 12px var(--font-ui); }
-.find-field:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.find-field:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 /* 坏正则 = 输入框画红（上游 `PatternUtil` 报错的等价物）。 */
 .find-field.invalid { border-color: var(--error); background: var(--error-bg); }
 .find-status { flex: 0 0 auto; min-width: 44px; padding: 0 var(--space-1); text-align: right; color: var(--muted); font: 11px var(--font-mono); }
@@ -535,28 +570,28 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .merge-bar-count { flex: 0 0 auto; min-width: 34px; color: var(--muted); font: 11px var(--font-mono); }
 .merge-bar-action { flex: 0 0 auto; height: var(--ctrl-height-sm); padding: 0 var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: transparent; color: var(--text); font: 12px var(--font-ui); }
 .merge-bar-action:hover { background: var(--hover); color: var(--bright); }
-.find-history { position: absolute; top: calc(var(--ctrl-height-sm) + 2px); left: 0; right: 0; z-index: 60; max-height: 220px; overflow: auto; padding: var(--space-1); border: var(--popup-border); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.find-history { position: absolute; top: calc(var(--ctrl-height-sm) + 2px); left: 0; right: 0; z-index: 60; max-height: 220px; overflow: auto; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .find-history-row { width: 100%; font: 12px var(--font-mono); }
 .find-replace-row .find-field { font-family: var(--font-mono); }
 /* IDEA's lightweight information hint (HintManagerImpl / GotoNextErrorHandler:138): a label
    above the caret line, dismissed by the next key, a text change or a scroll. */
-.editor-hint { position: absolute; z-index: 40; max-width: 70%; padding: 4px 8px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--text); font-size: 12px; box-shadow: var(--popup-shadow); pointer-events: none; }
+.editor-hint { position: absolute; z-index: 40; max-width: 70%; padding: var(--space-1) var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--text); font-size: 12px; box-shadow: var(--popup-shadow); pointer-events: none; }
 /* 字面量预览（ImageOrColorPreviewService）：Shift + 悬停在颜色/图片字面量上时贴出的小卡片。 */
-.literal-preview { position: absolute; z-index: 41; padding: 6px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); pointer-events: none; }
+.literal-preview { position: absolute; z-index: 41; padding: 6px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); pointer-events: none; }
 .literal-preview-color { display: flex; align-items: center; gap: 6px; }
-.literal-preview-chip { width: 28px; height: 18px; border: 1px solid var(--completion-border); border-radius: 3px; }
+.literal-preview-chip { width: 28px; height: 18px; border: 1px solid var(--completion-border); border-radius: var(--radius-xs); }
 .literal-preview-label { color: var(--muted); font: 11px var(--font-mono); }
 .literal-preview-image { display: block; max-width: 220px; max-height: 160px; image-rendering: pixelated; }
-.welcome-screen { margin: auto; width: 100%; max-width: 520px; max-height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: 24px 28px; }
+.welcome-screen { margin: auto; width: 100%; max-width: 620px; max-height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: clamp(24px, 5vh, 52px) clamp(20px, 4vw, 44px); }
 .workbench-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
 .back-to-projects { display: inline-flex; align-items: center; gap: var(--space-1); margin-top: var(--space-4); color: var(--muted); }
 .eyebrow { font: 10px var(--font-brand); letter-spacing: 1.1px; color: var(--muted); }
-.welcome-screen h1 { margin: 10px 0 12px; font-weight: 500; color: var(--bright); font-size: clamp(20px, 2vw, 24px); line-height: 1.4; letter-spacing: .2px; }
+.welcome-screen h1 { margin: 10px 0 var(--space-3); font-weight: 500; color: var(--bright); font-size: clamp(20px, 2vw, 24px); line-height: 1.4; letter-spacing: .2px; }
 .welcome-screen h1 > span { color: var(--secondary); }
 .welcome-screen > p { color: var(--secondary); font-size: 12px; line-height: 1.8; }
 .primary-button { background: var(--accent); color: var(--on-accent); border: 1px solid var(--accent); border-radius: var(--radius-sm); min-height: 32px; padding: var(--space-1) var(--space-3); display: inline-flex; gap: var(--space-2); align-items: center; font-weight: 500; margin-top: var(--space-3); }
 .primary-button:hover { background: var(--accent-hover); }
-.primary-button:focus-visible { outline-color: var(--on-accent); outline-offset: -4px; }
+.primary-button:focus-visible { outline: var(--focus-ring-on-accent); outline-offset: var(--focus-ring-offset-inset); }
 .primary-button > svg { flex-shrink: 0; }
 .welcome-shortcuts { display: flex; flex-direction: column; gap: var(--space-2); font-size: 11px; color: var(--muted); margin-top: var(--space-4); max-width: 260px; }
 .welcome-shortcuts > span { display: flex; justify-content: space-between; gap: var(--space-3); }
@@ -564,7 +599,10 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .welcome-boundary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); color: var(--muted); font-size: 11px; line-height: 1.7; border-top: 1px solid var(--line); padding-top: var(--space-3); margin-top: var(--space-5); }
 /* Keep space for editor chrome when the window shrinks after an output resize. */
 .output-panel { height: var(--output-height, 180px); min-width: 0; min-height: 0; max-height: calc(100% - 110px); flex-shrink: 0; border-top: 1px solid var(--line-strong); display: flex; flex-direction: column; overflow: hidden; background: var(--editor); }
-.output-heading { height: 32px; min-height: 32px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); border-bottom: 1px solid var(--line); padding: 0 var(--space-3); background: var(--panel); }
+/* 底部工具窗口的头部（内容标签条 + 齿轮 + 收起）：与 `.tool-strip-heading` 同一个上游度量
+   （`ToolWindow.Header.height`，默认 41 / compact 31）—— 原先这里与侧条一样写死 32，
+   不是任何一处上游取值。 */
+.output-heading { height: var(--tool-window-header-h); min-height: var(--tool-window-header-h); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); border-bottom: 1px solid var(--line); padding: 0 var(--space-3); background: var(--panel); }
 .output-tabs { height: 100%; display: flex; flex-shrink: 1; min-width: 0; gap: var(--space-4); overflow-x: auto; }
 .output-tabs > button { height: 100%; padding: 0; border: 0; border-bottom: 1px solid transparent; background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .output-tabs > button.selected { color: var(--text); border-bottom-color: var(--accent); }
@@ -596,10 +634,10 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .memory-gauge > i { position: absolute; top: 0; bottom: 0; left: 0; }
 .memory-gauge-allocated { background: var(--line-strong); }
 .memory-gauge-used { background: var(--accent); }
-.tab-alert { flex-shrink: 0; margin-left: 4px; color: var(--accent); }
+.tab-alert { flex-shrink: 0; margin-left: var(--space-1); color: var(--accent); }
 /* COMBO content UI (`ToggleContentUiTypeMode`, `ContentComboLabel.java`): the same list of contents
    as the tab strip above, presented as one combo box instead. */
-.output-content-select { height: 20px; max-width: 260px; min-width: 90px; flex-shrink: 1; padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--elevated); color: var(--text); font-size: 11px; }
+.output-content-select { height: 20px; max-width: 260px; min-width: 90px; flex-shrink: 1; padding: 0 var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--elevated); color: var(--text); font-size: 11px; }
 /* `ContentComboLabel.java`：图标 + 名称 + 箭头；单击弹内容列表（`toggleContentPopup`）。 */
 .content-combo { position: relative; display: inline-flex; min-width: 0; }
 .content-combo-toggle { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
@@ -613,23 +651,23 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .small-muted { color: var(--muted); font-size: 10px; }
 .output-heading .heading-actions { min-width: 28px; flex-shrink: 1; }
 .output-heading .small-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); letter-spacing: .6px; margin-right: 5px; white-space: nowrap; }
-.output-lines { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 9px 17px 12px; font: 12px/1.8 var(--font-mono); }
+.output-lines { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 9px 17px var(--space-3); font: 12px/1.8 var(--font-mono); }
 .output-line { display: flex; gap: var(--space-3); white-space: nowrap; }
 .output-line > span { flex-shrink: 0; }
 .log-time, .log-id { color: var(--muted); }
 .log-method { min-width: 99px; color: var(--secondary); }
 .log-result { color: var(--text); }
-.log-target { color: var(--muted); padding-left: 8px; }
+.log-target { color: var(--muted); padding-left: var(--space-2); }
 .output-line.failure .log-result { color: var(--error); background: var(--error-bg); border-radius: var(--radius-xs); padding: 0 var(--space-1); }
 .output-placeholder { color: var(--muted); overflow-wrap: anywhere; }
 .run-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .run-toolbar { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
 .run-command { flex: 1; min-width: 0; background: var(--elevated); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px 10px; font: 12px var(--font-mono); }
-.run-log { flex: 1; min-width: 0; min-height: 0; overflow: auto; margin: 0; padding: 10px 16px; color: var(--secondary); font: 12px/1.6 var(--font-mono); }
+.run-log { flex: 1; min-width: 0; min-height: 0; overflow: auto; margin: 0; padding: 10px var(--space-4); color: var(--secondary); font: 12px/1.6 var(--font-mono); }
 .run-line { white-space: pre-wrap; overflow-wrap: anywhere; }
 .run-issue-link { display: inline; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; }
 .run-issue-link:hover { color: var(--text); }
-.run-placeholder { margin: 0; padding: 10px 16px; color: var(--muted); font: 12px/1.6 var(--font-mono); }
+.run-placeholder { margin: 0; padding: 10px var(--space-4); color: var(--muted); font: 12px/1.6 var(--font-mono); }
 .run-issues { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-top: 1px solid var(--line); background: var(--rail); }
 .run-issue-count { color: var(--muted); font-size: 11px; }
 .run-stdin { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border-top: 1px solid var(--line); }
@@ -637,12 +675,12 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .run-stdin input { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font: 12px var(--font-mono); }
 .sc-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .sc-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); color: var(--secondary); border-bottom: 1px solid var(--line); }
-.sc-branch { flex: 1; min-width: 0; background: var(--elevated); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 4px 6px; font-size: 12px; }
+.sc-branch { flex: 1; min-width: 0; background: var(--elevated); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: var(--space-1) 6px; font-size: 12px; }
 .sc-commit { padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
-.sc-commit textarea { background: var(--elevated); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px 8px; font: 12px/1.5 var(--font-ui, inherit); resize: vertical; }
+.sc-commit textarea { background: var(--elevated); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px var(--space-2); font: 12px/1.5 var(--font-ui, inherit); resize: vertical; }
 .sc-commit-button { justify-self: start; }
 .sc-amend { display: flex; align-items: center; gap: var(--space-1); color: var(--secondary); font-size: 11px; cursor: pointer; }
-.sc-amend input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.sc-amend input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); margin: 0; accent-color: var(--accent); }
 /* IDEA ChangesViewCommitPanel: message box header, the changes-tree header with
    修改(M) + 展开, and the 提交(N) / 提交并推送(P) action row under the tree. */
 .sc-msg-history { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-xs); max-height: 160px; overflow: auto; }
@@ -658,7 +696,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .sc-inspection-line:hover { text-decoration: underline; }
 .sc-inspection-text { white-space: nowrap; }
 .sc-inspection-excess { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--warning); font: 11px var(--font-mono); }
-.sc-inspection-fix { padding: 0 4px; font-size: 10px; }
+.sc-inspection-fix { padding: 0 var(--space-1); font-size: 10px; }
 .sc-changes-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-3); }
 .sc-actions { display: flex; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); }
 /* IDEA's commit progress panel prints the reason a commit was refused just above the
@@ -697,9 +735,9 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 /* IDEA's CommitOptionsPanel groups the commit options under their VCS name and under
    `commit.checks.group` (VcsBundle.properties:44). */
 .sc-options-group { margin: var(--space-1) 0 0; color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
-.sc-error { color: var(--error); font-size: 12px; margin: 0 12px; overflow-wrap: anywhere; }
-.sc-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 0 12px; }
-.sc-section { margin: 4px 0; }
+.sc-error { color: var(--error); font-size: 12px; margin: 0 var(--space-3); overflow-wrap: anywhere; }
+.sc-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 0 var(--space-3); }
+.sc-section { margin: var(--space-1) 0; }
 .sc-section h3 { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-1) var(--space-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .sc-count { color: var(--secondary); font-weight: 400; }
 .sc-row { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2) 0 var(--space-3); transition: background-color var(--dur-1) var(--ease); }
@@ -709,26 +747,14 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .sc-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .diff-dialog { width: min(900px, 92vw); max-height: 84vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-3); }
 .diff-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--text); }
-.diff-head small { color: var(--muted); margin-left: 8px; font-weight: 400; }
-.diff-body { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 12px 16px; white-space: pre; font: 12px/1.6 var(--font-mono); color: var(--secondary); background: var(--editor); }
+.diff-head small { color: var(--muted); margin-left: var(--space-2); font-weight: 400; }
+.diff-body { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: var(--space-3) var(--space-4); white-space: pre; font: 12px/1.6 var(--font-mono); color: var(--secondary); background: var(--editor); }
 .trace-panel { display: flex; flex-direction: column; width: var(--trace-width, 300px); min-width: 0; min-height: 0; flex-shrink: 0; overflow: auto; background: var(--panel); border-left: 1px solid var(--line); }
 .trace-panel > :not(.trace-list) { flex-shrink: 0; }
 .trace-panel .panel-heading { border-bottom: 1px solid var(--line); }
-.observe-badge { display: inline-flex; gap: var(--space-1); align-items: center; padding: 3px var(--space-2); border: 1px solid currentColor; border-radius: var(--radius-pill); font-size: 10px; color: var(--success); background: var(--success-bg); white-space: nowrap; }
-.trace-intro { padding: 20px 20px 14px; }
-.trace-intro .eyebrow { font-size: 10px; }
-.trace-intro h2 { margin: 10px 0 8px; font-size: 16px; font-weight: 500; letter-spacing: .3px; color: var(--bright); }
-.trace-intro p { margin: 0; font-size: 12px; line-height: 1.8; color: var(--secondary); }
-.bridge-route { display: flex; align-items: flex-start; margin: 5px 16px 18px; padding: 12px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--elevated); box-shadow: var(--shadow-1); }
-.bridge-route > div { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); min-width: 42px; }
-.route-icon { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--accent); background: var(--selected); width: 29px; height: 28px; }
-.route-icon.native { color: var(--success); background: var(--success-bg); border-color: currentColor; }
-.bridge-route strong { font: 11px var(--font-mono); font-weight: 600; color: var(--text); }
-.bridge-route > div > span:last-child { font-size: 10px; color: var(--muted); }
-.route-line { flex: 1; border-top: 1px dashed var(--line-strong); text-align: center; margin: 14px 4px 0; padding-top: 6px; font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .trace-list-heading { display: flex; flex-wrap: wrap; gap: var(--space-1); justify-content: space-between; color: var(--secondary); font-size: 11px; padding: 0 var(--space-4) var(--space-2); }
 .trace-list-heading > span:last-child { color: var(--muted); font-size: 10px; }
-.trace-list { flex: 1; min-height: 80px; overflow: auto; padding: 0 11px 8px; }
+.trace-list { flex: 1; min-height: 80px; overflow: auto; padding: 0 11px var(--space-2); }
 .trace-item { position: relative; border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 5px; background: var(--elevated); }
 .trace-item.error { border-color: var(--error); }
 .trace-summary { display: flex; align-items: flex-start; width: 100%; gap: var(--space-2); border: 0; background: transparent; padding: var(--space-2) var(--space-2); text-align: left; }
@@ -740,19 +766,12 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .trace-title strong { font-size: 12px; font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
 .trace-title > span { font: 11px var(--font-mono); color: var(--muted); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .trace-timing { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); color: var(--muted); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; flex-shrink: 0; padding-top: 2px; }
-.trace-detail { padding: 0 12px 8px; border-top: 1px solid var(--line-strong); font-size: 11px; color: var(--text); overflow-wrap: anywhere; }
+.trace-detail { padding: 0 var(--space-3) var(--space-2); border-top: 1px solid var(--line-strong); font-size: 11px; color: var(--text); overflow-wrap: anywhere; }
 .trace-detail p { display: flex; gap: var(--space-2); }
 .trace-detail p > span { flex-shrink: 0; width: 36px; color: var(--muted); }
 .trace-detail code { min-width: 0; font: 11px var(--font-mono); }
-.trace-empty { padding: 24px 13px; text-align: center; color: var(--muted); }
+.trace-empty { padding: var(--space-6) 13px; text-align: center; color: var(--muted); }
 .trace-empty p { color: var(--secondary); font-size: 12px; }
-.trace-empty > span { font-size: 11px; line-height: 1.8; }
-.trace-retention { font-size: 10px; color: var(--muted); text-align: center; padding: 9px 12px 13px; }
-.capabilities { margin: 0 16px 14px; padding-top: 12px; border-top: 1px solid var(--line-strong); }
-.capabilities-heading { display: flex; gap: var(--space-2); align-items: center; font-size: 11px; color: var(--secondary); margin-bottom: var(--space-2); }
-.capabilities > div:not(.capabilities-heading) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1); font-size: 11px; color: var(--secondary); margin: var(--space-2) 0; }
-.capabilities > div > span:last-child { color: var(--muted); }
-.capabilities > div > span.capability-ready { color: var(--success); background: var(--success-bg); border-radius: var(--radius-xs); padding: var(--space-1); }
 /* 状态栏高度不是拍脑袋的常数，IDEA 是算出来的（platform-impl/.../status/）：
      :266  getTopWidth()   = JBUI.getInt("StatusBar.topBorderWidth", 1)        → 顶边框 1px
      :169-170 minIconHeight = JBUIScale.scale(18 + 1 + 1)                       → 20
@@ -764,7 +783,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
    而且漏了 :269 的左右 10px 内边距。
    --statusbar-height 同时供状态栏内的按钮/品牌块取高（都用 calc(高度 - 1px 顶边框)），
    改这里要一起生效。 */
-.statusbar { position: relative; min-height: var(--statusbar-height); flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line-strong); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; padding: 0 10px; color: var(--secondary); font-size: 11px; }
+.statusbar { position: relative; min-height: var(--statusbar-height); flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line-strong); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 var(--space-3); padding: 0 10px; color: var(--secondary); font-size: 11px; }
 .status-left, .status-right { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); min-width: 0; min-height: calc(var(--statusbar-height) - 1px); }
 .status-left > span { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 .status-brand { display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--accent-soft); color: var(--accent); width: 30px; height: calc(var(--statusbar-height) - 1px); }
@@ -778,45 +797,45 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
    行首那一列是**独立的编号**（PopupListElementRenderer.java:363-369 的 myMnemonicLabel），
    不是文案里的 "1. " 前缀；置灰的行仍留在表里（SelectInAction.java:99-105 showDisabledActions=true）。 */
 .select-in { position: fixed; z-index: 70; display: flex; flex-direction: column; min-width: 220px; max-width: 340px; padding: var(--popup-pad) 0; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--popup-background); color: var(--popup-foreground); box-shadow: var(--popup-shadow); outline: none; }
-.select-in-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--popup-row-h); margin: 0 var(--popup-selection-inset); padding: 2px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: start; cursor: default; }
+.select-in-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--popup-row-h); margin: 0 var(--popup-selection-inset); padding: 2px var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: start; cursor: default; }
 .select-in-row.is-selected { background: var(--popup-selection); }
 .select-in-row:disabled { color: var(--popup-disabled); }
 .select-in-number { flex: 0 0 auto; min-width: 1ch; color: var(--popup-mnemonic); font-variant-numeric: tabular-nums; }
 .select-in-row.is-selected .select-in-number { color: inherit; }
 .select-in-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.select-in-filter { margin: 0; padding: 2px 10px 4px; color: var(--completion-info); }
-.select-in-empty { margin: 0; padding: 4px 10px; color: var(--completion-info); }
+.select-in-filter { margin: 0; padding: 2px 10px var(--space-1); color: var(--completion-info); }
+.select-in-empty { margin: 0; padding: var(--space-1) 10px; color: var(--completion-info); }
 /* 「选择声明」（转到声明有多个目标时的弹出列表，`GotoDeclarationAction` 的 Choose Declaration）。
    一行三段照 `TargetPresentationMainRenderer.kt:31-50`：图标 + 主文本 + 灰色 " (in 容器)"；
    位置文本由 `TargetPresentationRenderer.kt:70-83` 单独一列、**右对齐**。 */
 .choose-target { position: fixed; z-index: 70; display: flex; flex-direction: column; min-width: 260px; max-width: 560px; padding: var(--popup-pad) 0; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--popup-background); color: var(--popup-foreground); box-shadow: var(--popup-shadow); outline: none; }
-.choose-target-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: 0; padding: 2px 10px 4px; color: var(--popup-foreground); }
+.choose-target-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: 0; padding: 2px 10px var(--space-1); color: var(--popup-foreground); }
 /* 上游 `setCouldPin` 的钉按钮长在标题栏里（`AbstractPopup.java:501-508` 的 InplaceButton），
    tooltip 取 `show.in.find.window.button.name.newui`。 */
 .choose-target-pin { display: inline-flex; align-items: center; justify-content: center; padding: 0; width: 20px; height: 20px; border: 0; border-radius: var(--radius-xs); background: none; color: var(--secondary); cursor: default; }
 .choose-target-pin:hover { background: var(--hover); color: var(--bright); }
-.choose-target-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--popup-row-h); margin: 0 var(--popup-selection-inset); padding: 2px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: start; cursor: default; }
+.choose-target-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--popup-row-h); margin: 0 var(--popup-selection-inset); padding: 2px var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: start; cursor: default; }
 .choose-target-row.is-selected { background: var(--popup-selection); }
 .choose-target-icon { flex: 0 0 auto; color: var(--secondary); }
 .choose-target-row.is-selected .choose-target-icon { color: inherit; }
 .choose-target-name { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .choose-target-container { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--completion-info); }
 .choose-target-position { flex: 0 0 auto; margin-left: auto; padding-left: 10px; color: var(--completion-info); font-variant-numeric: tabular-nums; }
-.choose-target-filter { margin: 0; padding: 2px 10px 4px; color: var(--completion-info); }
-.choose-target-empty { margin: 0; padding: 4px 10px; color: var(--completion-info); }
+.choose-target-filter { margin: 0; padding: 2px 10px var(--space-1); color: var(--completion-info); }
+.choose-target-empty { margin: 0; padding: var(--space-1) 10px; color: var(--completion-info); }
 /* 「快速定义」（`ShowImplementationsAction` 那个弹层）：标题一行 + 只读源码正文，目标行整行底色。
    与另一个弹层同族：同一套浮层令牌、等宽字体、点外面/Esc 关闭。 */
 .quick-definition { position: fixed; z-index: 71; display: flex; flex-direction: column; width: 560px; max-width: calc(100vw - 16px); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--popup-background); color: var(--popup-foreground); box-shadow: var(--popup-shadow); outline: none; }
-.quick-definition-title { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; padding: 4px 10px; border-bottom: var(--popup-border); }
+.quick-definition-title { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; padding: var(--space-1) 10px; border-bottom: var(--popup-border); }
 .quick-definition-path { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--completion-info); font: 11px var(--font-mono); }
-.quick-definition-code { margin: 0; max-height: 320px; overflow: auto; padding: 4px 0; font: 12px/1.55 var(--font-mono); }
+.quick-definition-code { margin: 0; max-height: 320px; overflow: auto; padding: var(--space-1) 0; font: 12px/1.55 var(--font-mono); }
 .quick-definition-line { display: block; padding: 0 10px; white-space: pre; }
 .quick-definition-line.is-target { background: var(--completion-selection); }
-.quick-definition-number { display: inline-block; width: 3.5ch; margin-right: 8px; color: var(--muted); text-align: right; user-select: none; }
+.quick-definition-number { display: inline-block; width: 3.5ch; margin-right: var(--space-2); color: var(--muted); text-align: right; user-select: none; }
 /* `text-align: left` 与 `.tool-menu-item`（:318）同一个理由：`<button>` 的 UA 默认是 center，
    而标题 span 是 `flex: 1`，居中会让每行看着各自居中而不是一张左对齐的表。 */
 .status-toolwindows-row { display: flex; align-items: center; gap: var(--space-2); text-align: left; }
-.status-toolwindows-group { display: block; margin: 4px 0 2px; padding: 0 8px; color: var(--muted); font-size: 10px; text-transform: none; }
+.status-toolwindows-group { display: block; margin: var(--space-1) 0 2px; padding: 0 var(--space-2); color: var(--muted); font-size: 10px; text-transform: none; }
 .status-toolwindows-name { flex: 1; text-align: left; }
 .status-toolwindows-key { color: var(--secondary); font: 400 10px/1 var(--font-mono); }
 .status-toolwindows-empty { margin: 0; padding: var(--space-2); color: var(--secondary); }
@@ -844,7 +863,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
    scoped 只改选择器，`animation-name` 的查找始终是文档级的。 */
 .status-spin { animation: tc-spin var(--dur-spin) var(--ease-linear) infinite; }
 @keyframes tc-spin { to { transform: rotate(360deg); } }
-.status-progress-list { position: absolute; bottom: 100%; left: 0; z-index: 40; display: flex; flex-direction: column; gap: var(--space-2); min-width: 280px; max-width: 380px; margin-bottom: 4px; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.status-progress-list { position: absolute; bottom: 100%; left: 0; z-index: 40; display: flex; flex-direction: column; gap: var(--space-2); min-width: 280px; max-width: 380px; margin-bottom: var(--space-1); padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .status-progress-row { display: flex; flex-direction: column; gap: 1px; margin: 0; }
 .status-progress-row strong { color: var(--text); font-size: 11px; font-weight: 600; }
 .status-progress-row span { color: var(--secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -871,13 +890,13 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .status-spin { animation: none; } }
 .status-count { color: var(--accent); }
 /* IDEA's ColumnSelectionModePanel: a highlighted status-bar widget while the mode is on. */
-.status-column { color: var(--accent) !important; background: var(--accent-soft); border-radius: var(--radius-xs); padding: 0 4px; }
+.status-column { color: var(--accent) !important; background: var(--accent-soft); border-radius: var(--radius-xs); padding: 0 var(--space-1); }
 /* IDEA PowerSaveStatusWidgetFactory: the icon that flags power save mode. */
 /* IDEA IdeStatusBarImpl/ViewStatusBarWidgetsGroup: right-click lists the widgets. */
 /* `max-height`/`overflow-y` 是兜底：正常情况下菜单翻到锚点上方就完整可见了（位置由
    src/menuPlacement.ts 夹），只有窗口极矮、菜单比视口还高时才需要它自己滚动。
    不写这两条时那种情况下菜单仍然整块溢出视口，而且没有滚动条可救。 */
-.status-widget-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; min-width: 190px; max-height: calc(100vh - 8px); overflow-y: auto; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.status-widget-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; min-width: 190px; max-height: calc(100vh - 8px); overflow-y: auto; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .status-widget-title { padding: var(--space-1) var(--space-2); color: var(--muted); font-size: 11px; }
 /* 这里原来只有 `justify-content` / `gap` / `width`，**没有 `display: flex`** ——
    `<button>` 默认 inline-block，那两条声明整条失效（与 `.tool-menu-item` 在 :311 踩的是同一个坑，
@@ -902,7 +921,7 @@ html[data-motion='reduced'] .plugin-spin { opacity: .45; }
 /* IDEA 'Use contrast scrollbars' + colour-vision filter + custom UI font size. */
 html[data-scrollbars='contrast'] * { scrollbar-color: var(--bright) var(--panel); }
 html[data-scrollbars='contrast'] ::-webkit-scrollbar { width: 14px; height: 14px; }
-html[data-scrollbars='contrast'] ::-webkit-scrollbar-thumb { background: var(--bright); border: 2px solid var(--panel); border-radius: 7px; }
+html[data-scrollbars='contrast'] ::-webkit-scrollbar-thumb { background: var(--bright); border: 2px solid var(--panel); border-radius: var(--radius-md); }
 html[data-scrollbars='contrast'] ::-webkit-scrollbar-track { background: var(--panel); border-left: 1px solid var(--line-strong); }
 html[data-color-blind='deuteranopia'] body { filter: url(#cb-deuteranopia); }
 html[data-color-blind='protanopia'] body { filter: url(#cb-protanopia); }
@@ -949,7 +968,7 @@ html[data-main-menu='hamburger'] .topbar { position: relative; }
 /* 溢出按钮（merged 档）点开的是**同一个**完整菜单弹层 —— 上游两档共用一个 `MainMenuButton`
    （`MainMenuWithButton.kt:47`），只是 merged 档的图标换成 `ChevronRight`（:142）。 */
 html[data-main-menu='hamburger'][data-menu-expanded='on'] .menubar,
-html[data-main-menu='merged'][data-menu-expanded='on'] .menubar { display: flex; position: absolute; top: 0; bottom: 0; left: var(--header-inset); z-index: 31; align-items: center; padding-right: 12px; background-color: var(--header-bg); background-image: var(--project-tint, none); }
+html[data-main-menu='merged'][data-menu-expanded='on'] .menubar { display: flex; position: absolute; top: 0; bottom: 0; left: var(--header-inset); z-index: 31; align-items: center; padding-right: var(--space-3); background-color: var(--header-bg); background-image: var(--project-tint, none); }
 /* merged 档折进溢出按钮的顶层菜单：行面上不出现，但**留在 DOM 里**（弹层展开时要列出全部项，
    而且 `display:none` 之后 offsetWidth 归零 —— 宽度按 MergedMainMenu.kt:171-176 的同一个理由缓存）。 */
 .menu-folded { display: none; }
@@ -963,7 +982,7 @@ html[data-main-menu='hamburger'] .topbar-menubar-row { min-height: var(--chrome-
 html[data-main-menu='merged'] { --topbar-height: var(--chrome-height); }
 html[data-main-menu='hamburger'] { --topbar-height: var(--chrome-height); }
 /* MainMenuButton: experimentalToolbarButtonSize 30x30, burgerMenuButtonIconSize 20 (JBUI.java:1277-1315). */
-.icon-button.hamburger-button { flex-shrink: 0; width: 30px; height: 30px; }
+.icon-button.hamburger-button { flex-shrink: 0; width: var(--toolbar-btn-size); height: var(--toolbar-btn-size); }
 /* Visually hidden live region that announces notifications to assistive technology. */
 .sr-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 /* IDEA 'Support screen readers': the tooltip suppression itself is done by removing
@@ -977,8 +996,8 @@ html[data-bracket-matching='off'] .cm-nonmatchingBracket { background: none !imp
 html[data-background='on'] .editor-stage { background-image: var(--bg-image-url); background-size: var(--bg-image-size, contain); background-repeat: var(--bg-image-repeat, no-repeat); background-position: var(--bg-image-position, center); }
 html[data-background='on'] .editor-stage .cm-editor { background: color-mix(in srgb, var(--editor) calc((1 - var(--bg-image-opacity, 1)) * 100%), transparent); }
 /* Presentation mode: bigger text, no chrome (IDEA presentationMode). */
-html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-banner { font-size: 1.15em; }
-.status-notice-list { position: absolute; bottom: 100%; right: 8px; z-index: 50; display: flex; flex-direction: column; gap: 2px; min-width: 300px; max-width: 420px; max-height: 280px; overflow: auto; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+html[data-presentation='on'] .statusbar { font-size: 1.15em; }
+.status-notice-list { position: absolute; bottom: 100%; right: 8px; z-index: 50; display: flex; flex-direction: column; gap: 2px; min-width: 300px; max-width: 420px; max-height: 280px; overflow: auto; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .status-notice-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 11px; }
 .status-notice-row { display: flex; gap: var(--space-2); margin: 0; color: var(--text); font-size: 11px; line-height: 1.6; }
 .status-notice-row.error { color: var(--error); }
@@ -992,29 +1011,29 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 /* 通知上的动作按钮（`Notification.addAction`）：小、贴左，与正文一样宽的一栏里，不抢主操作的视觉重量。 */
 .notice-action { padding: 1px var(--space-2); font-size: 11px; }
 .status-notice-track { flex: 0 0 74px; height: 3px; border-radius: 2px; background: var(--accent); }
-.status-powersave { display: inline-flex; align-items: center; gap: 3px; color: var(--warning) !important; background: var(--warning-bg); border-radius: var(--radius-xs); padding: 0 4px; }
+.status-powersave { display: inline-flex; align-items: center; gap: 3px; color: var(--warning) !important; background: var(--warning-bg); border-radius: var(--radius-xs); padding: 0 var(--space-1); }
 .status-right { margin-left: auto; gap: 0; padding-right: 10px; }
 .status-right > span { white-space: nowrap; font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
 /* IDEA StatusBar.Widget.border: New UI insets(6, 8) (JBUI.java:1021-1026), content-sized. */
-.status-right > button { display: flex; align-items: center; justify-content: center; white-space: nowrap; background: transparent; border: 0; border-radius: var(--radius-xs); padding: 6px 8px; color: var(--secondary); }
+.status-right > button { display: flex; align-items: center; justify-content: center; white-space: nowrap; background: transparent; border: 0; border-radius: var(--radius-xs); padding: 6px var(--space-2); color: var(--secondary); }
 .status-right > button:hover { background: var(--hover); color: var(--bright); }
 /* Notices reserve space above the status bar; long messages scroll within three lines. */
 .notice { display: flex; align-items: flex-start; gap: var(--space-2); flex-shrink: 0; min-width: 0; max-width: 100%; padding: var(--space-1) var(--space-2); border-top: 1px solid var(--line-strong); background: var(--success-bg); color: var(--success); font-size: 11px; line-height: 1.6; }
 .notice > span { flex: 1; min-width: 0; max-height: 4.8em; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
-.notice > .icon-button { width: 24px; height: 24px; color: inherit; }
+.notice > .icon-button { width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); color: inherit; }
 .notice.error { background: var(--error-bg); color: var(--error); }
 .workspace-notice { position: fixed; z-index: 30; right: 14px; bottom: 36px; width: max-content; max-width: min(420px, calc(100vw - 28px)); align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); background: var(--elevated); color: var(--text); border: var(--popup-border); border-radius: var(--radius-md); box-shadow: var(--shadow-2); }
 .workspace-notice.error { background: var(--elevated); border-color: var(--error); color: var(--text); }
 .notice-icon { flex-shrink: 0; color: var(--success); }
 .workspace-notice.error .notice-icon { color: var(--error); }
 .workspace-notice.clickable { cursor: pointer; }
-.modal-backdrop { position: fixed; inset: 0; z-index: 50; background: var(--backdrop); display: flex; justify-content: center; align-items: flex-start; padding: clamp(20px, 10vh, 90px) 20px 20px; overflow: auto; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 50; background: var(--backdrop); display: flex; justify-content: center; align-items: flex-start; padding: clamp(var(--space-5), 10vh, 90px) var(--space-5) var(--space-5); overflow: auto; }
 .command-palette { display: flex; flex-direction: column; width: 580px; max-width: 100%; max-height: 100%; min-height: 0; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-3); overflow: hidden; }
 .palette-input { display: flex; align-items: center; flex-shrink: 0; gap: var(--space-3); padding: var(--space-3) var(--space-3); border-bottom: 1px solid var(--line-strong); color: var(--accent); }
 .palette-input > svg { flex-shrink: 0; }
-.palette-input > input { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--bright); padding: 4px 0; font-size: 14px; }
+.palette-input > input { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--bright); padding: var(--space-1) 0; font-size: 14px; }
 .palette-input > input::placeholder { color: var(--muted); }
-.palette-scope { flex-shrink: 0; padding: 11px 16px; color: var(--muted); font-size: 11px; }
+.palette-scope { flex-shrink: 0; padding: 11px var(--space-4); color: var(--muted); font-size: 11px; }
 .palette-results { min-height: 0; max-height: 330px; overflow: auto; padding: 0 7px 7px; }
 .palette-results > button { display: flex; align-items: center; width: 100%; text-align: left; gap: var(--space-2); padding: var(--space-2) var(--space-2); min-height: 34px; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--text); }
 .palette-results > button:hover, .palette-results > button.highlighted { background: var(--selected); }
@@ -1025,10 +1044,10 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
    header, monospace snippet under each file name, editor-colored list background. */
 .locations-dialog { width: min(700px, 94vw); }
 .locations-dialog .palette-results { max-height: min(450px, 60dvh); background: var(--panel); }
-.locations-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-shrink: 0; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.locations-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-shrink: 0; padding: 6px var(--space-3); border-bottom: 1px solid var(--line); }
 .locations-header h2 { margin: 0; font-size: 12px; font-weight: 700; color: var(--bright); }
 .locations-toggle { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--secondary); white-space: nowrap; cursor: pointer; }
-.locations-toggle input { width: 14px; height: 14px; accent-color: var(--accent); }
+.locations-toggle input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); accent-color: var(--accent); }
 .locations-toggle kbd { margin-left: 2px; }
 .location-row { align-items: flex-start !important; }
 .location-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
@@ -1039,8 +1058,8 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .action-group { color: var(--muted); font-size: 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 1px 6px; white-space: nowrap; }
 .palette-disabled { opacity: .5; }
 .mnemonic-pop { width: min(430px, 92vw); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-3); overflow: hidden; }
-.mnemonic-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2); padding: 2px 14px 12px; }
-.mnemonic-grid > button { display: flex; min-width: 0; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
+.mnemonic-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2); padding: 2px 14px var(--space-3); }
+.mnemonic-grid > button { display: flex; min-width: 0; flex-direction: column; align-items: center; gap: 2px; padding: 6px var(--space-1); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
 .mnemonic-grid > button:hover { background: var(--hover); border-color: var(--line-strong); }
 .mnemonic-grid kbd { color: var(--accent); font-size: 12px; }
 .mnemonic-grid span { max-width: 100%; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1052,27 +1071,24 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .mnemonic-columns .mnemonic-grid { flex: 1; padding: 0; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .mnemonic-grid-letters { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; }
 .mnemonic-grid > button.mnemonic-current { background: var(--accent); border-color: var(--accent); }
-.mnemonic-grid > button.mnemonic-current kbd, .mnemonic-grid > button.mnemonic-current span { color: var(--accent-text, #fff); }
-.mnemonic-grid > button.mnemonic-assigned { background: var(--warning-soft, #f7c77733); border-color: var(--warning, #f7c777); }
+.mnemonic-grid > button.mnemonic-current kbd, .mnemonic-grid > button.mnemonic-current span { color: var(--on-accent); }
+.mnemonic-grid > button.mnemonic-assigned { background: var(--warning-bg); border-color: var(--warning); }
 .mnemonic-description { margin: var(--space-2) 14px; width: calc(100% - 28px); padding: 5px var(--space-2); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: 12px; }
-.mnemonic-legend { display: flex; align-items: center; gap: var(--space-1); padding: 0 14px 8px; color: var(--muted); font-size: 11px; }
-.mnemonic-legend .mnemonic-dot { width: 8px; height: 8px; margin-left: var(--space-2); border-radius: 50%; background: var(--warning, #f7c777); }
+.mnemonic-legend { display: flex; align-items: center; gap: var(--space-1); padding: 0 14px var(--space-2); color: var(--muted); font-size: 11px; }
+.mnemonic-legend .mnemonic-dot { width: 8px; height: 8px; margin-left: var(--space-2); border-radius: 50%; background: var(--warning); }
 .mnemonic-legend .mnemonic-dot.current { background: var(--accent); }
 .mnemonic-confirm { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); }
 .mnemonic-confirm p { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.6; }
-.help-dialog { position: relative; width: 520px; max-width: 100%; max-height: 100%; overflow: auto; padding: 24px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--elevated); box-shadow: var(--shadow-3); }
+.help-dialog { position: relative; width: 520px; max-width: 100%; max-height: 100%; overflow: auto; padding: var(--space-6); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--elevated); box-shadow: var(--shadow-3); }
 .help-close { position: absolute; right: 13px; top: 13px; }
-.help-dialog h2 { font: 22px var(--font-brand); color: var(--bright); padding-right: 20px; }
-.help-dialog h2 > span { font-size: 11px; color: var(--muted); margin-left: 9px; }.help-dialog > p { font-size: 12px; color: var(--secondary); line-height: 1.8; }
+.help-dialog h2 { font: 22px var(--font-brand); color: var(--bright); padding-right: var(--space-5); }
 /* IDEA's exit confirmation (ApplicationExitDialog): a short prompt, the "do not ask again"
    checkbox and the two buttons — narrower than the help dialog it is built on. */
 .exit-dialog { width: 400px; }
-.exit-dialog .leave-actions { margin-top: 16px; }
+.exit-dialog .leave-actions { margin-top: var(--space-4); }
 .help-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); margin: var(--space-5) 0; color: var(--text); font-size: 12px; }
-.help-note { color: var(--muted); font-size: 11px; line-height: 1.8; border-top: 1px solid var(--line-strong); padding-top: 14px; }
 .muted { color: var(--muted); }
 @media (max-width: 1200px) {
-  .trace-intro { padding: 18px 16px 14px; }
 }
 @media (max-width: 1000px) {
   .trace-panel { position: absolute; z-index: 7; right: 0; top: 0; bottom: 0; max-width: calc(100% - 48px); box-shadow: -10px 0 24px var(--shadow); }
@@ -1080,15 +1096,14 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
   .banner-right { display: none; }
 }
 @media (max-width: 700px) {
-  .topbar { gap: 4px 8px; padding: 5px 8px 0; flex-wrap: wrap; height: auto; min-height: 72px; }
+  .topbar { gap: var(--space-1) var(--space-2); padding: 5px var(--space-2) 0; flex-wrap: wrap; height: auto; min-height: 72px; }
   .brand { gap: 6px; font-size: 13px; }
   .menubar { order: 3; width: 100%; justify-content: flex-start; }
-  .menu-button { padding: 4px 8px; }
+  .menu-button { padding: var(--space-1) var(--space-2); }
   .topbar-right { gap: 2px; }
   .dropdown { position: fixed; top: 76px; left: 8px; right: 8px; width: auto; min-width: 0; max-width: none; max-height: calc(100dvh - 100px); transform-origin: top center; }
   .command-box { flex-basis: 120px; }
   .command-box kbd { display: none; }
-  .preview-banner { gap: 6px; padding: 5px 9px; }
   .preview-description { flex: 1; margin-left: 0; }
   .explorer-panel { position: absolute; left: 44px; z-index: 8; top: 0; bottom: 0; max-width: calc(100% - 44px); box-shadow: 10px 0 24px var(--shadow); }
   .resize-explorer { display: none; }
@@ -1098,34 +1113,43 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
   .output-heading .small-muted { display: none; }
   .output-tabs { gap: 14px; }
   .output-line { gap: 9px; }
-  .welcome-screen { padding: 16px 20px; }
-  .modal-backdrop { padding-left: 12px; padding-right: 12px; }
+  .welcome-screen { padding: var(--space-4) var(--space-5); }
+  .modal-backdrop { padding-left: var(--space-3); padding-right: var(--space-3); }
 }
 @media (max-height: 600px) {
   .trace-list { flex: 0 0 auto; min-height: 0; overflow: visible; }
-  .welcome-screen { padding: 16px 20px; }
-  .welcome-screen h1 { margin: 8px 0; }
-  .welcome-shortcuts { margin-top: 12px; }
+  .welcome-screen { padding: var(--space-4) var(--space-5); }
+  .welcome-screen h1 { margin: var(--space-2) 0; }
+  .welcome-shortcuts { margin-top: var(--space-3); }
   .welcome-boundary { margin-top: 14px; padding-top: 10px; }
 }
 
 /* ManageRecentProjectsAction.java (PlatformActions.xml:386) — the IDE renders a
    JBPopup with a recent-project tree, a search field, and the same multi-select
    remove behaviour as RemoveSelectedProjectsAction. TaoCode mirrors that with a
-   focused dialog of the same 300x485 dimensions. */
-.manage-recents-dialog { width: 480px; max-height: 70vh; padding: 18px; display: flex; flex-direction: column; gap: var(--space-2); }
+   focused dialog of the same 300x485 dimensions.
+   尺寸取源码：`ManageRecentProjectsAction.java:38-39` `DEFAULT_POPUP_HEIGHT = 485` /
+   `DEFAULT_POPUP_WIDTH = 300`，在 `:75` 由 `panel.setPreferredSize(JBUI.size(300, 485))` 落下。
+   原先这里写的是 480px —— 与本条注释自称的 300 不符，是目测值。高度取 485 的上限，
+   仅在视口比它还矮时收到 70vh（模态遮罩本来就能滚）。 */
+.manage-recents-dialog { width: 300px; max-height: min(485px, 70vh); padding: 18px; display: flex; flex-direction: column; gap: var(--space-2); }
 .manage-recents-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .manage-recents-head h2 { font: 18px var(--font-brand); color: var(--bright); margin: 0; }
-.manage-recents-search { width: 100%; padding: 8px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: 13px var(--font-brand); }
-.manage-recents-search:focus { outline: 1px solid var(--accent); outline-offset: 1px; }
+.manage-recents-search { width: 100%; padding: var(--space-2) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: 13px var(--font-brand); }
+.manage-recents-search:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 .manage-recents-list { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--editor); }
-.manage-recents-row { display: grid; grid-template-columns: 14px 1fr auto auto; align-items: center; gap: var(--space-2); padding: 6px var(--space-2); border-bottom: 1px solid var(--line); cursor: pointer; color: var(--secondary); transition: background-color var(--dur-1) var(--ease); }
+/* 一行五格：图标 · 名称 · 路径 · 「打开」· 「移除」。
+   原先写的是 `14px 1fr auto auto`（**四**格）而模板有五个子元素 —— CSS Grid 把第五个
+   （「移除」）自动落到第二行第一列，也就是那个 14px 的图标格里，两行之间还与名称/路径重叠，
+   正是「不允许重叠」要清掉的那类错位。名称/路径都用 `minmax(0, …)` 让它们在 300px 宽里
+   按比例收窄 + 省略号，而不是被 auto 那两格（按钮）挤到零。 */
+.manage-recents-row { display: grid; grid-template-columns: 14px minmax(0, 1.4fr) minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-2); padding: 6px var(--space-2); border-bottom: 1px solid var(--line); cursor: pointer; color: var(--secondary); transition: background-color var(--dur-1) var(--ease); }
 .manage-recents-row:last-child { border-bottom: none; }
 .manage-recents-row.is-selected { background: var(--selected); color: var(--bright); }
 .manage-recents-row:hover { background: var(--hover); }
 .manage-recents-name { color: var(--bright); font-weight: 600; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manage-recents-path { color: var(--muted); font: 11px var(--font-mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.manage-recents-row .subtle-button { padding: 2px 8px; font-size: 11px; }
+.manage-recents-row .subtle-button { padding: 2px var(--space-2); font-size: 11px; }
 .manage-recents-empty { padding: var(--space-3); color: var(--muted); text-align: center; font-size: 12px; }
 .manage-recents-foot { display: flex; justify-content: flex-end; gap: var(--space-2); padding-top: var(--space-1); border-top: 1px solid var(--line); }
 
@@ -1145,7 +1169,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .rename-target { margin: 0 0 var(--space-2); color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; }
 .rename-target code { color: var(--accent); font-family: var(--font-mono); }
 .rename-input { width: 100%; min-height: var(--ctrl-height-lg); padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font: 13px/1.5 var(--font-mono); }
-.rename-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.rename-input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 /* IDEA LocalHistoryDialog：时间线+diff 的对话框（ShowHistoryAction），宽而高，占屏 70%。 */
 .local-history-dialog { width: min(920px, 92vw); max-height: 78vh; display: flex; flex-direction: column; gap: var(--space-2); }
 .local-history-dialog > :first-of-type { flex: 1 1 auto; min-height: 0; overflow: auto; }
@@ -1178,7 +1202,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 
 /* File-tree context menu */
 .tree-menu-backdrop { position: fixed; inset: 0; z-index: 40; }
-.tree-menu { position: fixed; min-width: 168px; padding: 4px; background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); color: var(--popup-foreground); box-shadow: var(--popup-shadow); display: flex; flex-direction: column; transform-origin: top left; }
+.tree-menu { position: fixed; min-width: 168px; padding: var(--space-1); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); color: var(--popup-foreground); box-shadow: var(--popup-shadow); display: flex; flex-direction: column; transform-origin: top left; }
 .tree-menu > button { text-align: left; background: transparent; border: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-xs); color: var(--text); font-size: 12px; }
 .tree-menu > button:hover { background: var(--hover); color: var(--bright); }
 /* 键盘导航的活动行（`EditorPopupMenu` 的 ↑↓/→← 走查，见 src/menuKeyboard.ts）：与悬停同一观感。 */
@@ -1211,7 +1235,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .sc-badge { min-width: 15px; padding: 0 var(--space-1); border-radius: var(--radius-pill); background: var(--selected); color: var(--bright); font: 10px/1.5 var(--font-mono); text-align: center; }
 .sc-branch-ops { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); }
 .sc-input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
-.sc-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.sc-input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .sc-select { flex: 0 1 110px; }
 .sc-empty-line { margin: 0; padding: var(--space-1) var(--space-3); color: var(--muted); font-size: 11px; }
 
@@ -1219,9 +1243,9 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .run-configs { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3) 0; }
 .run-config-select { flex: 0 1 140px; min-height: var(--ctrl-height-sm); padding: 2px var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
 .run-config-name { flex: 0 1 120px; min-height: var(--ctrl-height-sm); padding: 2px var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
-.run-config-select:focus-visible, .run-config-name:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.run-config-select:focus-visible, .run-config-name:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .run-config-debug { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--secondary); font-size: 11px; cursor: pointer; white-space: nowrap; }
-.run-config-debug input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.run-config-debug input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); margin: 0; accent-color: var(--accent); }
 /* Full run-configuration editor: program / args / cwd / env / before-launch. */
 .run-config-editor { flex-shrink: 0; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); background: var(--rail); }
 .run-config-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); }
@@ -1229,14 +1253,14 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .run-field-wide { grid-column: 1 / -1; }
 .run-field input, .run-field select, .run-field textarea { min-height: var(--ctrl-height-sm); padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
 .run-field textarea { resize: vertical; line-height: 1.5; }
-.run-field input:focus-visible, .run-field select:focus-visible, .run-field textarea:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.run-field input:focus-visible, .run-field select:focus-visible, .run-field textarea:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .run-config-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); }
 .run-before { display: flex; flex-direction: column; gap: var(--space-1); }
 .run-before-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--muted); font-size: 10px; }
 .run-before-empty { margin: 0; color: var(--muted); font-size: 11px; }
 .run-before-row { display: grid; grid-template-columns: minmax(0, 140px) minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); }
 .run-before-name, .run-before-command { min-height: var(--ctrl-height-sm); padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
-.run-before-name:focus-visible, .run-before-command:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.run-before-name:focus-visible, .run-before-command:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 
 /* Safe Delete dialog: usages + recycle-bin choice */
 .delete-usages { max-height: 180px; overflow: auto; margin: var(--space-2) 0; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--editor); }
@@ -1248,7 +1272,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .delete-usage-row { display: block; width: 100%; padding: 1px 0; border: 0; background: transparent; color: var(--text); text-align: left; font: 11px var(--font-mono); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .delete-usage-row:hover { color: var(--accent); }
 .delete-trash { display: flex; align-items: center; gap: var(--space-1); margin-bottom: var(--space-2); color: var(--secondary); font-size: 11px; cursor: pointer; }
-.delete-trash input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.delete-trash input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); margin: 0; accent-color: var(--accent); }
 
 /* Plugin / worktree / submodule / file-history dialogs */
 .plugin-hint { margin: 0 0 var(--space-2); color: var(--muted); font-size: 11px; }
@@ -1260,7 +1284,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .plugin-name { color: var(--text); font-size: 12px; }
 .plugin-desc, .plugin-meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; color: var(--secondary); font-size: 11px; cursor: pointer; }
-.plugin-toggle input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.plugin-toggle input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); margin: 0; accent-color: var(--accent); }
 .worktree-row, .submodule-row { display: flex; align-items: center; gap: var(--space-2); padding: 3px 0; border-bottom: 1px solid var(--line); }
 .worktree-path, .submodule-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: 11px var(--font-mono); }
 .worktree-branch { flex-shrink: 0; color: var(--accent); font: 11px var(--font-mono); }
@@ -1270,7 +1294,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .worktree-add { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
 .worktree-add input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
 .worktree-new { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; color: var(--secondary); font-size: 11px; cursor: pointer; }
-.worktree-new input { flex: initial; width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.worktree-new input { flex: initial; width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); margin: 0; accent-color: var(--accent); }
 .file-history-dialog { width: min(760px, 92vw); }
 .file-history-body { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: var(--space-3); }
 .file-history-row { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
@@ -1302,7 +1326,12 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .call-empty { margin: 0; padding: 14px var(--space-3); color: var(--muted); font-size: 12px; }
 
 /* 文件编码：状态栏入口与对话框 */
-.status-chip { padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 状态栏 chip = 图标 + 文字的一行。`<button>` 的 UA 默认是 inline-block，SVG 是行内元素、
+   基线取自身下沿 —— 直接并排会让图标沉到文字基线上（`InternalErrorsChip` / `MacroRecordingChip` /
+   `LspServicesWidget` / `status-locked` / `status-powersave` 五处都带图标）。
+   统一成 inline-flex + 居中，与本域其余「图标 + 文字」行（`.status-file` / `.status-branch` / `.status-progress-toggle`）
+   同一写法。 */
+.status-chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .status-chip:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .status-locked { display: inline-flex; align-items: center; gap: 3px; color: var(--warning); }
 /* 检查配置档切换器（上游 InspectionProfileManager.setRootProfile 的状态栏落点）。 */
@@ -1318,7 +1347,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .encoding-bom { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); color: var(--secondary); font-size: 11px; }
 
 /* 快速文档（Quick Documentation） */
-.quickdoc-popup { position: fixed; z-index: 900; width: 460px; max-height: 300px; display: flex; flex-direction: column; background: var(--panel); border: var(--popup-border); border-radius: var(--radius-md); box-shadow: 0 4px 16px color-mix(in srgb, var(--shadow) 30%, transparent); }
+.quickdoc-popup { position: fixed; z-index: 900; width: 460px; max-height: 300px; display: flex; flex-direction: column; background: var(--popup-background); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
 .quickdoc-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 .quickdoc-body { margin: 0; padding: var(--space-2) var(--space-3); overflow: auto; flex: 1; font: 12px var(--font-mono); color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
 /* 弹层**内部**的分块。`QuickDocPopup.vue` 没有 <style> 块，class 名照抄上游 DocumentationMarkup 的四块
@@ -1367,12 +1396,12 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
    尺寸由 `quickEvaluatePopupSize` 按屏幕比例算完写进内联 style，这里只管外观。
    工具条那一块**故意没有规则**：`QUICK_EVALUATE_TOOLBAR` 的四个动作还差一个值输入界面，
    按 agent-playbook §3 不画点不动的按钮，所以这里也没有为它留位置。 */
-.quick-eval-hint { padding: var(--space-1) var(--space-2); background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--radius-sm); box-shadow: var(--shadow-2); overflow: hidden; }
+.quick-eval-hint { padding: var(--space-1) var(--space-2); background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); overflow: hidden; }
 .quick-eval-value { font: 12px var(--font-mono); color: var(--text); white-space: pre-wrap; word-break: break-word; }
 
 /* Signature help (参数信息) — IDEA's parameter info panel with overload navigation */
-.signature-popup { position: fixed; z-index: 900; width: 500px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--radius-md); box-shadow: var(--shadow-2); outline: none; }
-.signature-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); background: var(--panel); border-radius: var(--radius-md) var(--radius-md) 0 0; }
+.signature-popup { position: fixed; z-index: 900; width: 500px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); outline: none; }
+.signature-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); background: var(--panel); border-radius: var(--popup-radius) var(--popup-radius) 0 0; }
 .signature-overload { color: var(--muted); font: 11px var(--font-mono); white-space: nowrap; }
 .signature-nav { display: flex; gap: 1px; }
 .signature-body { padding: var(--space-2) var(--space-3); }
@@ -1398,8 +1427,8 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .diff-modes > button.selected { background: var(--selected); color: var(--bright); }
 .diff-sides { flex: 1; min-height: 0; overflow: auto; font: 12px/1.7 var(--font-mono); }
 .diff-line { display: grid; grid-template-columns: 46px minmax(0, 1fr) 46px minmax(0, 1fr); align-items: start; }
-.diff-no { padding: 0 8px; color: var(--muted); text-align: right; user-select: none; font-variant-numeric: tabular-nums; }
-.diff-cell { padding: 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 1px solid var(--line); }
+.diff-no { padding: 0 var(--space-2); color: var(--muted); text-align: right; user-select: none; font-variant-numeric: tabular-nums; }
+.diff-cell { padding: 0 var(--space-2); white-space: pre-wrap; overflow-wrap: anywhere; border-left: 1px solid var(--line); }
 .diff-delete > .diff-cell:last-child, .diff-insert > .diff-cell:first-child { background: var(--panel); }
 .diff-delete > .diff-cell:first-child { background: var(--error-bg); }
 .diff-insert > .diff-cell:last-child { background: var(--success-bg); }
@@ -1407,7 +1436,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .diff-change > .diff-cell:last-child { background: var(--success-bg); }
 .diff-word-del { background: var(--error-bg); box-shadow: inset 0 0 0 1px var(--error); border-radius: 2px; }
 .diff-word-add { background: var(--selection); box-shadow: inset 0 0 0 1px var(--success); border-radius: 2px; }
-.diff-note { margin: 0; padding: 8px 14px; color: var(--muted); font: 11px var(--font-ui); }
+.diff-note { margin: 0; padding: var(--space-2) 14px; color: var(--muted); font: 11px var(--font-ui); }
 
 /* IDEA tab drag & drop affordances */
 .file-tab.dragging { opacity: 0.45; }
@@ -1441,7 +1470,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .settings-filter-error { background: var(--search-field-error); border-color: var(--error); }
 .settings-filter-error input, .settings-filter-error input::placeholder { color: var(--text); }
 .settings-search-hint { margin: calc(var(--space-2) * -1) 0 var(--space-2); padding: 0 var(--space-1); color: var(--muted); font-size: 10px; line-height: 1.6; }
-.settings-crumbs[tabindex] { cursor: default; border-radius: var(--radius-xs); padding: 1px 4px; transition: background-color var(--dur-1) var(--ease); }
+.settings-crumbs[tabindex] { cursor: default; border-radius: var(--radius-xs); padding: 1px var(--space-1); transition: background-color var(--dur-1) var(--ease); }
 .settings-crumbs[tabindex]:hover, .settings-crumbs[tabindex]:focus-visible { background: var(--hover); outline: none; }
 .settings-crumb-menu { position: fixed; z-index: 30; min-width: 150px; color: var(--popup-foreground); box-shadow: var(--popup-shadow); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); }
 .settings-crumb-backdrop { position: fixed; inset: 0; z-index: 20; }
@@ -1457,18 +1486,33 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .conflict-diff { margin-top: var(--space-3); max-height: 46vh; overflow: auto; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
 
 /* IDEA's empty-editor shortcut list (right-of-centre, muted, no chrome) */
-.empty-hints { margin: auto; list-style: none; padding: 0; min-width: 300px; }
-.empty-hints > li { display: flex; align-items: baseline; gap: var(--space-2); padding: 3px 0; font-size: 13px; }
-.empty-hint { background: none; border: 0; padding: 0; color: var(--secondary); font-size: 13px; cursor: pointer; }
-.empty-hint:hover { color: var(--bright); text-decoration: underline; }
-.empty-hints > li > span { margin-left: auto; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
-.empty-hint-drag { color: var(--muted); }
+.empty-hints { width: min(100%, 460px); margin: auto; list-style: none; padding: 0; }
+.empty-hints > li { display: flex; align-items: center; gap: var(--space-3); min-height: var(--ctrl-height-lg); padding: 0 var(--space-2); border-bottom: 1px solid var(--line); font-size: 13px; transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+.empty-hints > li:first-child { min-height: calc(var(--ctrl-height-lg) + var(--space-4) + var(--space-4)); gap: var(--space-4); margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--accent); border-radius: var(--radius-xs); background: var(--accent-soft); }
+.empty-hints > li:not(:first-child):hover,
+.empty-hints > li:not(:first-child):focus-within { background: var(--hover); }
+.empty-hints > li:last-child { border-bottom-color: var(--line-strong); }
+.empty-hint { flex: 1; min-height: var(--ctrl-height-lg); background: none; border: 0; padding: 0; color: var(--secondary); font-size: 13px; font-weight: 500; text-align: left; cursor: pointer; }
+.empty-hints > li:first-child > .empty-hint { color: var(--accent); font-size: 18px; font-weight: 650; }
+.empty-hint:hover,
+.empty-hint:focus-visible { color: var(--accent-hover); }
+.empty-hints > li:first-child:hover,
+.empty-hints > li:first-child:focus-within { border-color: var(--accent-hover); }
+.empty-hint:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
+.empty-hints > li > span { display: inline-flex; align-items: center; margin-left: auto; min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: var(--radius-xs); background: var(--panel); color: var(--secondary); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; transition: border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.empty-hints > li:hover > span,
+.empty-hints > li:focus-within > span { border-color: var(--accent); color: var(--accent); }
+.empty-hints > li:first-child > span { min-height: var(--ctrl-height); padding: 0 var(--space-3); border-color: var(--accent); color: var(--accent); background: var(--editor); font-size: 12px; }
+.empty-hints > li:first-child:hover > span,
+.empty-hints > li:first-child:focus-within > span { border-color: var(--accent-hover); color: var(--accent-hover); }
 
 /* 控制台折叠计数（IDEA Console 折叠行的重复次数标记） */
-.run-fold-count { margin-left: var(--space-2); padding: 0 4px; border-radius: var(--radius-xs); background: var(--hover); color: var(--muted); font-variant-numeric: tabular-nums; font-size: 10px; }
+.run-fold-count { margin-left: var(--space-2); padding: 0 var(--space-1); border-radius: var(--radius-xs); background: var(--hover); color: var(--muted); font-variant-numeric: tabular-nums; font-size: 10px; }
 
 /* 粘性作用域行（IDEA editor.stickyLines）：绝对定位覆盖在编辑区顶部，不占布局。 */
 .sticky-lines { position: absolute; top: 0; left: 0; right: 12px; z-index: 8; display: flex; flex-direction: column; pointer-events: none; }
+.sticky-lines::after { content: ''; position: absolute; top: 100%; left: 0; right: 0; height: 3.4px; background: linear-gradient(to bottom, color-mix(in srgb, var(--shadow) 21%, transparent), transparent); }
+:root[data-theme='dark'] .sticky-lines::after { height: 5px; background-image: linear-gradient(to bottom, color-mix(in srgb, var(--shadow) 39%, transparent), transparent); }
 .sticky-line { height: 20px; min-height: 20px; padding: 0 var(--space-3) 0 52px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--secondary); background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 20px; }
 
 /* IDEA 的右边距线（Editor → General → Appearance → Show hard wrap guide，默认第 120 列）——

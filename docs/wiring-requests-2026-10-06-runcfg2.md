@@ -173,3 +173,16 @@ wall time 在 `java/execution/impl/src/com/intellij/execution/testframework/Java
    （`java/execution/impl/src/com/intellij/execution/testframework/JavaSMTRunnerTestTreeView.java:52-86` 覆盖同一个 `getDurationText`，
    `:69-73` 走「向下取整到整秒 + `formatDurationApproximateNarrow`」）。两种画法在上游就是分岔的，本仓取 Java 那一种（本仓的测试面是 JUnit/JVM 优先），
    所以 `formatDurationPadded` 没有真消费方 ⇒ 不搬（搬了就是只有测试在读的死代码）。若主代理认为该按通用档画，请指一个消费者。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（JAR 五处同改）已接线**：`RunConfig['type']` 含 `'jar'`、`RUN_CONFIG_EDITORS` 有 jar、`RUN_CONFIG_TYPES` 家族表含 jar（见 runcfg 处理结果）。
+- **R2（测试树排序/统计开关持久化）** —— 目标 `src/settingsModel.ts`（保留）+ `native/settings_schema.cpp`。需 settings/native owner。
+- **R3（重新构建键位）** —— 保留文件。**R4** —— 判词。
+
+结论：R1 已接线；R2/R3/R4 非本 lane。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「R1 已接线；R2/R3/R4 非本 lane。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

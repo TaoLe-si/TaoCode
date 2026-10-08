@@ -170,3 +170,16 @@ test('接线：两个入口共用这一层，Ctrl+Q 不再自己发 hover', () =
   assert.match(content, /HoverResultCache\.kt:11-12/, '区间命中的上游出处没有登记')
   assert.match(content, /EditorMouseHoverPopupManager\.java:452/, 'hover 闸的上游出处没有登记')
 })
+
+// C-3 收口：hover 的 `range` 早就从 native 透传过来了（受版本控制的判据在
+// `native/lsp_coding_test.cpp:210-216`），缺的只是前端类型登记 ⇒ 钉这一格别再漂回"没有 range"。
+test('前端类型登记了 hover 的 range（C-3），但边界校验仍是宽松那一份', () => {
+  const bridge = readFileSync(join(root, 'src/bridge.ts'), 'utf8')
+  assert.match(bridge, /export interface LspHoverResult \{[^}]*range\?: LspRange/,
+    'LspHoverResult 没有登记 range?: LspRange ⇒ native 透传过来的那一格在前端是隐形的')
+  const content = readFileSync(join(root, 'src/docHoverContent.ts'), 'utf8')
+  // 取用面自己那一份 payload 形状必须继续是宽松的（start/end 都可缺、坐标可非数字）：
+  // 它是外来数据的校验层，收紧成 LspRange 等于把校验删掉。
+  assert.match(content, /range\?: \{\s*\n\s*start\?: \{ line\?: number; character\?: number \}/,
+    'docHoverContent 的宽松 range 形状被换成了严格类型 ⇒ 残缺回包会直接进模型')
+})

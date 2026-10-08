@@ -6,6 +6,7 @@
 // component keeps that behaviour testable without a DOM.
 
 import { isSameProjectPath } from './projectLocator.ts'
+import { shouldHideProjectSwitchingActions } from './projectWidgetActionsFilter.ts'
 
 export interface WidgetProject {
   name: string
@@ -21,11 +22,28 @@ export interface WidgetGroup<T> {
 /** MAX_RECENT_COUNT (ProjectToolbarWidgetAction.kt:98). */
 export const MAX_PROJECT_WIDGET_ITEMS = 100
 
-/** Speed search over "name path" (:367-372); an empty query matches everything. */
-export function filterProjects<T extends WidgetProject>(projects: readonly T[], query: string): T[] {
+/**
+ * Speed search over "name path" (:367-372); an empty query matches everything.
+ *
+ * 第二道过滤是**项目切换动作过滤器**（EP `com.intellij.projectWidgetActionsFilter`，见
+ * `src/projectWidgetActionsFilter.ts`）：上游 `ProjectToolbarWidgetAction` 在建「切换项目」
+ * 那一组动作时逐条问 `shouldHideProjectSwitchingActions(event)`，任一条答 true 就把这一行摘掉。
+ * 本仓的行就是最近项目表，所以在这里逐条问一次 —— 没有 provider 时恒为 false，
+ * 既有行为一字不变（`tests/project-widget.test.mjs` 与
+ * `tests/project-widget-actions-filter.test.mjs` 同时钉住）。
+ */
+export function filterProjects<T extends WidgetProject>(
+  projects: readonly T[],
+  query: string,
+  currentRoot = '',
+): T[] {
   const needle = query.trim().toLowerCase()
-  if (!needle) return [...projects]
-  return projects.filter(project => `${project.name} ${project.path}`.toLowerCase().includes(needle))
+  const searched = !needle ? [...projects] : projects.filter(project => `${project.name} ${project.path}`.toLowerCase().includes(needle))
+  return searched.filter(project => !shouldHideProjectSwitchingActions({
+    projectPath: project.path,
+    projectName: project.name,
+    currentRoot,
+  }))
 }
 
 /**

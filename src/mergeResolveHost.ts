@@ -17,7 +17,10 @@
 // `conflicts.accept.*.action.text`（英文原文在 `plugins/git4idea/shared/resources/messages/`）。
 import { request } from './bridge.ts'
 import { acceptSide, conflictsIn, parseConflicts, type ConflictSide } from './mergeConflicts.ts'
-import { APPLY_NON_CONFLICTS_TEXT, RESOLVE_SIMPLE_CONFLICTS_TEXT, resolveConflictsInText } from './mergeResolve.ts'
+import {
+  APPLY_NON_CONFLICTS_TEXT, RESOLVE_SIMPLE_CONFLICTS_TEXT, hasAutoResolvableBlock,
+  hasNonConflictingBlock, resolveConflictsInText,
+} from './mergeResolve.ts'
 import { gitErrorHint } from './vcsFileUtil.ts'
 
 export interface MergeResolveDeps {
@@ -100,5 +103,23 @@ async function applyResolution(path: string, onlyNonConflicts: boolean, deps: Me
   } catch (caught) {
     deps.notify(gitErrorHint(caught instanceof Error ? caught.message : String(caught)), true)
     return false
+  }
+}
+
+/**
+ * 冲突文件的内容侧判据（上游 `MergeConflictModel.kt:146-152` 那两个 `has*` 谓词）：
+ * 读一次文件，回答「解决简单的冲突」/「应用所有不冲突的更改」两条动作**能不能点**。
+ *
+ * 读不到内容（文件被删、通道失败）时返回空对象 —— 调用侧按"保持可点"处理，
+ * 不把一次读失败伪装成"没有可自动合的东西"（那样用户会以为按钮坏了）。
+ */
+export async function conflictResolutionAvailability(path: string): Promise<{ autoResolvable?: boolean; nonConflicting?: boolean }> {
+  try {
+    const read = await request<FileFacts>('file.read', { path })
+    const content = read.content ?? ''
+    if (!conflictsIn(content).length) return {}
+    return { autoResolvable: hasAutoResolvableBlock(content), nonConflicting: hasNonConflictingBlock(content) }
+  } catch {
+    return {}
   }
 }

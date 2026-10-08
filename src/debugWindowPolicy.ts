@@ -67,16 +67,24 @@ export interface DebuggerWindowHost {
 /**
  * 会话停住（上游 `onPause`）。返回做了哪几件事，测试与调用方都能看到判据：
  *   · 用户单步 ⇒ 什么都不做（`:653`）；
+ *   · 适配器报 `preserveFocusHint` ⇒ 什么都不做（**别抢焦点**）：
+ *     DAP 规范里 `StoppedEvent.preserveFocusHint` 的原文是「客户端**不**应该让编辑器/窗口
+ *     抢焦点（例如命中的是日志断点、或用户正在别处打字）」—— 与上游那条「用户单步时不要吸引
+ *     用户」是同一件事的两个来源（一个是本仓推断的 reason，一个是适配器明说的旗标），
+ *     适配器明说时以它为准；
  *   · `showDebuggerOnBreakpoint` 关掉 ⇒ 不带前面（`:654`）；
  *   · 顶帧没有源码位置 ⇒ 额外亮出调用堆栈（`:658-662`）。
  */
 export function applyDebuggerPause(host: DebuggerWindowHost, info: {
   reason: string | null | undefined
   hasTopFrameSource: boolean
+  /** 适配器请求"别抢焦点"（DAP `stopped.preserveFocusHint`，见 `src/dapEventFields.ts`）。 */
+  preserveFocusHint?: boolean
   policy?: DebuggerWindowPolicy
 }): { attracted: boolean; showedFrames: boolean } {
   const policy = info.policy ?? currentDebuggerWindowPolicy()
   if (isUserStepping(info.reason)) return { attracted: false, showedFrames: false }
+  if (info.preserveFocusHint === true) return { attracted: false, showedFrames: false }
   if (policy.showDebuggerOnBreakpoint) host.bringDebuggerToFront()
   const showedFrames = !info.hasTopFrameSource
   if (showedFrames) host.showFramesView()

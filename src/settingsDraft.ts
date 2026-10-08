@@ -8,6 +8,7 @@ export interface SettingsDraft {
   editor?: EditorSettings
   general?: GeneralSettingsState
   commitMessage?: CommitMessageInspectionSettings
+  formatOnSave?: boolean
   scopes?: NamedScopeSetting[]
   localFileColors?: FileColorSetting[]
   fileColors?: FileColorSetting[]
@@ -26,10 +27,11 @@ export function createSettingsDraftPages(
   editorDirty: Readonly<Ref<boolean>>,
   commitMessageDirty: Readonly<Ref<boolean>>,
   generalDirty: Readonly<Ref<boolean>>,
+  formatOnSaveDirty?: Readonly<Ref<boolean>>,
 ) {
   const scopesPage = ref<DraftPage<NamedScopeSetting[] | null>>()
   const fileColorsPage = ref<DraftPage<FileColorsDraft>>()
-  const dirty = computed(() => editorDirty.value || commitMessageDirty.value || generalDirty.value
+  const dirty = computed(() => editorDirty.value || commitMessageDirty.value || generalDirty.value || formatOnSaveDirty?.value
     || scopesPage.value?.dirty || fileColorsPage.value?.dirty)
   return { scopesPage, fileColorsPage, dirty }
 }
@@ -38,9 +40,11 @@ interface SettingsDraftActionsDeps {
   editor: Ref<EditorSettings>
   general: Ref<GeneralSettingsState>
   commitMessage: Ref<CommitMessageInspectionSettings>
+  formatOnSave?: Ref<boolean>
   editorDirty: Readonly<Ref<boolean>>
   generalDirty: Readonly<Ref<boolean>>
   commitMessageDirty: Readonly<Ref<boolean>>
+  formatOnSaveDirty?: Readonly<Ref<boolean>>
   dirty: Readonly<Ref<boolean | undefined>>
   scopesPage: Readonly<Ref<DraftPage<NamedScopeSetting[] | null> | undefined>>
   fileColorsPage: Readonly<Ref<DraftPage<FileColorsDraft> | undefined>>
@@ -67,6 +71,7 @@ export function createSettingsDraftActions(deps: SettingsDraftActionsDeps) {
       editor: deps.editorDirty.value ? { ...deps.editor.value } : undefined,
       general: deps.generalDirty.value ? { ...deps.general.value } : undefined,
       commitMessage: deps.commitMessageDirty.value ? { ...deps.commitMessage.value } : undefined,
+      formatOnSave: deps.formatOnSaveDirty?.value ? deps.formatOnSave?.value : undefined,
       scopes,
       localFileColors: colors?.local,
       fileColors: colors?.shared,

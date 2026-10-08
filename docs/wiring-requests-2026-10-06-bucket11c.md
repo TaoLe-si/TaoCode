@@ -41,3 +41,11 @@
   （构造器 `super("JarApplication", …)` —— 类型 id 就是 `JarApplication`，与本仓 `src/jarRun.ts:50` 一致）；
   `docs/batches-2026-10-06-buckets.md` 桶 11 那行的「接线请求：`runConfigEditors.ts` + `runConfigTree.ts` 与 `settingsModel.ts` 的 `'jar'` 必须同一次改」。
 - 本轮状态：没做（额度全花在 5 条红的复核/反向验证与 `testLocator` 上）。这是具体欠账，不是「下一轮再说」。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-B11c-1 已接线**：`src/App.vue:2315` 的 `<TestRunnerPanel …>` 已带 `@jump="target => revealLocation({ path: target.path, line: Math.max(0, target.line - 1) })"`（1 基 → 0 基口径正确）。
+- **W-B11c-2 已接线**：`src/components/ToolWindowView.vue` 已无 `TestRunnerPanel` import（`grep` 0 命中），陈旧 import 已清。
+- **W-B11c-3 已接线**：`src/settingsModel.ts:31` 的 `RunConfig['type']` 已含 `'jar'`，`src/runConfigEditors.ts:135` 的 `RUN_CONFIG_EDITORS` 已有 jar 条目，`src/runConfigTree.ts` 的 `RUN_CONFIG_TYPES` 走 `RUN_CONFIG_TYPE_IDS` 家族表（含 jar）。三表同批已落。
+
+结论：**零待接**，未改任何文件。

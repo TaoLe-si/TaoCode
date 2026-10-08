@@ -56,6 +56,14 @@ export interface RefactorMenuContext {
   /** 成员上移/下移（`LangActions.xml:391/392`）。上游这两条**没有默认键位**（`$default.xml` 里查不到 id）。 */
   openPullUp?: () => any
   openPushDown?: () => any
+  /**
+   * 提取超类 / 提取接口（`LangActions.xml:380/381` 的 `ExtractInterface`/`ExtractSuperclass`，
+   * 在 IntroduceActionsGroup 子菜单里）。两条都**没有默认键位**（`$default.xml` 里按 id 搜不到）。
+   * **可选**：宿主没给处理函数就不渲染那一行（与 ChangeSignature 同一道能力闸门）。
+   * 模型/装配在 `src/refactorExtractSuper.ts` + `src/refactorHostAssembly.ts`（`openExtractSuperclass`）。
+   */
+  openExtractSuperclass?: () => any
+  openExtractInterface?: () => any
   /** 引入形参对象（`LangActions.xml:372`）。 */
   openIntroduceParameterObject?: () => any
   semantic: (kind: any, title: any, keys: any, keywords: any) => MenuRow
@@ -115,6 +123,20 @@ export function createRefactorMenuRows(ctx: RefactorMenuContext): MenuRow[] {
         enabled: () => Boolean(ctx.active.value), run: () => void ctx.openIntroduceParameterObject!(),
       }] : []),
       { id: 'refactor.ExtractMethod', title: '提取方法', keys: 'Ctrl Alt M', keywords: 'extract method function 提取方法', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: ctx.extractMethod },
+      // :380 ExtractInterface / :381 ExtractSuperclass —— 上游同样在这个子菜单里，两条都**没有**默认键位。
+      // 落点是 `src/refactorExtractSuper.ts`（文本层：新建声明文件 + 源类插继承子句 + 删被抽走的成员段），
+      // 装配在 `src/refactorHostAssembly.ts` 的 `openExtractSuperclass`/`openExtractInterface`；
+      // 宿主没接（App.vue 的 `refactorMenuContext` 是保留文件）就不渲染这两行。
+      ...(hosted(ctx.openExtractInterface) ? [{
+        id: 'refactor.extractInterface', title: '提取接口…',
+        keywords: 'extract interface 提取接口 抽出接口',
+        enabled: () => Boolean(ctx.active.value), run: () => void ctx.openExtractInterface!(),
+      }] : []),
+      ...(hosted(ctx.openExtractSuperclass) ? [{
+        id: 'refactor.extractSuperclass', title: '提取超类…',
+        keywords: 'extract superclass 提取超类 抽出超类',
+        enabled: () => Boolean(ctx.active.value), run: () => void ctx.openExtractSuperclass!(),
+      }] : []),
     ] },
     // :384 Inline。
     { id: 'refactor.inline', title: '内联', keys: 'Ctrl Alt N', keywords: 'inline variable method constant 内联', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: ctx.inlineVariable },

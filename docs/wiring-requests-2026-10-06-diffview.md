@@ -82,3 +82,15 @@
    文案照上游 `platform/vcs-api/vcs-api-core/resources/messages/VcsBundle.properties:447`
    （`patch.copied.to.clipboard=Patch copied to clipboard`，本地树无中文包 ⇒ 英文原文直译）。
    主代理若要统一成全局通知，再单开一批。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1 / R2** —— 目标 `src/changesMenuActions.ts`（本 lane 可改面，但属 VCS 域；请求原文只要求改过期注释）。
+- **C** —— 取证，无需改 App.vue。
+
+结论：零接线（R1/R2 是注释订正，属 VCS 域 owner；本 lane 未越界）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（R1/R2 是注释订正，属 VCS 域 owner；本 lane 未越界）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

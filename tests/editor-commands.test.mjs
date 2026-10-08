@@ -88,16 +88,24 @@ test('every name the menus offer is either an editing command or owned by the ed
 })
 
 // `OWNED_BY_EDITOR` 不能变成一个"什么都装得下"的口袋：里面每一条都必须在
-// `src/components/CodeEditor.vue` 的 `editorActions` 里真的有一个实现。少了这一条，
-// 上面那条判据对任何拼错的菜单名都会放绿 —— 正是它要防的事。
+// **editorActions 表本体**里真的有一个实现。少了这一条，上面那条判据对任何拼错的菜单名都会放绿
+// —— 正是它要防的事。
+//
+// 2026-10-06：表本体搬进 `src/editorKeymap.ts`（CodeEditor.vue 贴着机检上限，拆一次降一次），
+// 判据跟着搬到新落点；宿主仍然必须是**同一个** `editorActions` 名字（`runEditorCommand` 与
+// `defineExpose` 都按它取命令），所以两条一起钉：模块里有表、宿主有同名变量。
 test('every name claimed to be editor-owned really has an implementation there', () => {
-  const editor = readFileSync('src/components/CodeEditor.vue', 'utf8')
-  const tableStart = editor.indexOf('const editorActions: Record<string, Command> = {')
+  const module = readFileSync('src/editorKeymap.ts', 'utf8')
+  const tableStart = module.indexOf('export function createEditorActions')
   assert.ok(tableStart > 0, 'editorActions 表还在（判据的锚点）')
-  const table = editor.slice(tableStart, editor.indexOf('\n}', tableStart))
+  const table = module.slice(tableStart, module.indexOf('\n}', tableStart))
   for (const name of OWNED_BY_EDITOR) {
     // `completion` / `evaluate` / `template.expand` 用的是裸键名，查找族是引号键名。
     const keyed = table.includes(`'${name}':`) || table.includes(`\n  ${name}:`) || table.includes(`${name}: `)
     assert.ok(keyed, `OWNED_BY_EDITOR 里的「${name}」在 editorActions 里没有实现`)
   }
+  // 宿主确实把这张表挂成了 `editorActions`（菜单分派与 defineExpose 读的就是这个名字）。
+  const editor = readFileSync('src/components/CodeEditor.vue', 'utf8')
+  assert.match(editor, /const editorActions: Record<string, Command> = createEditorActions\(/,
+    'CodeEditor 没把动作表接成 editorActions ⇒ 菜单那一族找不到实现')
 })

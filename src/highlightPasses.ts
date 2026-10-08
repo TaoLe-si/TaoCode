@@ -31,6 +31,15 @@
 //     一次连打并成一次收集，窗口内在屏的那一层仍是区间标记，跟着编辑走。
 //   · `runGeneralHighlightingPass` —— `GeneralHighlightingPass` 的调度口径（`myUpdateAll`
 //     决定整份还是只算脏范围、pass 名是 `AnalysisBundle.message("pass.syntax")`）。
+//
+// **改动局部性（2026-10-07 pvdm）**：脏范围在交给 pass 之前先过
+// `com.intellij.daemon.changeLocalityDetector`（上游消费方 `PsiChangeHandler.java:59`，
+// 出厂两支见 `platform/lang-impl/resources/intellij.platform.lang.impl.xml:1030` 与
+// `platform/todo/resources/intellij.platform.todo.xml:53`）。落点在 `src/changeLocality.ts`，
+// 两拍（`runMainHighlightPasses` / `runGeneralHighlightingPass`）都调同一趟；
+// 没有检查器时逐字节不变（`narrowChangeLocalityRanges` 原样复制入参）。
+
+import { narrowChangeLocalityRangesFor } from './changeLocality.ts'
 
 export type HighlightPassKind = 'main' | 'editorBound'
 
@@ -191,10 +200,13 @@ export function runMainHighlightPasses(
   tracker: DirtyScopeTracker,
   path: string,
   text: string,
+  language: string = '',
 ): number[] {
   const note = tracker.noteText(path, text)
   if (note.ranges.length === 0) return []
-  const dirtyRanges = tracker.takeDirtyRanges(path)
+  // `com.intellij.daemon.changeLocalityDetector`（`PsiChangeHandler.java:59` 那条 EP）：
+  // 脏范围先过局部性检查器那一趟（`src/changeLocality.ts`），没有检查器时逐字节不变。
+  const dirtyRanges = narrowChangeLocalityRangesFor(path, language, text, tracker.takeDirtyRanges(path))
   const ran: number[] = []
   for (const pass of registrar.findByKind('main')) {
     pass.run({ path, text, dirtyRanges, previousText: note.previousText })
@@ -385,7 +397,8 @@ export function runGeneralHighlightingPass<T extends HighlightLayerItem>(
     return { updateAll: false, dirtyLines: null, passName: SYNTAX_PASS_NAME, items: [], skipped: true }
   }
   const updateAll = note.previousText === null
-  const dirtyLines = updateAll ? null : tracker.takeDirtyRanges(input.path)
+  // 同上：脏范围先过 `com.intellij.daemon.changeLocalityDetector`（`src/changeLocality.ts`）。
+  const dirtyLines = updateAll ? null : narrowChangeLocalityRangesFor(input.path, input.language, input.text, tracker.takeDirtyRanges(input.path))
   if (!updateAll) tracker.takeDirtyRanges(input.path)
   return {
     updateAll,

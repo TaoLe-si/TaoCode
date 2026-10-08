@@ -94,7 +94,10 @@ test('接线：lspNavigation 复用同一份 CLASS_KINDS 且符号搜索走包�
   // 桶 4b 把缓存接进来之后，合并层的调用挪到了 `visibleSymbols` 里（缓存的原始应答先过
   // 「按类型过滤」条、再进合并层）—— 意图没变：**工作区符号必须经过 `mergeWorkspaceSymbols`**，
   // 这里改成守新形状（不是放松成 includes）。
-  assert.match(navigation, /mergeWorkspaceSymbols\(\[filterSymbols\(symbols, hiddenSymbolGroups\.value\)\]/,
+  // 桶 4b + gotoByNameContributors 之后：合并层的第一路仍是「缓存原始应答先过过滤条」，
+  // 第二路是插件贡献（`contributed`）—— 意图不变：工作区符号必须经过 `mergeWorkspaceSymbols`，
+  // 且过滤条在合并之前。守新形状，不放松成 includes。
+  assert.match(navigation, /mergeWorkspaceSymbols\(\[filterSymbols\(symbols, hiddenSymbolGroups\.value\), contributed\]/,
     '工作区符号搜索要经过合并层（且过滤条在合并之前）')
   assert.match(navigation, /documentSymbolEntries\(outline\.value as NavigationDocumentSymbol\[\], path, query\)/, '文件内符号搜索要经过转换层')
 })

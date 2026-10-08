@@ -184,3 +184,43 @@ test('安全删除：外部算好的账用同一张三选一对话框（showSafe
   wired.safeDeleteChoose('viewUsages')
   assert.deepEqual(calls, [['notify', '这次没有可跳转的代码引用位置（注释/字符串里的字面出现不进引用窗口）。', true]])
 })
+
+// 提取超类 / 提取接口（`src/refactorExtractSuper.ts` + 装配层的 `openExtractSuperclass`/`openExtractInterface`）：
+// 复用同一张勾选表（面板 0 源类 / 面板 1 新名字 / 面板 2 成员表），编辑经预览链落到
+// 「源文件 + 新建声明文件」两条 `LspFileEdits` 上。
+test('提取超类：勾选表起得来，编辑落到源文件与新建声明文件两条上', async () => {
+  const java = 'package demo;\nclass Order {\n  int total;\n  int getTotal() { return total; }\n}\n'
+  const file = { path: 'src/demo/Order.java', content: java, line: 3, column: 10 }
+  const { host: wired, calls } = host([file], { language: 'java', line: 1, character: 8 })
+  await wired.openExtractSuperclass()
+  const model = wired.chooserState.value
+  assert.ok(model, 'openExtractSuperclass 没有起勾选表')
+  assert.equal(model.title, '提取超类')
+  assert.deepEqual(model.panels.map(panel => panel.title), ['源类：Order', '新超类名', '要提取的成员'])
+  assert.equal(model.panels[1].value, 'OrderBase', '新名字默认 = 类名 + Base')
+  assert.deepEqual(model.panels[2].rows.map(row => row.id), ['total', 'getTotal'])
+  wired.toggleChooserRow(2, 1)
+  await wired.applyChooser()
+  assert.deepEqual(calls.map(call => call[0]), ['preview', 'apply'])
+  assert.equal(calls[0][1], '提取超类 Order → OrderBase')
+  assert.equal(calls[0][2], 2, '源文件 + 新建的 OrderBase.java')
+  assert.match(calls[1][1], /已从「Order」抽出 1 个成员到新超类「OrderBase」/)
+})
+
+test('提取接口：新文件是 interface，方法体换成 `;`；不支持的档如实说不做', async () => {
+  const java = 'class Order {\n  int getTotal() { return 0; }\n}\n'
+  const file = { path: 'src/Order.java', content: java, line: 2, column: 6 }
+  const { host: wired, calls } = host([file], { language: 'java', line: 1, character: 8 })
+  await wired.openExtractInterface()
+  assert.equal(wired.chooserState.value.title, '提取接口')
+  assert.equal(wired.chooserState.value.panels[1].title, '新接口名')
+  wired.toggleChooserRow(2, 0)
+  await wired.applyChooser()
+  assert.equal(calls[0][1], '提取接口 Order → OrderBase')
+  // python 档没有类体花括号解析 ⇒ 直接说不做，不立空对话框。
+  const py = { path: 'src/order.py', content: 'class Order:\n    pass\n', line: 1, column: 1 }
+  const { host: pyHost, calls: pyCalls } = host([py], { language: 'python', line: 0, character: 6 })
+  await pyHost.openExtractSuperclass()
+  assert.equal(pyHost.chooserState.value, null)
+  assert.match(pyCalls[0][1], /没有花括号类成员的文本层落点/)
+})

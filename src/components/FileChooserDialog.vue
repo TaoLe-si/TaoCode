@@ -33,8 +33,9 @@ import {
   Archive, ChevronDown, ChevronRight, Eye, FileText, Folder, FolderOpen, FolderPlus, RefreshCw, Search,
 } from 'lucide-vue-next'
 import {
-  favoriteShortcuts, isNodeSelectable, newFolderPlan, nodeSelectableReason, recentShortcuts,
-  resolveTypedName, shortcutNavigation, visibleChooserRows,
+  emptyChooserSelection, favoriteShortcuts, isNodeSelectable, newFolderPlan, nodeSelectableReason,
+  recentShortcuts, resolveTypedName, selectOnly, selectRange, selectionPaths, shortcutNavigation, toggleSelection,
+  visibleChooserRows,
   type ChooserShortcut, type ChooserListing, type ChooserNode, type ChooserRow, type ChooserViewMode,
 } from '../fileChooserModel'
 import { withShowHiddenFiles, type FileChooserDescriptor } from '../fileChooserDescriptor'
@@ -50,6 +51,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   (event: 'pick', path: string): void
+  /** 多选描述件下选中多项时（上游 `FileChooser.getSelectedFiles()` 的多项那一路）。 */
+  (event: 'pickMultiple', paths: string[]): void
   /** 用户点了工作区外的条目 / 「用系统对话框…」——调用方转交宿主原生对话框。 */
   (event: 'outside', path: string): void
   (event: 'close'): void
@@ -66,6 +69,12 @@ const viewMode = ref<ChooserViewMode>('tree')
 const showHidden = ref(props.descriptor.showHiddenFiles)
 const typedName = ref('')
 const picking = ref('')
+/**
+ * 多选选择集（上游 `FileChooserDialogImpl.java:418` 的 `isChooseMultiple()` →
+ * `FileSystemTreeImpl.java:116` 的 `DISCONTIGUOUS_TREE_SELECTION`）。单选描述件下每次点选
+ * 都替换整个集合（`selectOnly`），多选下普通点替换、Ctrl 点切换、Shift 点按行表取一段。
+ */
+const selection = ref(emptyChooserSelection(props.descriptor))
 const loading = ref(false)
 const creating = ref(false)
 const draftName = ref('')
@@ -155,10 +164,23 @@ const draft = computed(() => newFolderPlan(currentPath.value, draftName.value, l
 function canPick(node: ChooserNode): boolean { return isNodeSelectable(chooser.value, node) }
 function reasonOf(node: ChooserNode): string { return nodeSelectableReason(chooser.value, node) }
 
-/** 单击：选中；选中目录时把它设为当前目录（文件名输入与新建目录跟着走）。 */
-async function selectRow(row: ChooserRow) {
+/** 单击：选中；选中目录时把它设为当前目录（文件名输入与新建目录跟着走）。
+ *  多选描述件下按修饰键走 `toggleSelection`（Ctrl）/`selectRange`（Shift），否则替换选择集。 */
+async function selectRow(row: ChooserRow, event?: MouseEvent) {
   picking.value = row.node.path
+  const multiple = props.descriptor.chooseMultiple
+  if (multiple && event?.ctrlKey) selection.value = toggleSelection(selection.value, row.node.path)
+  else if (multiple && event?.shiftKey) selection.value = selectRange(selection.value, row.node.path, rows.value.map(entry => entry.node.path))
+  else selection.value = selectOnly(selection.value, row.node.path)
   if (row.node.kind === 'directory') currentPath.value = row.node.path
+}
+
+/** 多选模式下「确定」把整组路径交出去（上游 `FileChooser.getSelectedFiles()`）；单选仍走 emit('pick')。 */
+function pickSelection() {
+  const paths = selectionPaths(selection.value, rows.value.map(entry => entry.node.path))
+    .filter(path => { const row = rows.value.find(entry => entry.node.path === path); return Boolean(row && canPick(row.node)) })
+  if (props.descriptor.chooseMultiple && paths.length > 1) { emit('pickMultiple', paths); return true }
+  return false
 }
 
 /** 展开/折叠那个箭头（叶子没有箭头，`isChooserLeaf` 判的）。 */
@@ -180,6 +202,7 @@ async function activateRow(row: ChooserRow) {
 }
 
 function pickTyped() {
+  if (pickSelection()) return
   if (!typed.value.selectable) { picking.value = typed.value.path; return }
   emit('pick', typed.value.path)
 }
@@ -187,7 +210,10 @@ function pickTyped() {
 /** 回车 = 确认当前行（没有当前行时按文件名输入框走）。上游那一棵树就是「回车选中」。 */
 function acceptRow(row: ChooserRow | null) {
   if (!row) { pickTyped(); return }
-  if (row.node.kind === 'file' && canPick(row.node) && !typedName.value.trim()) { emit('pick', row.node.path); return }
+  if (row.node.kind === 'file' && canPick(row.node) && !typedName.value.trim()) {
+    if (pickSelection()) return
+    emit('pick', row.node.path); return
+  }
   if (row.node.kind === 'directory' && canPick(row.node) && !typedName.value.trim()) { emit('pick', row.node.path); return }
   pickTyped()
 }
@@ -267,6 +293,7 @@ watch(() => props.descriptor, () => {
   typedName.value = ''
   expanded.value = []
   listings.value = {}
+  selection.value = emptyChooserSelection(props.descriptor)
   showHidden.value = props.descriptor.showHiddenFiles
   creating.value = false
   draftName.value = ''
@@ -284,13 +311,13 @@ void nextTick(() => nameRef.value?.focus())
     <section class="help-dialog chooser-dialog" role="dialog" aria-modal="true" aria-labelledby="chooser-title">
       <header class="chooser-head">
         <h2 id="chooser-title">{{ descriptor.title }}</h2>
-        <span class="chooser-desc">{{ descriptor.description || '在左侧选位置，中间选条目，底部输入文件名。' }}</span>
+        <span v-if="descriptor.description" class="chooser-desc">{{ descriptor.description }}</span>
       </header>
 
       <nav class="chooser-crumbs" aria-label="当前位置">
         <template v-for="(crumb, index) in crumbs" :key="crumb.path">
           <ChevronRight v-if="index" :size="iconSize.menu" aria-hidden="true" class="chooser-crumb-sep" />
-          <button type="button" class="chooser-crumb" :class="{ on: crumb.path === currentPath }" @click="openDirectory(crumb.path)">{{ crumb.label }}</button>
+          <button type="button" class="chooser-crumb" :class="{ on: crumb.path === currentPath }" :aria-current="crumb.path === currentPath ? 'true' : undefined" @click="openDirectory(crumb.path)">{{ crumb.label }}</button>
         </template>
       </nav>
 
@@ -324,17 +351,18 @@ void nextTick(() => nameRef.value?.focus())
             <button type="button" class="chooser-tool" :aria-expanded="creating" @click="creating = !creating; draftProblem = ''">
               <FolderPlus :size="iconSize.menu" aria-hidden="true" />新建目录
             </button>
-            <button type="button" class="chooser-tool" title="刷新当前目录（RefreshFileChooserAction）" @click="refresh">
+            <button type="button" class="chooser-tool" @click="refresh">
               <RefreshCw :size="iconSize.menu" aria-hidden="true" />刷新
             </button>
-            <button type="button" class="chooser-tool" :aria-pressed="showHidden" title="切换隐藏文件的显示（ToggleVisibilityAction）" @click="showHidden = !showHidden">
+            <button type="button" class="chooser-tool" :aria-pressed="showHidden" @click="showHidden = !showHidden">
               <Eye :size="iconSize.menu" aria-hidden="true" />显示隐藏文件
             </button>
             <span v-if="loading" class="chooser-tool-state">正在列出…</span>
+            <span v-if="descriptor.chooseMultiple" class="chooser-tool-state" role="status">已选 {{ selection.paths.length }} 项</span>
           </div>
 
           <div v-if="creating" class="chooser-newdir">
-            <input ref="draftRef" v-model="draftName" type="text" aria-label="新目录名（多级用 / 分隔）"
+            <input ref="draftRef" v-model="draftName" type="text" aria-label="新目录名"
                    :aria-invalid="Boolean(draftProblem && !draft.creatable)" placeholder="Enter a new folder name:" />
             <button type="button" class="primary-button" :disabled="!draft.creatable" @click="createFolder">创建</button>
             <button type="button" class="subtle-button" @click="creating = false; draftName = ''; draftProblem = ''">取消</button>
@@ -354,14 +382,14 @@ void nextTick(() => nameRef.value?.focus())
                     <ChevronDown v-if="row.expanded" :size="iconSize.menu" />
                     <ChevronRight v-else :size="iconSize.menu" />
                   </button>
-                  <button type="button" class="chooser-row" role="treeitem" :aria-selected="picking === row.node.path"
+                  <button type="button" class="chooser-row" role="treeitem" :aria-selected="selection.paths.includes(row.node.path)"
                           :aria-level="row.depth + 1" :aria-expanded="row.leaf ? undefined : row.expanded"
                           :aria-disabled="!canPick(row.node)" :title="reasonOf(row.node)" :class="{ off: !canPick(row.node) }"
-                          @click="selectRow(row)" @dblclick="activateRow(row)">
+                          @click="selectRow(row, $event)" @dblclick="activateRow(row)">
                     <span class="chooser-row-icon" aria-hidden="true">
-                      <FolderOpen v-if="row.node.kind === 'directory'" :size="iconSize.toolbar" />
-                      <Archive v-else-if="row.node.archive" :size="iconSize.toolbar" />
-                      <FileText v-else :size="iconSize.toolbar" />
+                      <FolderOpen aria-hidden="true" v-if="row.node.kind === 'directory'" :size="iconSize.toolbar" />
+                      <Archive aria-hidden="true" v-else-if="row.node.archive" :size="iconSize.toolbar" />
+                      <FileText aria-hidden="true" v-else :size="iconSize.toolbar" />
                     </span>
                     <span class="chooser-row-name">{{ row.node.name }}</span>
                     <span v-if="row.unlisted" class="chooser-row-note">列不出内容</span>
@@ -382,18 +410,18 @@ void nextTick(() => nameRef.value?.focus())
         </label>
         <div class="chooser-view" role="group" aria-label="视图模式">
           <button type="button" class="chooser-view-btn" :class="{ on: viewMode === 'tree' }" :aria-pressed="viewMode === 'tree'"
-                  :title="viewMode === 'tree' ? '当前：树形（展开的目录就地嵌套）' : '切到树形（展开的目录就地嵌套）'" @click="viewMode = 'tree'">
+                  @click="viewMode = 'tree'">
             <Folder :size="iconSize.menu" aria-hidden="true" />树形
           </button>
           <button type="button" class="chooser-view-btn" :class="{ on: viewMode === 'list' }" :aria-pressed="viewMode === 'list'"
-                  :title="viewMode === 'list' ? '当前：列表（只看当前这一层）' : '切到列表（只看当前这一层）'" @click="viewMode = 'list'">
+                  @click="viewMode = 'list'">
             <Search :size="iconSize.menu" aria-hidden="true" />列表
           </button>
         </div>
         <p v-if="confirmProblem" class="chooser-problem" role="alert">{{ confirmProblem }}</p>
         <div class="chooser-actions">
-          <button type="button" class="subtle-button" @click="emit('close')">取消</button>
           <button type="button" class="primary-button" :disabled="Boolean(confirmProblem)" @click="pickTyped">确定</button>
+          <button type="button" class="subtle-button" @click="emit('close')">取消</button>
         </div>
       </footer>
     </section>
@@ -406,7 +434,7 @@ void nextTick(() => nameRef.value?.focus())
 .chooser-head h2 { margin: 0; }
 .chooser-desc { color: var(--muted); font-size: 11px; }
 .chooser-crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin: var(--space-2) 0; font-size: 12px; }
-.chooser-crumb { padding: 2px 4px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 12px; }
+.chooser-crumb { padding: 2px var(--space-1); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 12px; }
 .chooser-crumb:hover { background: var(--hover); color: var(--bright); }
 .chooser-crumb.on { color: var(--bright); font-weight: 600; }
 .chooser-crumb-sep { color: var(--muted); }
@@ -414,25 +442,25 @@ void nextTick(() => nameRef.value?.focus())
 .chooser-side { overflow: auto; padding-right: var(--space-2); border-right: 1px solid var(--line); }
 .chooser-side-group h3 { margin: 0 0 var(--space-1); color: var(--secondary); font-size: 11px; font-weight: 600; }
 .chooser-side-group ul { margin: 0 0 var(--space-2); padding: 0; list-style: none; }
-.chooser-shortcut { display: flex; align-items: center; gap: 4px; width: 100%; padding: 3px 4px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 12px; text-align: left; }
+.chooser-shortcut { display: flex; align-items: center; gap: var(--space-1); width: 100%; padding: 3px var(--space-1); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 12px; text-align: left; }
 .chooser-shortcut:hover { background: var(--hover); color: var(--bright); }
 .chooser-side-empty { color: var(--muted); font-size: 11px; }
 .chooser-main { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .chooser-toolbar { display: flex; align-items: center; gap: var(--space-1); }
-.chooser-tool { display: inline-flex; align-items: center; gap: 4px; padding: 3px var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 11px; }
+.chooser-tool { display: inline-flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 11px; }
 .chooser-tool:hover { background: var(--hover); color: var(--bright); }
 .chooser-tool[aria-pressed='true'], .chooser-tool[aria-expanded='true'] { border-color: var(--line-strong); background: var(--selected); color: var(--bright); }
 .chooser-tool svg { flex-shrink: 0; }
 .chooser-tool-state { color: var(--muted); font-size: 11px; }
 .chooser-newdir { display: flex; align-items: center; gap: var(--space-2); }
-.chooser-newdir input { flex: 1; min-width: 0; padding: 4px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--editor); color: var(--bright); font-size: 12px; }
+.chooser-newdir input { flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--editor); color: var(--bright); font-size: 12px; }
 .chooser-newdir input[aria-invalid='true'] { border-color: var(--warning); }
 .chooser-list { min-height: 0; overflow: auto; }
 .chooser-list ul { margin: 0; padding: 0; list-style: none; }
 .chooser-row-line { display: flex; align-items: center; gap: 2px; }
 .chooser-caret { display: inline-flex; align-items: center; justify-content: center; width: 16px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); }
 .chooser-caret:disabled { visibility: hidden; }
-.chooser-row { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; padding: 4px var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--bright); font-size: 12px; text-align: left; }
+.chooser-row { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--bright); font-size: 12px; text-align: left; }
 .chooser-row:hover { border-color: var(--line-strong); }
 .chooser-row[aria-selected='true'] { border-color: var(--accent); background: var(--selected); }
 .chooser-row.off { color: var(--muted); }
@@ -442,10 +470,10 @@ void nextTick(() => nameRef.value?.focus())
 .chooser-list-empty, .chooser-list-hint { color: var(--muted); font-size: 12px; }
 .chooser-foot { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); }
 .chooser-name { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; color: var(--secondary); font-size: 12px; }
-.chooser-name input { flex: 1; min-width: 0; padding: 4px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--editor); color: var(--bright); font-size: 12px; }
+.chooser-name input { flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--editor); color: var(--bright); font-size: 12px; }
 .chooser-name input[aria-invalid='true'] { border-color: var(--warning); }
 .chooser-view { display: flex; gap: var(--space-1); }
-.chooser-view-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 11px; }
+.chooser-view-btn { display: inline-flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 11px; }
 .chooser-view-btn.on { border-color: var(--line-strong); background: var(--selected); color: var(--bright); }
 .chooser-problem { flex-basis: 100%; margin: 0; color: var(--warning); font-size: 11px; }
 .chooser-warning { flex-basis: 100%; margin: 0; color: var(--secondary); font-size: 11px; }

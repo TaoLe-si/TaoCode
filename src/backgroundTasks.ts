@@ -1,32 +1,51 @@
 // 后台任务队列与进度指示模型 —— 上游 `BackgroundTaskQueue`（platform-impl/openapi/progress）
 // 加 `ProgressIndicatorModel`/`ProgressModel` 的 `TaskCancellation` 一档。
 //
-// 上游行为（都核过源码，不是"看起来像"）：
-//   · `BackgroundTaskQueue.java:36-45`：Runs backgroundable tasks one by one —— 队列**串行**，
-//     `run(Task.Backgroundable)` 入队；`clear()` 丢未跑的（:62-64），`isEmpty()` 是队列查询面（:66-68），
-//     队列自己带 title（正在跑的任务没有标题时用它，:39-40）。
-//   · `ProgressIndicatorModel.kt:34-59`：title + text + fraction + cancellation；
-//     `setFraction`/`setText` 是任务的写入面；带 `onCancel` 的构造器在 `cancel()` 时先调用户回调。
-//   · `TaskCancellation`：可取消 / 不可取消两档；不可取消的任务取消不该生效
-//     （非取消档的 `cancel()` 是空操作，`ProgressIndicatorBase` 的 `isCancellable` 门控）。
+// 上游行为（2026-10-06 progflow 逐条重开源码数过行号，不是"看起来像"；原来写的几处坐标是漂的）：
+//   · `BackgroundTaskQueue.java:26`「Runs backgroundable tasks one by one」= 队列**串行**，
+//     串行由构造它的那条 `QueueProcessor`（`:43-46`，`ThreadToUse.AWT`）保证；
+//     `run(Task.Backgroundable)` 入队在 `:61-63`，`clear()` 丢未跑的在 `:49-51`，
+//     `isEmpty()` 是队列查询面在 `:53-55`，队列自己带 title（正在跑的任务没有标题时用它：
+//     字段 `:35`，真正生效的那一句是 `:105-107`）。
+//   · `ProgressIndicatorModel.kt:13-18`：title + cancellation + visibleInStatusBar，
+//     写入面 `setFraction`（`:39-41`）/ `setText`（`:47-49`）/ `getFraction`（`:59-61`）；
+//     带 `onCancel` 的构造器 `:25-37` 把回调装成 `cancel()` 的委托（`:33` 先调回调、`:34` 再 `super.cancel()`）。
+//   · `TaskCancellation`：可取消 / 不可取消两档（`ProgressIndicatorModel.kt:23` 的 `nonCancellable()`、
+//     `:92` 的 `isCancellable() = cancellation is TaskCancellation.Cancellable`）；
+//     不可取消的任务取消不该生效（本仓的同一档在 `Indicator.cancel()`）。
+//   · 行的**取消按钮**按任务自己的可取消档画，且正在停止时不画：
+//     `InfoAndProgressPanel.kt:753`（`cancelButton.setPainting(task.isCancellable())`）与
+//     `:876`（`info.isCancellable() && !isStopping`）；点下去打的是这条任务自己的
+//     `original!!.cancel()`（`:964`）—— 本仓对应的就是 `queueRow.cancellable` + `cancelCurrentAndAwait`。
 //
-// 本仓的落点：`src/progressPanel.ts` 只画"当前正在跑的任务"，任务在各调用点自行执行、
-// 没有排队面。这个模块补的就是那一层：串行队列 + 每任务一条可取消的 indicator + 排队计数。
+// 本仓的落点：`src/progressPanel.ts` 画各行，任务在各调用点自行执行、没有排队面。
+// 这个模块补的就是那一层：串行队列 + 每任务一条可取消的 indicator + 排队计数。
 // 第一个真实消费者是 `src/gradleHost.ts` 的「同步 Gradle 项目更改」：用户从外部系统通知里点出来的
-// 重载走队列，连点两下排成一条；取消按钮走 `onCancel`（接到宿主的 `gradle.cancel`）。
-// 进度面板把**排队深度**画成一行（正在跑的那条由各功能自己的进度行承担，不重复画）。
+// 重载走队列，连点两下排成一条；取消按钮走 `onCancel`（那条回调接到宿主的 `gradle.cancel`）。
+// 进度面板**只开一行**（`queueRow`）：正在跑的那条自己的标题/进度由各功能自己的进度行承担
+// （Gradle 那条 = `src/progressPanel.ts` 读 `ctx.gradleSync()` 的行），队列这一行只在
+// **排队中 / 被挂起 / 正在取消**这三种"只有队列知道"的状态出现，并带上正在跑那条的
+// 可取消档（`cancellable`）—— 取消按钮点的是 `cancelCurrentAndAwait()`，也就是正在跑的那条任务
+// 自己的 `indicator.cancel()`，与上游 `InfoAndProgressPanel.kt:964` 同一个落点。
+// 原来这里对外开着 `runningTitle`/`runningDetail`/`runningFraction`/`runningCancellable`/
+// `queuedCount`/`cancellingTitle` 六条扁平出口 + 一条 `cancelCurrent()`：全仓零生产消费者
+// （只有各自的测试读它们），且"再开一行正在跑的任务"会与上面那条 Producer 行重复 ——
+// 2026-10-06 progflow 按铁律「死代码直接删」收掉，状态改由 `queueRow` 这一个出口承担。
 //
 // **挂起-恢复**（这一族判词里缺的那条）接在 `src/progressSuspender.ts` 上：队列给正在跑的
-// 那条任务建一个挂起器，`suspend(reason)` / `resume()` 由宿主触发（本仓的触发者是省电模式，
-// 理由与上游依据写在 progressSuspender.ts 的模块头）。任务在耗时点 `await indicator.awaitResumed()`
+// 那条任务建一个挂起器，`setSuspended(reason)` / `setSuspended(null)` 由宿主触发（本仓的触发者是
+// 省电模式，`src/notifications.ts:298`；理由与上游依据写在 progressSuspender.ts 的模块头）。
+// 挂起器本身不存文案 —— 原因只有队列这一份（`queueSuspendReason`），显示它的那一行是 `queueRow`。
+// 任务在耗时点 `await indicator.awaitResumed()`
 // 就是上游 `checkCanceled()` 里那句 `myLock.wait()` 的等价物 —— 单线程 JS 不能真的阻塞，
 // 改成"这一拍不往下走"。
 //
 // 协作式的**另一半在任务体里**：只有走到 `awaitResumed()` / `checkCanceled()` 的任务才会真的让路。
-// 目前唯一的入队消费者（`src/gradleHost.ts:203` 的「同步 Gradle 项目更改」）只用了 `onCancel`
-// —— 那条同步是宿主子进程，中途没有可让路的节拍 ⇒ 挂起对它的实际效果是"不再开新任务"。
-// `queueRow` 那句措辞按这个口径写（原写「正在跑的那条停在检查点上」= 把没做的事说成做了，本批订正），
-// 给 gradleHost 的接线请求见 `docs/wiring-requests-2026-10-06-status2.md`。
+// 目前唯一的入队消费者（`src/gradleHost.ts:204-212` 的「同步 Gradle 项目更改」）两个检查点都接上了：
+// 进 `sync()` 前一次、每个链接目录开始执行前一次（`gradleHost.ts` 的 `execute(job)` 开头）——
+// 那条同步本身是宿主子进程，**进程内部**没有可让路的节拍，所以让路发生在"不再往下一个目录开新进程"
+// 这一层；`queueRow` 挂起分支那句措辞按这个口径写（原写「正在跑的那条停在检查点上」= 把没做的事
+// 说成做了，2026-10-06 桶 status2 订正过一次，本轮接上检查点后仍然只说"会在下一个检查点让路"）。
 import { computed, ref, shallowRef } from 'vue'
 import { createProgressSuspender, ProgressSuspenderTracker, type ProgressSuspender } from './progressSuspender.ts'
 
@@ -160,19 +179,12 @@ class Indicator implements ProgressIndicatorModel {
 export const CANCEL_WAIT_TIMEOUT_MS = 5000
 
 export function createBackgroundTaskQueue() {
-  const runningTitle = ref('')
-  const runningDetail = ref('')
-  const runningFraction = ref<number | null>(null)
-  const runningCancellable = ref(false)
-  const queuedCount = ref(0)
   /**
-   * 「取消已经按下、任务体还没走到下一个 `checkCanceled()`」的那条任务的标题（空串 = 没有）。
+   * 「取消已经按下、任务体还没走到下一个 `checkCanceled()`」的那条任务（null = 没有）。
    * 协作式取消的两个时刻要分开画：点下去是一件事，任务真的收尾是另一件事
    * （`ProgressIndicatorUtils.java:313-314` 那句"计算得足够频繁地调 checkCanceled"说的就是这段距离）。
    */
   const cancellingEntry = shallowRef<QueueEntry | null>(null)
-  /** 面板读的那句标题（没有中间态就是空串）。 */
-  const cancellingTitle = computed(() => cancellingEntry.value?.indicator.title ?? '')
   const queue: QueueEntry[] = []
   const suspenders = new ProgressSuspenderTracker()
   /**
@@ -182,30 +194,34 @@ export function createBackgroundTaskQueue() {
    * 判据 `tests/progress-queue-suspend.test.mjs`）。
    */
   const queueSuspendReason = ref<string | null>(null)
+  /**
+   * 「队列里有什么变了」的**唯一**响应式信号：`current` / `queue` / `Indicator` 都是普通对象，
+   * 它们的 text/fraction/取消状态变化本身不会触发重算。上游对应的是给指示器挂
+   * `onProgressChange` 委托（`ProgressIndicatorModel.kt:83-90`）后把这一行标脏
+   * （`InfoAndProgressPanel.kt:966-968` 的 `dirtyIndicators.add(this)`），DOM 侧就只剩"自增一次计数"。
+   */
+  const revision = ref(0)
   let current: QueueEntry | null = null
   let pumping = false
   let taskSeq = 0
 
-  /** 队列的三个查询面（`isEmpty`/`clear`）加面板读的那几个 ref。 */
+  /** 任务状态变了：让读 `revision` 的那几条 computed（只有 `queueRow`）重新算一遍。 */
   const sync = () => {
-    queuedCount.value = queue.length
-    runningTitle.value = current?.indicator.title ?? ''
-    runningDetail.value = current?.indicator.text ?? ''
-    runningFraction.value = current?.indicator.fraction ?? null
-    runningCancellable.value = Boolean(current?.indicator.cancellable && !current.indicator.cancelled)
+    revision.value += 1
     // 挂起原因**不在这里另开一个出口**：上游那句是 `TaskManager.pauseTask(task, suspender.suspendedText,
-    // Source.USER)`（`TaskInfoEntityCollector.kt:174`，恢复的对称面 `resumeTask` 在 `:177`；上一批写的
-    // `:164-168` 是那段函数的起始行，本轮重开该文件逐行数过）—— 暂停状态跟着那一行显示，
-    // 本仓的那一行就是下面的 `queueRow`（面板读它）。原写在这里的 `runningSuspendedText`
-    // （`:154` 声明、`:181` 写、`:246` 导出）全仓零消费者 = 铁律 §5 禁的"只过自己测试的死出口"，
-    // 2026-10-06 桶 status2 删除（判据：`tests/progress-queue-suspend.test.mjs`）。
+    // Source.USER)`（`TaskInfoEntityCollector.kt:174`，恢复的对称面 `resumeTask` 在 `:177`）——
+    // 暂停状态跟着那一行显示，本仓的那一行就是下面的 `queueRow`（面板读它）。
+    // 原写在这里的 `runningSuspendedText`（`:154` 声明、`:181` 写、`:246` 导出）与同批那几条
+    // `runningTitle`/`runningDetail`/`runningFraction`/`runningCancellable`/`queuedCount`/`cancellingTitle`
+    // 全仓零生产消费者 = 铁律禁的"只过自己测试的死出口"，2026-10-06 桶 status2 与 progflow 分两批删除
+    // （判据：`tests/progress-queue-suspend.test.mjs` 的那份精确键清单）。
   }
 
-  /** 把队列级的挂起请求落到那条正在跑的任务上。 */
+  /** 把队列级的挂起请求落到那条正在跑的任务上（挂起器的状态机不带文案，原因由这一层拿着）。 */
   const applySuspend = (indicator: Indicator) => {
     const suspender = suspenders.getSuspender(indicator.taskId)
     if (!suspender) return
-    if (queueSuspendReason.value !== null) suspender.suspend(queueSuspendReason.value)
+    if (queueSuspendReason.value !== null) suspender.suspend()
     else suspender.resume()
   }
 
@@ -228,13 +244,16 @@ export function createBackgroundTaskQueue() {
         const taskId = `${entry.indicator.title}#${++taskSeq}`
         entry.indicator.taskId = taskId
         const suspender = suspenders.track(createProgressSuspender(
-          // 上游那句 `suspendText` 是"这条任务可以被挂起，原因写在这里"（`TaskSuspension.kt:24-25`）；
-          // 它是构造给挂起器的那句**兜底**文案（上游优先级在 `ProgressSuspender.java:106-110`：临时 reason 优先）。
-          // 原写「没有具体 reason 时用它兜底，面板拼成「已挂起：<这句>」」= 把没发生的事说成发生过了：
-          // 队列这一路 `applySuspend` 只在 reason 非 null 时才往下传（本文件 :208），所以这句兜底
-          // **当前显示不到**（面板读的是 `queueRow` 里的 `queueSuspendReason.value`，:364-367）。
-          // 2026-10-06 桶 status2defect 核对后按实情订正；要真接上兜底口径的线见交付报告 §7。
-          taskId, '等待前台操作',
+          // 上游 `markSuspendable(indicator, suspendedText)`（`ProgressSuspender.java:79-81`）的第二参是
+          // "挂起那一行的兜底文案"（`TaskSuspension.kt:24-25`：
+          // "a text message explaining the reason for the suspension, which is displayed in the progress bar"）。
+          // 本仓**不接这一参**（这里原样传过一句「等待前台操作」，2026-10-06 桶 status2 删除）：
+          // 队列这一路只在 `queueSuspendReason` 非 null 时才挂起（本文件 `applySuspend`），
+          // 那句兜底没有能显示到它的调用点 = 只过自己测试的死出口。面板那一行读的是 `queueSuspendReason`
+          // （见下面 `queueRow` 的挂起分支），口径与上游那三处 `suspendedText` 消费者一起写在
+          // `src/progressSuspender.ts` 的文件头。要真接上兜底档，先要有一个"不给 reason 的挂起入口"——
+          // 上游那一支是 `TaskStatus.Paused(reason)` 可空（`TaskInfoEntityCollector.kt:188`），本仓没有。
+          taskId,
           { get running() { return current === entry && !entry.indicator.cancelled } },
         ))
         entry.indicator.suspender = suspender
@@ -267,10 +286,16 @@ export function createBackgroundTaskQueue() {
   const resumeQueueWaiters: Array<() => void> = []
 
   return {
-    runningTitle, runningDetail, runningFraction, runningCancellable, queuedCount,
-    // 原写在这里还有一条 `currentSuspender()`（对应上游 `ProgressSuspenderTracker.getSuspender`），
+    // 原写在这里还有一条 `currentSuspender()`（对的是上游 `ProgressSuspender.getSuspender(indicator)`
+    // —— `ProgressSuspender.java:93-95` 查那张 `ourProgressToSuspenderMap` `:44`；上游拿它去反查挂起器的是
+    // `UnindexedFilesIndexer.java:243`、`BridgeTaskSuspender.kt:37`/`:60`、`InfoAndProgressPanel.kt:404`/`:953`），
     // 全仓零消费者 ⇒ 与 `runningSuspendedText` 同批删除（挂起状态由 `queueRow` 那一行显示，
     // 队列内部用 `suspenders.getSuspender` 与 `Indicator.suspender` 两条私有通道，不需要对外再开一个）。
+    // 2026-10-06 progflow 同批删掉的还有 `runningTitle`/`runningDetail`/`runningFraction`/
+    // `runningCancellable`/`queuedCount`/`cancellingTitle`/`cancelCurrent` 七条：它们读到的状态
+    // 全部由下面 `queueRow` 这一个出口带出去（标题、进度、排队数、可取消档、取消中间态），
+    // 面板里也只需要那一行 —— 正在跑那条任务的标题/百分比由**它自己的功能行**承担
+    // （Gradle = 面板读 `ctx.gradleSync()` 的那一行），队列再开一行就是把同一个操作画两遍。
     /**
      * 队列级挂起：`reason` 给字符串就是"让路"（正在跑的在它走到下一个检查点时让路、还没轮到的不开），
      * 给 null 就是恢复。**不是取消** —— 任务的进度、百分比、`onCancel` 都不动。
@@ -306,7 +331,7 @@ export function createBackgroundTaskQueue() {
         void pump()
       })
     },
-    /** `BackgroundTaskQueue.clear()`：丢掉还没跑的任务（正在跑的仍由 `cancelCurrent` 收）。 */
+    /** `BackgroundTaskQueue.clear()`：丢掉还没跑的任务（正在跑的仍由 `cancelCurrentAndAwait` 收）。 */
     clear(): void {
       for (const entry of queue.splice(0, queue.length)) {
         entry.cancelledBeforeStart = true
@@ -316,10 +341,6 @@ export function createBackgroundTaskQueue() {
       sync()
     },
     isEmpty: () => !current && queue.length === 0,
-    /** 正在跑的那条的取消中间态（面板画「正在取消…」用；没有就是空串）。 */
-    cancellingTitle,
-    /** 取消正在跑的那条（面板「取消」按钮的落点）。 */
-    cancelCurrent(): void { current?.indicator.cancel() },
     /**
      * 取消正在跑的那条**并等它真的收尾**。
      * 返回 `false` 表示超时了任务体还没停 —— 上游对同一件事的处理是给指示器 `cancel()` 之后再
@@ -345,8 +366,19 @@ export function createBackgroundTaskQueue() {
       if (timer !== null) clearTimeout(timer)
       return finished
     },
-    /** 面板要的一行：有人排队、或队列正被挂起时出现（正在跑的那条由各功能自己的进度行承担）。 */
+    /**
+     * 面板要的一行：有人排队、或队列正被挂起时出现（正在跑的那条由各功能自己的进度行承担）。
+     * `cancellable` 带的是**正在跑那一条任务自己的可取消档**（`ProgressIndicatorModel.kt:92`
+     * `isCancellable() = cancellation is TaskCancellation.Cancellable`），面板据此决定这一行给不给
+     * 「取消」按钮（`src/progressPanel.ts` 的 `'background'` 那一档）。这一句以前在面板里写死
+     * `cancellable: false` —— 队列里那条 `cancelCurrentAndAwait` 于是没有任何出口，按钮永远点不到
+     * （2026-10-06 progflow 补）。正在停止的那一段不给按钮，与上游同一判据：
+     * `InfoAndProgressPanel.kt:876` 的 `info.isCancellable() && !isStopping`。
+     */
     queueRow: computed(() => {
+      void revision.value // current / queue / Indicator 都不是 reactive，这一句是本行唯一的变化信号
+      const queued = queue.length
+      const cancellable = current !== null && current.indicator.cancellable && !current.indicator.cancelled
       // 「正在取消…」这一行是**必要**的：协作式取消里，按钮按下与任务体停在下一个
       // `checkCanceled()` 之间有一段真实的时间（上游 `ProgressIndicatorUtils.java:313-314` 那句
       // "计算得足够频繁地调用 checkCanceled，超时后才能停下"）。这段时间里界面必须说清发生了什么，
@@ -355,24 +387,29 @@ export function createBackgroundTaskQueue() {
         return {
           title: '后台任务队列',
           detail: `正在取消：${cancellingEntry.value.indicator.title}（等任务体走到下一个取消检查点）`,
+          cancellable: false,
           percent: null as number | null,
         }
       }
       // 挂起时这一行是**必要**的：省电模式让后台任务让路（上游那句正文「代码洞察和后台任务已禁用。」，
       // `power.save.mode.on.notification.content`），但正在跑的那条由各功能自己画（Gradle 行、
       // 检查行…），它们不知道队列被挂起了。所以挂起状态由队列自己补一行，而不是塞进别人的行。
-      if (queueSuspendReason.value !== null && (queuedCount.value > 0 || current !== null)) {
+      // 这一段里"能不能取消"尤其有用：卡在自己等待里的任务体只有 `cancel()` 那条路会先
+      // `suspender.resume()`（`ProgressSuspender.java:55-61` 那个 `cancelled()` 监听）再放行。
+      if (queueSuspendReason.value !== null && (queued > 0 || current !== null)) {
         return {
           title: '后台任务队列',
-          detail: `已挂起：${queueSuspendReason.value}${queuedCount.value > 0 ? `（还有 ${queuedCount.value} 个排队中）` : '（正在跑的那条会在下一个检查点让路）'}`,
+          detail: `已挂起：${queueSuspendReason.value}${queued > 0 ? `（还有 ${queued} 个排队中）` : '（正在跑的那条会在下一个检查点让路）'}`,
+          cancellable,
           percent: null as number | null,
         }
       }
-      if (queuedCount.value <= 0) return null
+      if (queued <= 0) return null
       const head = queue[0]!
       return {
         title: '后台任务队列',
-        detail: `还有 ${queuedCount.value} 个任务排队中${head ? `（下一个：${head.task.title}）` : ''}`,
+        detail: `还有 ${queued} 个任务排队中${head ? `（下一个：${head.task.title}）` : ''}`,
+        cancellable,
         percent: null as number | null,
       }
     }),

@@ -10,6 +10,9 @@ import { watchStopped, fsChanges, lspEdited, request, setNativeTheme, termOpened
 import type { Tab } from './editorTab'
 import type { Theme } from './appearance'
 import { errorMessage } from './errors.ts'
+import { decodeFailureKey, decodeFailureNotice } from './fileEncodingRules.ts'
+// 正文被程序性改写也要给那一篇换修订号 —— 见 src/documentRevisions.ts 与下面每处 bumpDocumentRevision 的注释。
+import { bumpDocumentRevision } from './documentRevisions.ts'
 
 export interface DiskSyncDeps {
   notify: (message: string, error?: boolean) => void
@@ -66,6 +69,9 @@ export function createDiskSync(deps: DiskSyncDeps) {
   const { menu, activity, theme, generalSettings, workspace, allTabs, treeVersion, dirty, syncLimit,
           editorFor, findTab, refreshTree, terminalPanelRef } = deps
   const showOutput = deps.showOutput
+  // 已经说过的「按这档编码读不出来」：磁盘同步每次切标签、每次外部改动都会再跑一趟，
+  // 同一个标签的同一个磁盘版本只报一次（读成功了就把键放下，下次真变了还要报）。
+  const decodeFailuresReported = new Set<string>()
   async function performDiskSync(quiet = false) {
     if (!isDesktop || !workspace.value || deps.syncing()) return
     deps.setSyncing(true)
@@ -94,9 +100,25 @@ export function createDiskSync(deps: DiskSyncDeps) {
       if (!diskSupersedesBuffer(tab, disk)) return
       Object.assign(tab, { content: disk.content, version: disk.version, encoding: disk.encoding, bom: disk.bom })
       editorFor(tab.path)?.setDraft(disk.content)
+      // 磁盘内容盖进编辑器 = 上游**第一个** listener 那一档（VFS 变化，
+      // `NonModalCommitWorkflowHandler.kt:203-213`）⇒ 这一篇的正文真的变过一版，必须换号；
+      // 不换号 ⇒ 提交检查的指纹逐字不变 ⇒ 上一轮的 PASSED 永远不作废（假复用）。
+      bumpDocumentRevision(tab.path)
       if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: disk.content }).catch(() => undefined)
+      decodeFailuresReported.delete(decodeFailureKey(tab.path, tab.version))
       if (!quiet) deps.notify(`磁盘上的 ${tab.path} 已变化，编辑器已同步`)
-    } catch { /* deleted or unreadable: keep the buffer as it is */ }
+    } catch (error) {
+      // 「删了 / 暂时读不到」继续留着旧缓冲（那条另有归属，见上面的 deleted 注释与本文件的 fs watch 分支）；
+      // 但**按这一档编码解不开字节**必须说话：本仓读侧是严格的（`native/workspace.cpp:141-142`
+      // "never a '?' written over the user's text"），上游同场景至少按默认编码读下去
+      // （`CharsetToolkit.java:242-261` 的 `INVALID_UTF8 ⇒ defaultCharset`）。两边都不该让缓冲区
+      // 悄悄停在旧内容上 —— 静默的旧文本和静默的问号一样坏。
+      const notice = decodeFailureNotice(tab.path, tab.encoding, (error as { code?: string })?.code, errorMessage(error))
+      if (notice) {
+        const key = decodeFailureKey(tab.path, tab.version)
+        if (!decodeFailuresReported.has(key)) { decodeFailuresReported.add(key); deps.notify(notice, true) }
+      }
+    }
   }
   /**
    * 切编辑器标签：**只同步切过去的那个文件**（上游那条 `selectionChanged` 就是这么做的 ——
@@ -186,6 +208,8 @@ export function createDiskSync(deps: DiskSyncDeps) {
       tab.readOnly = doc.readOnly
       tab.dirty = false
       editorFor(path)?.setDraft(doc.content)
+      // 语言服务改了正文（上游 documentChanged 的那一档，程序性改写照样换号）⇒ 这一篇要换号。
+      bumpDocumentRevision(path)
       deps.notify(`「${path}」已被语言服务修改，编辑器已重新载入。`)
     } catch (error) { deps.notify(`语言服务改动了「${path}」，但重新载入失败：${errorMessage(error)}`, true) }
   })

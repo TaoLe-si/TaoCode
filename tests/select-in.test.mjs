@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { filterSelectIn, moveSelectIn, planSelectIn, selectInMnemonicHit, selectInMnemonics, selectInNumber } from '../src/selectIn.ts'
+import { SELECT_IN_TARGET_EP, bundledSelectInTargets } from '../src/selectInTargets.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -96,11 +97,18 @@ test('上下键在可选行之间走，两端不回绕', () => {
   assert.equal(moveSelectIn([], -1, 1), -1)
 })
 
-// —— 出厂目标表的源码级核对 ——————————————————————————————————————————————
-const shipped = [...sideViews.matchAll(/\{ id: '([a-z]+)', label: '([^']+)', weight: ([\d.]+), selectable: (?:local|Boolean\()/g)]
-  .map(match => ({ id: match[1], label: match[2], weight: Number(match[3]) }))
+// —— 出厂目标表的核对 ——————————————————————————————————————————————
+// 表已搬进 `src/selectInTargets.ts`（`com.intellij.selectInTarget` EP 的 bundled 贡献），
+// 所以这里直接问那份模块，不再从 editorSideViews 的源码里抠字面量（抠字面量一旦搬家就假绿）。
+const targetSource = read('src/selectInTargets.ts')
+const shippedBundled = bundledSelectInTargets()
+const shipped = shippedBundled.map(entry => ({ id: entry.id, label: entry.label, weight: entry.weight }))
 
-test('表里就是这六个落点，且数组字面量的顺序 == 权重升序（改一个数就会响）', () => {
+test('EP id 与上游 qualifiedName 逐字一致', () => {
+  assert.equal(SELECT_IN_TARGET_EP, 'com.intellij.selectInTarget')
+})
+
+test('表里就是这六个落点，且声明顺序 == 权重升序（改一个数就会响）', () => {
   assert.deepEqual(shipped.map(row => row.id), ['project', 'structure', 'navbar', 'commit', 'explorer', 'settings'])
   const weights = shipped.map(row => row.weight)
   assert.deepEqual([...weights].sort((a, b) => a - b), weights, '声明顺序与权重不一致 —— 上游只认权重（SelectInManager.java:23-27）')
@@ -124,13 +132,14 @@ test('六个标题各对各的上游字面量，且都是本仓真有落点的�
   })
   // 书签目标**故意不做**：上游 canSelect 只认 FileBookmark（BookmarksSelectInTarget.kt:26-33），
   // 本仓的书签全是行书签。写进来就是一条永远灰着、还谎称对齐上游的行。
-  assert.doesNotMatch(sideViews, /id: 'bookmarks'/)
-  // 每一项都必须有真落点，不能只有表没有动作：五项显式分派 + 资源管理器那条走原生 reveal。
-  assert.match(sideViews, /if \(id === 'project'\) \{ selectInTree\(\); return \}/)
-  assert.match(sideViews, /if \(id === 'navbar'\) \{ showNavBar\(\); return \}/)
-  assert.match(sideViews, /if \(id === 'settings'\) \{ openProjectStructure\?\.\(\); return \}/)
-  assert.match(sideViews, /if \(id === 'structure'\) \{ focusToolWindow\?\.\('outline'\)/)
-  assert.match(sideViews, /if \(id === 'commit'\) \{ focusToolWindow\?\.\('git'\)/)
+  assert.doesNotMatch(targetSource, /id: 'bookmarks'/)
+  // 每一项都必须有真落点，不能只有表没有动作：bundled 目标自带 `selectIn`，宿主在
+  // `src/editorSideViews.ts` 里把副作用回调给齐（不是把动作写死在目标表里）。
+  for (const entry of shippedBundled) assert.equal(typeof entry.selectIn, 'function', `${entry.id} 没有 selectIn`)
+  assert.match(sideViews, /selectProjectView: \(\) => selectInTree\(\)/)
+  assert.match(sideViews, /showNavBar: \(\) => showNavBar\(\)/)
+  assert.match(sideViews, /openProjectStructure: \(\) => openProjectStructure\?\.\(\)/)
+  assert.match(sideViews, /focusToolWindow: id => focusToolWindow\?\.\(id\)/)
   assert.match(sideViews, /request\('shell\.reveal'|request\('file\.reveal'/, '资源管理器那一项必须真的调原生 reveal')
 })
 

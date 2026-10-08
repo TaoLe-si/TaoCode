@@ -124,3 +124,11 @@
 5. **ExtractClass/ExtractInclude/ExtractInterface/ExtractSuperclass/ExtractModule**
    （`LangActions.xml:378-382`）、**IntroduceField/IntroduceParameter**（`:367/:368`）：
    均无落点，菜单里不出现（`tests/refactor-menu-parity.test.mjs` 的 id 判据守着）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **A1 已接线**：`src/keymapBindings.ts:127` `refactor.changeSignature`（Ctrl F6）、`:132` `refactor.safeDelete`（Alt Delete）。
+- **A2 已接线**：`src/keymap.ts:402` `'refactor.changeSignature': () => openChangeSignature()`、`:403` `'refactor.safeDelete': () => void openSafeDelete()`。
+- **A3 已接线**：`src/App.vue:1620` 的 `refactorMenuContext` 已含 `openChangeSignature / openPullUp / openPushDown / openIntroduceParameterObject / openSafeDelete`；`:2473` 已挂 `<RefactorSignatureDialog v-if="changeSignatureState" …>`（及 `RefactorMemberChooserDialog` / `RefactorSafeDeleteDialog`）。
+
+结论：**零待接**，未改任何文件。

@@ -50,6 +50,9 @@ std::string trim(std::string value);
 std::wstring checked_ref(const std::filesystem::path& repo, const std::string& base);
 // 用户给的路径 spec：它落在 git 命令行的 `--` 之后，所以只要求待在仓库内。
 std::wstring checked_path(const std::string& path);
+// 「提交文件…」的 pathspec：在上面那五道之上再加"必须是仓库相对的 POSIX 写法"。
+// 2026-10-06 partialcommit 新加的，只挂在 commit() 那一发上（`file_history` 那一条仍用宽的那道）。
+std::wstring checked_pathspec(const std::string& path);
 // 把 `%H\x1f%h\x1f…` 那种 0x1F 分隔、一行一条的记录切成的 [{字段…}, …]。
 Json parse_records(const std::string& output);
 

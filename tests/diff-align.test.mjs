@@ -144,18 +144,25 @@ test('generateUnifiedDiff 仍是文本形态', () => {
 
 test('内核文件里的上游行号不许漂移（判据的判据）', () => {
   const source = readFileSync(join(root, 'src/diffAlign.ts'), 'utf8')
+  // 每一条都是 2026-10-06 对着参考树 `grep -n` 复核实测的行号（旧值漂移见
+  // `docs/batch-2026-10-06-mergeverdict.md` §E）：`Diff.kt` 的 buildChanges 在 `:15`/`:42`
+  // （旧钉的 `:29-41` 是 Kotlin 重写前的位置），`MyersLCS.kt` 的阈值公式在 `:76-78`、
+  // 抛异常在 `:190`、V 数组分配在 `:45-46`，`Enumerator` 的方法在 `Enumerator.kt:13-15`。
   for (const cite of [
-    'Diff.kt:29-41',     // buildChanges
-    'Diff.kt:118-127',   // getStartShift
-    'Diff.kt:129-141',   // getEndCut
-    'Diff.kt:64-75',     // doBuildChangesFast
-    'Diff.kt:96-101',    // patience 退路
-    'MyersLCS.kt:96-190',  // execute 分治
-    'MyersLCS.kt:38-42',   // V 数组全程复用（线性空间的由来）
-    'MyersLCS.kt:64-70',   // 阈值公式
+    'Diff.kt:15',        // buildChanges(before, after)
+    'Diff.kt:42',        // buildChanges(IntArray, IntArray)
+    'Diff.kt:55',        // doBuildChangesFast
+    'Diff.kt:104-112',   // getStartShift
+    'Diff.kt:88-97',     // patience 退路（catch 后 execute(true)）
+    'MyersLCS.kt:90-191',  // execute 分治
+    'MyersLCS.kt:45-46',   // V 数组全程复用（线性空间的由来）
+    'MyersLCS.kt:76-78',   // 阈值公式
+    'MyersLCS.kt:190',     // 超阈值抛出点
     'DiffConfig.kt:10',    // DELTA_THRESHOLD_SIZE
-    'Enumerator.kt:16-25',
+    'Enumerator.kt:13-15',
     'TextDiffSettingsHolder.kt:47',
+    'PatienceIntLCS.kt:11-159',
+    'UniqueLCS.kt:23-105',
   ]) {
     assert.ok(source.includes(cite), `diffAlign.ts 里少了上游引用 ${cite}`)
   }

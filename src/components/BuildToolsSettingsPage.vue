@@ -11,7 +11,7 @@
 // 三档语义见 `ExternalSystemProjectTrackerSettings.kt:12-28`（src/gradle.ts 的 AutoReloadType）。
 import { computed } from 'vue'
 import {
-  AUTO_RELOAD_ALL_LABEL, AUTO_RELOAD_GROUP_TITLE, AUTO_RELOAD_SELECTIVE_COMMENT, AUTO_RELOAD_SELECTIVE_LABEL,
+  AUTO_RELOAD_ALL_LABEL, AUTO_RELOAD_GROUP_TITLE, AUTO_RELOAD_SELECTIVE_LABEL,
   DEFAULT_BUILD_TOOLS, type AutoReloadType, type BuildToolsSettings,
 } from '../gradle.ts'
 
@@ -39,5 +39,4 @@ function apply(next: boolean, value: AutoReloadType = choice.value) {
     <label><input type="radio" name="build-tools-auto-reload" value="ALL" :checked="choice === 'ALL'" :disabled="disabled || !enabled" @change="apply(true, 'ALL')" /><span>{{ AUTO_RELOAD_ALL_LABEL }}</span></label>
     <label><input type="radio" name="build-tools-auto-reload" value="SELECTIVE" :checked="choice === 'SELECTIVE'" :disabled="disabled || !enabled" @change="apply(true, 'SELECTIVE')" /><span>{{ AUTO_RELOAD_SELECTIVE_LABEL }}</span></label>
   </div>
-  <p class="field-hint">{{ AUTO_RELOAD_SELECTIVE_COMMENT }}关闭后（<code>NONE</code>）只有显式触发的同步才会重载；上次选的档会记在 <code>settings.build.tools.auto.reload</code> 里（源码 <code>:58</code>）。这一组是<strong>项目级</strong>的，随项目保存。</p>
 </template>

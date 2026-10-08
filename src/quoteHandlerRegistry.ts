@@ -42,6 +42,10 @@
 // `isUnicodeIdentifierPart` 那段），差别只会在冷门码位上；(b) 的「注释 token」用「后面是 `//` 或 `/*`」近似，
 // 块注释中间的位置（前面才是 `/*`）会被算成不允许 ⇒ 与本仓既有词法一致，不新造规则。
 
+import {
+  EXTENSIONS, LANGUAGE_QUOTE_HANDLER_EP, QUOTE_HANDLER_EP,
+} from './extensionPoints.ts'
+
 /** 一条注册（XML 里的一行）。 */
 export interface QuoteHandlerRegistration {
   /** XML 里 `fileType` / `language` 属性的**原值**（逐字照抄，大小写与空格都算）。 */
@@ -165,8 +169,73 @@ export const QUOTE_HANDLER_REGISTRATIONS: readonly QuoteHandlerRegistration[] = 
   },
 ]
 
-/** `Character.isUnicodeIdentifierPart` 的文本层近似（见文件头 (a) 那条）。 */
-const IDENTIFIER_PART = /[\p{L}\p{N}\p{Mn}\p{Pc}]/u
+// ── handler 的**注册表**（上游两条 EP 的等价物） ────────────────────────────────────────
+// 上游那 20 条注册写在 plugin.xml 里，分挂两条 EP：按 fileType 走 `com.intellij.quoteHandler`
+// （`QuoteHandlerEP.java:18` 的 `EP_NAME`）、按 language 走 `com.intellij.lang.quoteHandler`
+// （`LanguageQuoteHandling.java:15`）。本仓没有插件 XML 解析器，改由扩展点宿主承载：
+// bundled 的 20 条在模块加载时按各自的 `via` 挂成 bundled 贡献，第三方按同一个 EP id 挂进来的
+// 注册由 `adoptFromExtensions()` 收编，消费方（`quoteRegistrationForLanguage`）一律从注册表取。
+export class QuoteHandlerRegistry {
+  private readonly table = new Map<string, QuoteHandlerRegistration>()
+
+  /** 注册一条（同键覆盖）；键 = `via:key`（两条 EP 的同名 key 不互相覆盖）。 */
+  register(registration: QuoteHandlerRegistration, options: { source?: 'bundled' | 'user' } = {}): void {
+    if (!registration?.key || !registration.className)
+      throw new Error('引号 handler 注册必须有 key 与 className。')
+    const key = quoteHandlerKey(registration)
+    this.table.set(key, registration)
+    const ep = registration.via === 'language' ? LANGUAGE_QUOTE_HANDLER_EP : QUOTE_HANDLER_EP
+    if (EXTENSIONS.hasExtensionPoint(ep))
+      EXTENSIONS.registerExtension(ep, key, registration, { source: options.source ?? 'user' })
+  }
+
+  unregister(key: string): boolean {
+    const existing = this.table.get(key)
+    const removed = this.table.delete(key)
+    if (removed && existing) {
+      const ep = existing.via === 'language' ? LANGUAGE_QUOTE_HANDLER_EP : QUOTE_HANDLER_EP
+      EXTENSIONS.unregisterExtension(ep, key)
+    }
+    return removed
+  }
+
+  /** 从扩展点宿主收编两条 EP 的注册（上游启动时读 plugin.xml）。返回收编条数。 */
+  adoptFromExtensions(): number {
+    let adopted = 0
+    for (const ep of [QUOTE_HANDLER_EP, LANGUAGE_QUOTE_HANDLER_EP]) {
+      for (const registration of EXTENSIONS.extensionsOf<QuoteHandlerRegistration>(ep)) {
+        if (!registration?.key || !registration.className) continue
+        this.table.set(quoteHandlerKey(registration), registration)
+        adopted += 1
+      }
+    }
+    return adopted
+  }
+
+  all(): QuoteHandlerRegistration[] { return [...this.table.values()] }
+
+  find(key: string): QuoteHandlerRegistration | null { return this.table.get(key) ?? null }
+
+  get size(): number { return this.table.size }
+}
+
+/** 贡献键：`via:key`（XML 里两条 EP 各挂一个 key 时也不撞）。 */
+export function quoteHandlerKey(registration: QuoteHandlerRegistration): string {
+  return `${registration.via}:${registration.key}`
+}
+
+/** 进程内唯一的注册表（bundled 20 条 + 收编的第三方）。 */
+export const QUOTE_HANDLER_REGISTRY = new QuoteHandlerRegistry()
+
+/** 消费方统一入口：当前全部注册（bundled 在前，收编的第三方跟在其后）。 */
+export function quoteHandlerRegistrations(): readonly QuoteHandlerRegistration[] {
+  return QUOTE_HANDLER_REGISTRY.all()
+}
+
+// bundled 20 条：按 `via` 分流挂进对应的那条 EP（上游 `:405` 与 `:408` 两条声明的等价物）。
+for (const registration of QUOTE_HANDLER_REGISTRATIONS) QUOTE_HANDLER_REGISTRY.register(registration, { source: 'bundled' })
+
+/** `Character.isUnicodeIdentifierPart` 的文本层近似（见文件头 (a) 那条）。 */const IDENTIFIER_PART = /[\p{L}\p{N}\p{Mn}\p{Pc}]/u
 
 /** 上游 `;` `,` `)` `]` `}` 那四个右向括号与两个分隔符（`JavaQuoteHandler.java:35-36`）。 */
 const APPROPRIATE_NEXT_CHARS = ';,)]}'
@@ -206,10 +275,10 @@ export function pairInsertionSuppressed(line: string, caret: number, javaLike: b
   return nextCharBlocksPair(line, caret)
 }
 
-/** 本仓的语言档对上表里的哪一条注册（对不上返回 null ⇒ 这门语言在本仓没有引号 handler 的档案）。 */
+/** 本仓的语言档对上**注册表**里的哪一条注册（对不上返回 null ⇒ 这门语言在本仓没有引号 handler 的档案）。 */
 export function quoteRegistrationForLanguage(language: string | undefined): QuoteHandlerRegistration | null {
   if (language === undefined) return null
-  return QUOTE_HANDLER_REGISTRATIONS.find(item => item.repoLanguage === language) ?? null
+  return quoteHandlerRegistrations().find(item => item.repoLanguage === language) ?? null
 }
 
 /** 这门语言是不是 `javaLike`（决定门槛 (b) 放不放过它）。 */

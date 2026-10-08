@@ -1,5 +1,5 @@
 // 引用面板（IDEA 的 Find 窗口）的**用法树行**—— 判词 `lp/usage-view` 的
-// 「把分组树接进引用面板（面板现状是平表）」那一半的模块侧。
+// 「把分组树接进引用面板（原来是平表，2026-10-06 已换成 ReferencePanel 树形）」那一半。
 //
 // 上游依据（本批逐行开参考树自数核对）：
 //   · 层级次序：platform/usageView-impl/src/com/intellij/usages/impl/rules/UsageGroupingRulesDefaultRanks.java:26-32
@@ -16,6 +16,7 @@
 //   · 目录分组那一档的动作：platform/usageView-impl/src/com/intellij/usages/impl/actions/GroupByDirectoryStructureAction.java:10-26
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   allUsageGroupKeys, buildUsageTree, exportUsageTreeText, filterUsageTree, flattenUsageTree, usageCounterText,
   usageGroupKey, usageRowSearchText, usageRowsForQuery, usagesFoundText,
@@ -380,4 +381,19 @@ test('换一份结果看就把过滤串清掉（过滤串属于正在看的这�
     referencesSpeedSearch.value = ''
     resetReferences()
   }
+})
+
+// ── 宿主接线（docs/wiring-requests-2026-10-06-usage3.md 的 R-2）───────────────────
+test('接线：宿主把成员层的符号源接上，且每次引用结果换一份表', () => {
+  const app = readFileSync('src/App.vue', 'utf8')
+  assert.match(app, /import \{[^}]*\bprovideUsageSymbols\b[^}]*\} from '\.\/referenceContents'/,
+    '宿主必须引模块那个注入点，不是自己再实现一棵符号树')
+  assert.match(app, /provideUsageSymbols\(path => usageSymbolTable\.value\[path\]\)/,
+    'provider 读的是那份响应式表（普通 let 会让树永远不重算 —— 模块注释里写明了）')
+  assert.match(app, /watch\(references, rows => \{[\s\S]{0,80}usageSymbolTable\.value = \{\}/,
+    '每次结果回来先清空：上一批 / 上一个工程的符号不能喂给这一批')
+  assert.match(app, /kind: 'documentSymbol'/, '符号取自现成的 lsp.request documentSymbol 通道')
+  assert.match(app, /typeof item\.startLine === 'number' && typeof item\.endLine === 'number'/,
+    '没有行范围的符号不进表（归组会错，宁缺毋滥）')
+  assert.equal(app.includes('provideUsageSymbols(null)'), false, '接上之后不许再手动拔掉 provider 兜底')
 })

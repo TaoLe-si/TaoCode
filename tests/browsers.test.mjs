@@ -103,7 +103,11 @@ test('内置浏览器清单：六个 id 与默认勾选态逐条照 WebBrowserMa
     edge: '37cae5b9-e8b2-4949-9172-aafa37fbc09c',
   })
   const windows = predefinedBrowsers('windows')
-  assert.deepEqual(windows.map(row => row.name), ['Google Chrome', 'Firefox', 'Safari', 'Opera', 'Internet Explorer', 'Edge'])
+  // 名字 = `family.getName()`（`ConfigurableWebBrowser.java:31-33` 的两参构造），
+  // 而 `BrowserFamily.java:16` 的第一个构造参数是 `IdeBundle.message("browsers.chrome")`
+  // = `platform/platform-api/resources/messages/IdeBundle.properties:27` 的 **Chrome**（不是 mac 路径
+  // 'Google Chrome'，那是第四个参数 `BrowserFamily.java:16`；2026-10-06 trust5 按原文订正）。
+  assert.deepEqual(windows.map(row => row.name), ['Chrome', 'Firefox', 'Safari', 'Opera', 'Internet Explorer', 'Edge'])
   // 两参构造（ConfigurableWebBrowser.java:31-33）给 active=true。
   assert.equal(windows[0].active, true)
   assert.equal(windows[1].active, true)

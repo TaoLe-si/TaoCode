@@ -35,3 +35,12 @@
 
 - `src/components/ScopesSettingsPage.vue` 的「分析」一节：本轮已自己接完（页面是我的文件），无保留文件改动。
 - `ANALYZE_INJECTED_CODE` 的控件：**不放**。上游在 `BaseAnalysisActionDialog.java:105` 自己就 `setVisible(false)`，本仓也没有注入语言的 PSI 片段可查 ⇒ 放了就是假控件。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **`tests/scope-persistence.test.mjs` 桩键** —— `tests/**` 不属本 lane。复核现状：`node --test tests/scope-persistence.test.mjs` ⇒ **tests 3 / pass 3 / fail 0**，该红已被别人修掉。
+- **`ProblemsPanel.vue` 四控件** —— 与 bookmarks W-1 同一条；本 lane 不越界改 ProblemsPanel 的既有 owner，登记为「需 ProblemsPanel owner 处理」。
+- **`native/git.cpp` 符号链接归属 / 「某修订里某文件内容」通道** —— `native/*` 与 `src/bridge.ts` 非本 lane 可改面。跳过给 native/vcs owner。
+- **命名作用域表注入** —— **本 lane 已接线**（与 bookmarks W-2 同一处）：`src/App.vue:499-506` 的 `watch(() => projectSettings.value.scopes, …)` → `setAnalysisScopeNamedScopes(...)`。
+
+结论：零待接（命名作用域那半本 lane 已接），未改本份请求点名的任何文件。

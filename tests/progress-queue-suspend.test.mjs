@@ -8,19 +8,27 @@
 //   · platform/platform-impl/src/com/intellij/openapi/progress/impl/TaskInfoEntityCollector.kt:174 ——
 //     `TaskManager.pauseTask(task, suspender.suspendedText, TaskStatus.Source.USER)`（原因挂在任务行上）；
 //   · 同文件 `:177` 的 `resumeTask` 是对称的那一半（恢复后那一行收掉）。
-// 本仓的那一行就是队列的 `queueRow`，消费者是 `src/progressPanel.ts`。这里钉三件可数的事：
+// 本仓的那一行就是队列的 `queueRow`，消费者是 `src/progressPanel.ts`。这里钉的是下面这几件可数的事：
 //   1. 队列对外只有那一份精确的键清单（死出口不许悄悄回来）；
 //   2. 挂起时那一行带着原因、任务体停在 `awaitResumed()` 这个检查点上不放行；恢复后放行并把那一行收掉；
 //   3. 面板只画队列拼好的那一行，不自己再拼第二套挂起文案；
 //   4. （2026-10-06 status2defect 补）"**只**改挂起原因"这一件事单独钉一条：前后其余可见状态逐个不变、
 //      而那一句文案真的从"不显示"变成"已挂起：<原因>"—— 钉的就是 `queueSuspendReason` 必须是响应式的
-//      （`queueRow` 是 computed，原因用普通变量的话这一拍没有任何依赖变化 ⇒ 缓存留着、行永远出不来）。
+//      （`queueRow` 是 computed，原因用普通变量的话这一拍没有任何依赖变化 ⇒ 缓存留着、行永远出不来）；
+//   5. （2026-10-06 status2 第二轮补）挂起器与 tracker 的**对外面也是一份精确清单**：
+//      同批删掉的那几条零消费口（`suspendedText`/`text()`/`isClosed()`/`SuspendableTask.onCancel`/
+//      tracker 的 `suspended()`/`suspendAll()`/`resumeAll()`/`clear()`）不许悄悄回来，
+//      并且 close 之后"suspend 是空操作"这条闸仍然有效（它不再靠 `isClosed()` 出口可观测）。
+//   6. （2026-10-06 progflow 补）`queueRow.cancellable` 带的是**正在跑那一条任务自己的**可取消档
+//      （`ProgressIndicatorModel.kt:92`），挂起期间也照样点得着 —— 面板那一行的取消按钮只有这一个来源，
+//      原来它在 `src/progressPanel.ts` 里被写死成 `false`，于是 `cancelCurrentAndAwait` 没有出口。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { nextTick } from 'vue'
 
 import { createBackgroundTaskQueue } from '../src/backgroundTasks.ts'
+import { createProgressSuspender, ProgressSuspenderTracker } from '../src/progressSuspender.ts'
 import { POWER_SAVE_SUSPEND_REASON } from '../src/notificationPowerSave.ts'
 
 const read = relative => readFileSync(new URL(relative, import.meta.url), 'utf8')
@@ -29,14 +37,55 @@ const settle = async () => { for (let i = 0; i < 10; i += 1) await nextTick() }
 test('队列的对外状态是一份精确清单：没有零消费方的死出口', () => {
   // 上一版这里少两条（`runningSuspendedText`、`currentSuspender`），都是"写了、导出了、没人读"。
   // 深比较而不是 includes：新增一条没人消费的键也必须先在这里登记理由。
+  // 2026-10-06 progflow 又收掉七条：`runningTitle`/`runningDetail`/`runningFraction`/
+  // `runningCancellable`/`queuedCount`/`cancellingTitle`/`cancelCurrent` —— 逐条 grep 过 src/，
+  // 生产侧只有本模块与测试在读；正在跑那条任务的可见状态全部走 `queueRow`（含新的 `cancellable`），
+  // 取消走 `cancelCurrentAndAwait`（`cancelCurrent` 是它的不等收尾版本，面板不需要两条路）。
   assert.deepEqual(Object.keys(createBackgroundTaskQueue()).sort(), [
-    'cancelCurrent', 'cancelCurrentAndAwait', 'cancellingTitle', 'clear', 'isEmpty', 'isSuspended',
-    'queueRow', 'queuedCount', 'run', 'runningCancellable', 'runningDetail', 'runningFraction',
-    'runningTitle', 'setSuspended',
+    'cancelCurrentAndAwait', 'clear', 'isEmpty', 'isSuspended', 'queueRow', 'run', 'setSuspended',
   ])
   const source = read('../src/backgroundTasks.ts')
   assert.doesNotMatch(source, /const (runningSuspendedText|currentSuspender)\b/,
     '挂起状态只有一条通道（queueRow），不再对外开这两个口')
+  // 钉的是**声明**（注释里写"这几条已删"是留痕，不是把它们请回来）。
+  assert.doesNotMatch(source, /const (runningTitle|runningDetail|runningFraction|runningCancellable|queuedCount|cancellingTitle)\b/,
+    '那几条扁平 ref 不再回来：正在跑那条任务的状态只从 queueRow 出口')
+  assert.doesNotMatch(source, /^\s*cancelCurrent\s*[:(]/m,
+    '不等收尾的那条取消出口也删了：面板只该有一条路（cancelCurrentAndAwait）')
+})
+
+test('挂起器与 tracker 的对外面也是精确清单：零消费文案口删了就不回来', () => {
+  // 2026-10-06 桶 status2 同批删除的那几条（逐条实测过"全仓零消费者"，含测试）：
+  //   · `ProgressSuspender.suspendedText` / `text()` —— 上游那份文案有三个读者
+  //     （platform/platform-impl/src/com/intellij/openapi/wm/impl/status/InfoAndProgressPanel.kt:815、
+  //     platform/platform-impl/src/com/intellij/openapi/progress/impl/TaskInfoEntityCollector.kt:174、
+  //     platform/platform-impl/src/com/intellij/openapi/progress/impl/TaskToProgressSuspenderSynchronizer.kt:57），
+  //     本仓那一行是 `queueRow`、文案来自队列的 `queueSuspendReason` ⇒ 挂起器里那份没人读；
+  //   · `isClosed()`（上游 ProgressSuspender.java:116-118）—— 队列不反查关闭态；
+  //   · `SuspendableTask.onCancel` —— 取消即恢复这一条落在 `src/backgroundTasks.ts` 的 `Indicator.cancel()`；
+  //   · tracker 的 `suspended()` / `suspendAll()` / `resumeAll()` / `clear()` —— 上游
+  //     ProgressSuspenderTracker.kt:20-34 只有 startTracking/stopTracking 四个重载，这四个是本仓自造且零调用。
+  // 用 deepEqual 而不是 includes：多开一个口必须先在这里登记理由。
+  const suspender = createProgressSuspender('挂起器判据#1', { running: true })
+  assert.deepEqual(Object.keys(suspender).sort(), [
+    'close', 'inNonSuspendableSection', 'isSuspended', 'onStateChanged',
+    'resume', 'runNonSuspendable', 'suspend', 'taskId', 'waitWhileSuspended',
+  ])
+  assert.deepEqual(Object.getOwnPropertyNames(ProgressSuspenderTracker.prototype).sort(),
+    ['constructor', 'getSuspender', 'track', 'untrack'])
+})
+
+test('close 之后 suspend 是空操作（上游 ProgressSuspender.java:125 那一句）', () => {
+  // 删掉 `isClosed()` 出口不等于删掉那条闸：挂起器自己守着，队列这边可观测的只有 `isSuspended()`。
+  const suspender = createProgressSuspender('挂起器判据#2', { running: true })
+  suspender.close()
+  suspender.suspend()
+  assert.equal(suspender.isSuspended(), false, '已 close 的挂起器不能再被挂起')
+  const fresh = createProgressSuspender('挂起器判据#3', { running: true })
+  fresh.suspend()
+  assert.equal(fresh.isSuspended(), true, '没 close 时同一次 suspend() 必须挂得上（上一条不是恒真）')
+  fresh.resume()
+  assert.equal(fresh.isSuspended(), false)
 })
 
 test('挂起时那一行带着原因（唯一通道 queueRow），任务卡在检查点上；恢复后放行并收行', async () => {
@@ -100,27 +149,19 @@ test('只改挂起原因这一件事：那一行的文案必须真的更新（�
   const queue = createBackgroundTaskQueue()
   let proceed
   const gate = new Promise(resolve => { proceed = resolve })
+  const beats = []
   const running = queue.run({
     title: '索引',
     // 任务体停在 gate 上：整条用例期间它一步都没走 ⇒ 它既不是响应式依赖，也不会顺带改到别的状态。
-    run: async indicator => { await gate; await indicator.awaitResumed() },
+    run: async indicator => { beats.push('第一段'); await gate; await indicator.awaitResumed(); beats.push('第二段') },
   })
   await settle()
 
-  // 队列"除挂起原因之外"的全部可见状态，逐个取一份快照。
-  const visible = () => ({
-    runningTitle: queue.runningTitle.value,
-    runningDetail: queue.runningDetail.value,
-    runningFraction: queue.runningFraction.value,
-    runningCancellable: queue.runningCancellable.value,
-    queuedCount: queue.queuedCount.value,
-    cancellingTitle: queue.cancellingTitle.value,
-  })
+  // 队列"除挂起原因之外"的可见状态（2026-10-06 progflow：那几条扁平 ref 删了，剩下的可观测面就是
+  // 任务体走到哪一步 + `isEmpty()` + 那一行本身）。
+  const visible = () => ({ steps: beats.length, empty: queue.isEmpty() })
   const before = visible()
-  assert.deepEqual(before, {
-    runningTitle: '索引', runningDetail: '', runningFraction: null,
-    runningCancellable: true, queuedCount: 0, cancellingTitle: '',
-  }, '前置状态：有一条正在跑的任务、没有排队、没有取消中间态')
+  assert.deepEqual(before, { steps: 1, empty: false }, '前置状态：有一条正在跑的任务、没有排队')
 
   // ① 没有挂起原因时，那一行不显示（读一次把 computed 的依赖集与缓存都建立起来）。
   assert.equal(queue.queueRow.value, null, '没挂起、没排队时不画队列行')
@@ -134,6 +175,8 @@ test('只改挂起原因这一件事：那一行的文案必须真的更新（�
   assert.equal(row.title, '后台任务队列')
   assert.equal(row.detail, `已挂起：${POWER_SAVE_SUSPEND_REASON}（正在跑的那条会在下一个检查点让路）`,
     '整句钉死：原因原样出现在那一行里，且没人排队时说的是"会在下一个检查点让路"')
+  assert.equal(row.cancellable, true,
+    '挂起期间那条可取消的任务仍然点得着取消（卡在自己等待里的任务只有 cancel() 那条路会先 resume 再放行）')
 
   // ③ 恢复（原因回到 null）是那一句的对称面：那一行收掉。
   queue.setSuspended(null)
@@ -143,4 +186,5 @@ test('只改挂起原因这一件事：那一行的文案必须真的更新（�
 
   proceed()
   await running
+  assert.deepEqual(beats, ['第一段', '第二段'])
 })

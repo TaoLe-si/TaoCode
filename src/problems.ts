@@ -24,6 +24,24 @@ import { highlightLevelForPath, keepsDiagnosticAtLevel } from './highlightSettin
 // 身份解析共用 src/inspectionIdentity.ts（对应上游 `HighlightingProblem.kt:85-89` 的那一步）。
 import { applyInspectionProfile } from './inspectionProfile.ts'
 import { localDiagnostics } from './junitInspections.ts'
+// 问题高亮过滤器的扩展点宿主（上游 `ProblemHighlightFilter` EP，
+// `platform/analysis-api/resources/intellij.platform.analysis.xml:44`）：本仓的「分析忽略」
+// 与「按文件覆盖类型」两道门控作为 bundled 贡献登记进同名 EP（见 `src/daemonExtensionPoints.ts`），
+// 两张表在读同一条判定；第三方（原版 IDEA 插件）按同一 id 挂自己的过滤器即可被这两处消费。
+import { registerProblemHighlightFilter, shouldHighlightFileByFilters } from './daemonExtensionPoints.ts'
+
+/** 「分析忽略」这条 bundled 过滤器（`AnalysisIgnoreService` 的等价物，见 src/analysisIgnore.ts）。 */
+registerProblemHighlightFilter({
+  id: 'taocode.analysisIgnore',
+  shouldHighlightFile: path => !isAnalysisIgnored(path),
+  shouldProcessFileInBatch: path => !isAnalysisIgnored(path),
+})
+/** 「按文件覆盖文件类型」这条 bundled 过滤器（`OverrideFileTypeManager` 的等价物，见 src/fileTypeOverrides.ts）。 */
+registerProblemHighlightFilter({
+  id: 'taocode.fileTypeOverride',
+  shouldHighlightFile: path => !isFileTypeOverridden(path),
+  shouldProcessFileInBatch: path => !isFileTypeOverridden(path),
+})
 // 高亮级别模型（上游 `HighlightDisplayLevel` 一族，见 src/highlightLevels.ts）：严重度文案、
 // 样式类与 CodeMirror severity 是同一份，问题面板/状态栏/编辑器标记不再各写三元表达式。
 import { severityClass, severityLabel } from './highlightLevels.ts'
@@ -90,7 +108,9 @@ export { severityClass, severityLabel }
 export const allProblems = computed<ProblemRow[]>(() => {
   const result: ProblemRow[] = []
   for (const [path, items] of lspDiagnostics) {
-    if (isAnalysisIgnored(path) || isFileTypeOverridden(path)) continue
+    // 文件级过滤器（`ProblemHighlightFilter` EP）：分析忽略 / 覆盖类型两道 bundled 过滤器，
+    // 任一条返回 false 就整份文件不进表；第三方挂进来的过滤器同样在这条判定里生效。
+    if (!shouldHighlightFileByFilters(path)) continue
     const level = highlightLevelForPath(path)
     if (level === 'none') continue
     for (const item of items) {
@@ -108,7 +128,9 @@ export const allProblems = computed<ProblemRow[]>(() => {
     }
   }
   for (const [path, items] of localDiagnostics) {
-    if (isAnalysisIgnored(path) || isFileTypeOverridden(path)) continue
+    // 文件级过滤器（`ProblemHighlightFilter` EP）：分析忽略 / 覆盖类型两道 bundled 过滤器，
+    // 任一条返回 false 就整份文件不进表；第三方挂进来的过滤器同样在这条判定里生效。
+    if (!shouldHighlightFileByFilters(path)) continue
     const level = highlightLevelForPath(path)
     if (level === 'none') continue
     for (const item of items) {

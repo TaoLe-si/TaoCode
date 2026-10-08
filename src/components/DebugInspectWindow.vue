@@ -163,7 +163,7 @@ async function commitEdit(row: VarRow) {
 
 <style scoped>
 /* 非模态浮窗（上游 XInspectDialog 用 `setModal(false)` + 独立 DialogWrapper）。 */
-.debug-inspect { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: 60; display: flex; flex-direction: column; width: min(520px, calc(100vw - 32px)); max-height: min(420px, 60vh); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.debug-inspect { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: 60; display: flex; flex-direction: column; width: min(520px, calc(100vw - 32px)); max-height: min(420px, 60vh); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .debug-inspect-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); }
 .debug-inspect-title { flex: 1; min-width: 0; color: var(--bright); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .debug-inspect-tools { display: flex; align-items: center; gap: 2px; }
@@ -182,7 +182,7 @@ async function commitEdit(row: VarRow) {
 .debug-inspect-row .debug-type { margin-left: auto; color: var(--muted); flex-shrink: 0; }
 .debug-inspect-tree .debug-empty { margin: 0; padding: var(--space-1) var(--space-2); color: var(--muted); font-size: 11px; }
 .debug-input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px/1.4 var(--font-mono); }
-.debug-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.debug-input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .debug-btn { display: inline-flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); color: var(--text); font-size: 11px; }
 .debug-btn:hover { background: var(--hover); color: var(--bright); }
 .debug-btn.primary { border-color: var(--accent); color: var(--accent); }

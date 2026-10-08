@@ -9,6 +9,15 @@
 //      （`ScopeEditorPanel.onTextChange`，`scopes.ts:496-507` 的 `compileScopeText` 已给）。
 
 import { compileScopeText, type ScopeSet } from './scopes.ts'
+import { filterNamedScopes, type FindContextLike, type NamedScopeLike } from './findExtensionPoints.ts'
+
+/**
+ * 空上下文：`src/components/SearchPanel.vue` 是保留文件（本 lane 不能改），所以它调
+ * `resolveScopeSelection` 时只传得到作用域表，传不到 `root`/选中文本。按名字过滤的那一类
+ * `FindInProjectExtension` 贡献不受影响；要按根/选区过滤的贡献需要宿主把上下文传下来
+ * （登记在 `docs/wiring-requests-2026-10-06-b1b7verdict.md`）。
+ */
+const EMPTY_FIND_CONTEXT: FindContextLike = { root: '', path: '', selectedText: '' }
 
 export interface ScopeResolution {
   /** 实际使用的名字；空串 = 「项目」（不限定）。名字失配时回落为空串。 */
@@ -23,10 +32,14 @@ export interface ScopeResolution {
 
 export function resolveScopeSelection(
   name: string,
-  entries: readonly { name: string; pattern: string }[],
+  entries: readonly NamedScopeLike[],
+  context: FindContextLike = EMPTY_FIND_CONTEXT,
 ): ScopeResolution {
+  // 上游 `FindInProjectExtension.getFilteredNamedScopes(project)` 的消费点：作用域下拉的候选
+  // 先过一遍 EP（没有贡献时是恒等变换）。这就是「第三方插件决定哪些作用域出现在查找里」那条口子。
+  const visible = filterNamedScopes(entries, context)
   if (!name) return { name: '', set: null, error: null, position: null }
-  const entry = entries.find(item => item.name === name)
+  const entry = visible.find(item => item.name === name)
   if (!entry) return { name: '', set: null, error: null, position: null }
   const compiled = compileScopeText(entry.pattern)
   return { name, set: compiled.set, error: compiled.error, position: compiled.position }

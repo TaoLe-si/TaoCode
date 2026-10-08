@@ -176,6 +176,62 @@ export function isNodeSelectable(descriptor: FileChooserDescriptor, node: Choose
   return isFileSelectable(descriptor, node.path, node.kind, node.hidden)
 }
 
+// ── 多选（`FileChooserDescriptor.isChooseMultiple` + `TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION`）──
+
+/**
+ * 多选模式下的选择集（上游 `FileChooserDialogImpl.java:418` 与 `FileSystemTreeImpl.java:116`：
+ * `isChooseMultiple()` 决定 `TreeSelectionModel` 是 `DISCONTIGUOUS_TREE_SELECTION` 还是
+ * `SINGLE_TREE_SELECTION`）。本仓的树行是扁平的，所以这里只维护**一组选中路径**：
+ *   · 单选描述件（`chooseMultiple=false`）下任何一次选中都**替换**整个集合；
+ *   · 多选描述件下 `toggle` 切换一项（Ctrl 点），`selectOnly` 替换（普通点），
+ *     `selectRange` 按当前行表在锚点到目标之间加一段（Shift 点）；
+ *   · 只保留**可选中的**行（灰行不参与，上游 `JTree` 的选择模型同样不选不可选项）。
+ */
+export interface ChooserSelection {
+  readonly multiple: boolean
+  readonly paths: readonly string[]
+  /** 上一次普通点选的锚点（Shift 段的起点）；没有就是 null。 */
+  readonly anchor: string | null
+}
+
+export function emptyChooserSelection(descriptor: FileChooserDescriptor): ChooserSelection {
+  return { multiple: descriptor.chooseMultiple, paths: [], anchor: null }
+}
+
+/** 普通点选：单选替换；多选也替换（Ctrl 才是 toggle），并把锚点设到这一项。 */
+export function selectOnly(selection: ChooserSelection, path: string): ChooserSelection {
+  return { ...selection, paths: [path], anchor: path }
+}
+
+/** Ctrl 点选：切换一项；单选描述件退化成替换（上游单选模型不接受第二项）。 */
+export function toggleSelection(selection: ChooserSelection, path: string): ChooserSelection {
+  if (!selection.multiple) return selectOnly(selection, path)
+  const has = selection.paths.includes(path)
+  return {
+    ...selection,
+    paths: has ? selection.paths.filter(entry => entry !== path) : [...selection.paths, path],
+    anchor: path,
+  }
+}
+
+/**
+ * Shift 点选：从锚点到目标在**当前行表顺序**上加一段（上游 `JTree` 的连续区间选择）。
+ * 没有锚点、或两者之一不在行表里时退化成替换。单选描述件同样退化成替换。
+ */
+export function selectRange(selection: ChooserSelection, path: string, visiblePaths: readonly string[]): ChooserSelection {
+  if (!selection.multiple || !selection.anchor) return selectOnly(selection, path)
+  const from = visiblePaths.indexOf(selection.anchor)
+  const to = visiblePaths.indexOf(path)
+  if (from < 0 || to < 0) return selectOnly(selection, path)
+  const [low, high] = from <= to ? [from, to] : [to, from]
+  return { ...selection, paths: visiblePaths.slice(low, high + 1) }
+}
+
+/** 选择集里的路径（顺序稳定，供「确定」时按行表顺序返回）。 */
+export function selectionPaths(selection: ChooserSelection, visiblePaths: readonly string[]): string[] {
+  return visiblePaths.filter(path => selection.paths.includes(path))
+}
+
 /** 行标灰时给的那句原因（tooltip / `aria-disabled` 的说明）。 */
 export function nodeSelectableReason(descriptor: FileChooserDescriptor, node: ChooserNode): string {
   if (node.outside) return '该路径在工作区之外，本仓列不出内容（用宿主对话框选它）。'

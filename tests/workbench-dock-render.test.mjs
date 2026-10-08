@@ -32,6 +32,9 @@ async function renderPart(className, state) {
   const exports = {}
   new Function('require', 'exports', js)(require, exports)
   const app = createSSRApp({ setup: () => ({ iconSize, ...state }), render: exports.render })
+  // 片段里 `<IdeaTerminalIcon>` 这类组件经 `_resolveComponent` 找，不在 setup 绑定里 ——
+  // 注册成全局组件才是真组件（`renderPart` 的默认 warnHandler 把"没解析到"当成失败）。
+  app.component('IdeaTerminalIcon', require('../src/components/icons/toolWindowIcons.ts').IdeaTerminalIcon)
   app.config.warnHandler = message => { if (!message.startsWith('Failed to resolve component:')) throw new Error(message) }
   return parse(await renderToString(app))
 }
@@ -52,6 +55,9 @@ const editorState = orientation => ({
   isTabDropped: () => false, onTabStripWheel: () => {}, setTabStripHover: () => {},
   // 底部 dock 标题条上的齿轮（src/components/ToolWindowGear.vue）：SSR 里没有可执行的行，空数组 = 连按钮都不画。
   bottomGearRows: [], toolWindowGearRows: [],
+  // 工具窗口内容面板的输入面（src/toolViewContext.ts）：这些用例渲染的是 dock 片段，`<ToolWindowView>`
+  // 在 SSR 里没注册 ⇒ 组件解析失败、不往下走，ctx 只作为模板绑定存在，空对象不参与任何断言。
+  toolViewCtx: {},
   // 引用那一格的多条 content（src/referenceContents.ts）：SSR 默认"没有结果"，具体用例自己填。
   referenceTabs: [], selectReferenceTab: () => {}, closeReferenceTab: () => {},
   // 标签条右端的「更多」下拉（src/components/TabEntryPoint.vue）：SSR 里给一个空成员表。
@@ -140,4 +146,27 @@ test('引用有几条 content，标签条就画几行，每行自带关闭', asy
   }
   assert.equal(count('output-tab-close'), 2, '每条 content 都要有关自己的按钮')
   assert.equal(count('output-tab-pin'), 2, '每条 content 都要能钉住（PinToolwindowTab）')
+})
+
+// 底部标签条那一格「终端」的图标：上游是 `TerminalIcons.OpenTerminal_13x13`
+// （`plugins/terminal/resources/icons/expui/toolwindow/terminal.svg`，`terminal.xml:4` 就是用它
+// 注册 Terminal 窗口的）。原先这里是 lucide 的 `SquareTerminal`（24 格描边图），本批换成 expui 副本
+// （`IdeaTerminalIcon`，出处登记在 `src/components/icons/index.ts` 的 `BOTTOM_CONTENT_IDEA_ICON`）。
+// 这条是**真渲染**判据：看 HTML 里画出来的 viewBox 与 path，不是看源码字符串。
+test('底部「终端」那一格画的是 IDEA 的 terminal.svg，不是 lucide 的 24 格图', async () => {
+  const { IDEA_ICON_16 } = require('../src/components/icons/ideaIconData.ts')
+  const tree = await renderPart('output-panel', { ...editorState('none'), bottomTab: 'output' })
+  const tabs = find(tree, node => classIs(node, 'output-tabs'))
+  assert.ok(tabs, '标签条没画出来')
+  // 找到「终端」那一颗按钮。
+  const terminal = find(tabs, node => node.type === 1 && node.tag === 'button' &&
+    node.children?.some(c => c.type === 2 && c.content.includes('终端')))
+  assert.ok(terminal, '「终端」那一格没画出来')
+  const html = JSON.stringify(terminal)
+  // 16 格那份的 viewBox 与 path 逐字节来自上游。
+  assert.ok(html.includes('"0 0 16 16"'), '终端那一格不是 16 格图（还是 lucide 的 24 格？）')
+  assert.ok(html.includes(JSON.stringify(IDEA_ICON_16.terminal.body[0]).slice(1, -1)) ||
+            html.includes(IDEA_ICON_16.terminal.body[0]),
+    '终端那一格画的不是上游 terminal.svg 那条 path')
+  assert.ok(!html.includes('lucide'), '又混进 lucide 图标了')
 })

@@ -225,3 +225,16 @@ const {
    （`TrailingSpacesStripper.java:213-226`），本仓 `src/editorFileOps.ts:249` 只能取
    `EditorHandle.getCursor()` 一条（接口 `src/editorTab.ts:21`）。要接先得给 `EditorHandle` 加
    「读全部光标」的出口（实现方在 `src/components/CodeEditor.vue`）⇒ 我没有假造。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **① 已接线**：`src/App.vue:1164` 已有 `const savePass = await transformOnSave(tab, content)`，解构在 `:1201`，顺序 `runActionsOnSave` → `transformOnSave` → `file.write` 正确。
+- **② 设置键** —— 三键已在 `src/settingsModel.ts`（`autoInsertPairQuote` 等同类）；`stripTrailingSpaces`/`ensureNewLineAtEof`/`keepTrailingSpacesOnCaretLine` 已登记。
+- **③ 设置页控件** —— `src/components/SettingsDialog.vue` / `EditorSavePassesFields.vue`（本 lane 可改面），已存在（见 `:736` 的 `EditorSavePassesFields`）。
+
+结论：① 已接线；②/③ 复核为已接。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「① 已接线；②/③ 复核为已接。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

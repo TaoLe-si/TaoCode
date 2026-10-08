@@ -69,7 +69,7 @@ test('本仓 tab 表的 priority 全部来自上游那一档', () => {
   const byId = Object.fromEntries(SEARCH_EVERYWHERE_TABS.map(entry => [entry.id, entry.priority]))
   assert.ok(byId.all > byId.classes, 'All 在最左（Integer.MAX_VALUE）')
   assert.equal(byId.classes, 950)
-  assert.equal(byId.project, 900, 'Project 合成档取 Files 的位次')
+  assert.equal(byId.files, 900, 'Files 档取上游 SeFilesTab.kt:52 的位次（2026-10-06 从 Project 合成档拆回）')
   assert.equal(byId.symbols, 850)
   assert.equal(byId.commands, 800)
   assert.equal(byId.runConfigs, 350)

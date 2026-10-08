@@ -32,6 +32,17 @@ import { DEFAULT_BUILD_TOOLS } from './gradle.ts'
 import { BridgeError } from './bridgeError.ts'
 import { previewRequest } from './bridgePreview.ts'
 export { BridgeError } from './bridgeError.ts'
+// DAP 会话的运行时状态（能力位 / 断点册子 / 进度 / 模块 / 源清单 / 线程信号）与「事件怎么落地」的
+// 规则也各属一个职责域，2026-10-08 拆到 src/dapEvents.ts（bridge.ts 顶到机检上限；与 gradleEvents /
+// terminalEvents / searchStream 同一拆法）。下面这批符号在那里定义、这里**原样转出**：既有
+// `import { dapState } from './bridge'` 一行都不用改。`DapEvent` / `DapBreakpoint` 仍是桥接的
+// 线上形状（原生分派与面板都要引用，且是机检锚点），没有随状态搬走。
+import { applyDapEvent, dapBreakpoints, dapCurrentThread, dapRememberCapabilities, dapState, resetDapSessionTracking } from './dapEvents.ts'
+export {
+  applyDapEvent, dapBreakpoints, dapCapabilities, dapCapability, dapConsole, dapLoadedSources, dapModules,
+  dapProgress, dapRememberCapabilities, dapSelectThread, dapSetCurrentLocation, dapState, dapThreadSignal,
+  type DapLoadedSource, type DapModule, type DapProgress,
+} from './dapEvents.ts'
 
 // 异常信息的类型与判定规则属于 `exceptionInfo.ts`（一个文件一个职责域），
 // 这里只做转出，调用方不用记两处路径。
@@ -55,9 +66,9 @@ export interface Entry { name: string; path: string; kind: 'directory' | 'file' 
 export interface Workspace { name: string; root: string; entries: Entry[] }
 // Text encodings the native file layer can read and write. The key is what travels
 // over the bridge; the label is what the status bar and dialog show.
-export type EncodingKey = 'utf-8' | 'gbk' | 'cp1252' | 'system' | 'utf-16le' | 'utf-16be'
+export type EncodingKey = 'utf-8' | 'gbk' | 'cp1252' | 'system' | 'utf-32be' | 'utf-32le' | 'utf-16le' | 'utf-16be'
 export const encodingLabels: Record<EncodingKey, string> = {
-  'utf-8': 'UTF-8', gbk: 'GBK（中文）', cp1252: 'Windows-1252', system: '系统 ANSI', 'utf-16le': 'UTF-16 LE', 'utf-16be': 'UTF-16 BE',
+  'utf-8': 'UTF-8', gbk: 'GBK（中文）', cp1252: 'Windows-1252', system: '系统 ANSI', 'utf-32be': 'UTF-32BE', 'utf-32le': 'UTF-32LE', 'utf-16le': 'UTF-16 LE', 'utf-16be': 'UTF-16 BE',
 }
 export const encodingKeys = Object.keys(encodingLabels) as EncodingKey[]
 export interface DocumentData { path: string; content: string; version: string; encoding: EncodingKey; bom: boolean; readOnly?: boolean }
@@ -82,6 +93,8 @@ import {
 } from './settingsModel.ts'
 /** `workspace.files` 的结果：整棵项目树的相对路径清单（作用域编辑器用）。 */
 export interface ProjectFileList { files: string[]; truncated: boolean }
+export interface WorkspaceSearchFileEntry { path: string; type: 'file' | 'directory' }
+export interface WorkspaceSearchFileList { entries: WorkspaceSearchFileEntry[]; cancelled: boolean }
 // TaoCode 能高亮/索引的语言集合（与模板、文件类型关联用的是同一份）。
 // 定义在零依赖的 languages.ts 里，这里再导出给既有的引用点。
 export { EDITOR_LANGUAGES } from './languages.ts'
@@ -106,7 +119,7 @@ export function normalizeEditorSettings(settings: EditorSettings): EditorSetting
   return { ...settings, showBreadcrumbs: false, breadcrumbsPlacement: 'bottom' }
 }
 
-export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'workspace.files' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'shell.openUrl' | 'file.readBinary' | 'file.usages' | 'file.librarySource' | 'file.archiveEntries' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'settings.general.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'lsp.cancelProgress' | 'run.start' | 'run.write' | 'run.stop' | 'run.instances' | 'git.status' | 'git.diff' | 'git.patch' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.commitDetails' | 'git.commitChanges' | 'git.commitFileDiff' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.revertCommit' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.setVariable' | 'dap.setExpression' | 'dap.restart' | 'dap.gotoTargets' | 'dap.goto' | 'dap.restartFrame' | 'dap.exceptionInfo' | 'dap.breakpointLocations' | 'dap.completions' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'dap.loadedSources' | 'dap.modules' | 'dap.stepBack' | 'dap.reverseContinue' | 'dap.readMemory' | 'dap.disassemble' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'plugin.install' | 'plugin.uninstall' | 'app.memory' | 'app.fullScreen' | 'app.setFullScreen' | 'app.info' | 'app.jdks' | 'app.logPaths' | 'app.internalErrors' | 'app.specialPaths' | 'app.collectLogs' | 'app.troubleshooting' | 'dialog.pickImage' | 'app.readImage' | 'gradle.sync' | 'gradle.cancel' | 'gradle.state' | 'app.exportSettings' | 'app.readSettingsArchive' | 'app.importSettings' | 'app.resetSettings' | 'dialog.pickFile' | 'dialog.saveFile' | 'app.writeExportFiles'
+export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'workspace.files' | 'workspace.searchFiles' | 'workspace.searchFiles.cancel' | 'file.read' | 'file.write' | 'file.writeNew' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'shell.openUrl' | 'file.readBinary' | 'file.usages' | 'file.librarySource' | 'file.archiveEntries' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'settings.general.update' | 'browser.data.clear' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'lsp.cancelProgress' | 'run.start' | 'run.write' | 'run.stop' | 'run.instances' | 'git.status' | 'git.diff' | 'git.patch' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.commitDetails' | 'git.commitChanges' | 'git.commitFileDiff' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.revertCommit' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.setVariable' | 'dap.setExpression' | 'dap.restart' | 'dap.gotoTargets' | 'dap.goto' | 'dap.restartFrame' | 'dap.exceptionInfo' | 'dap.breakpointLocations' | 'dap.dataBreakpoints' | 'dap.setDataBreakpoints' | 'dap.setFunctionBreakpoints' | 'dap.source' | 'dap.completions' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'dap.loadedSources' | 'dap.modules' | 'dap.stepBack' | 'dap.reverseContinue' | 'dap.readMemory' | 'dap.disassemble' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'plugin.install' | 'plugin.uninstall' | 'app.memory' | 'app.fullScreen' | 'app.setFullScreen' | 'app.info' | 'app.jdks' | 'app.logPaths' | 'app.internalErrors' | 'app.specialPaths' | 'app.collectLogs' | 'app.troubleshooting' | 'dialog.pickImage' | 'app.readImage' | 'gradle.sync' | 'gradle.cancel' | 'gradle.state' | 'app.exportSettings' | 'app.readSettingsArchive' | 'app.importSettings' | 'app.resetSettings' | 'dialog.pickFile' | 'dialog.saveFile' | 'app.writeExportFiles' | 'http.get' | 'http.post' | 'agent.model.stream' | 'agent.model.cancel' | 'agent.skills.list' | 'agent.skills.setEnabled' | 'agent.skills.delete' | 'agent.skills.reveal' | 'agent.skills.promptContext' | 'agent.memory.list' | 'agent.memory.read' | 'agent.mcp.configure' | 'agent.mcp.status' | 'agent.mcp.call'
 export type { GitChange, GitUser, GitStatus, GitDiff, GitCommit, GitLog, GitRef, GitFullCommit, GitFullLog, GitLogQuery, GitLogSort, GitCommitDetails, GitCommitChange, GitCommitComparison, GitCommitChanges, GitCommitFileDiff, GitStashEntry, GitStash, GitAheadBehind, GitHunk, GitHunks, GitTags, GitCompareFile, GitCompare, GitBlameLine, GitBlame } from './vcsLogTypes'
 import type { GitCommit } from './vcsLogTypes'
 // One aligned row of the side-by-side viewer. Marks are [start, length] byte ranges
@@ -123,7 +136,7 @@ export interface LspDiagnosticReport { available: boolean; supported: boolean; k
 // server is still starting' — the status bar only reports the latter as indexing.
 export interface LspOpenResult { running: boolean; language: string; configured?: boolean }
 export interface LspLocation { path: string; line: number; character: number }
-export interface LspHoverResult { available: boolean; contents?: string }
+export interface LspHoverResult { available: boolean; contents?: string; range?: LspRange }
 export interface LspDefinitionResult { available: boolean; locations?: LspLocation[] }
 export interface LspCompletionItem { label: string; kind: string; detail?: string; apply?: string; documentation?: string; raw?: unknown }
 export interface LspCompletionResult { available: boolean; items?: LspCompletionItem[] }
@@ -233,18 +246,18 @@ export interface DapThread { id: number; name: string }
 // `verified` is the adapter's own verdict, sent on the `breakpoint` event: a
 // breakpoint the user set on a blank line is unverified until the adapter moves it
 // somewhere it can actually bind.
-export interface DapBreakpoint { line: number; condition?: string; hitCondition?: string; verified?: boolean }
+export interface DapBreakpoint { line: number; condition?: string; hitCondition?: string; logMessage?: string; verified?: boolean }
 export interface DapBreakpointNote { line: number; message: string }
 export interface DapBreakpointsResult { ok: boolean; path: string; verifiedLines: number[]; deferred?: boolean; messages?: DapBreakpointNote[] }
 export interface DapOk { ok: boolean; allThreadsContinuation?: boolean }
 export type DapEvent =
-  | { event: 'stopped'; reason: string; threadId: number; text?: string }
-  | { event: 'output'; category: string; text: string }
+  | { event: 'stopped'; reason: string; threadId: number; text?: string; allThreadsStopped?: boolean; preserveFocusHint?: boolean; hitBreakpointIds?: Array<number | string> }
+  | { event: 'output'; category: string; text: string; line?: number; column?: number; path?: string; group?: string }
   // `id` is the adapter's own handle for the breakpoint, present when it sends one;
   // it is what makes a moved line identifiable across two reports.
   | { event: 'breakpoint'; verified: boolean; line?: number; path?: string; id?: string | number }
   | { event: 'terminated'; restartable?: boolean; connectionClosed?: boolean }
-  | { event: 'continued'; threadId?: number }
+  | { event: 'continued'; threadId?: number; allThreadsContinued?: boolean; preserveFocusHint?: boolean }
   // The adapter's thread list changed. Its body is forwarded raw by the native
   // layer (reason: 'started' | 'exited', threadId), so both shapes are read.
   | { event: 'thread'; reason?: string; threadId?: number; body?: { reason?: string; threadId?: number } }
@@ -282,7 +295,7 @@ interface Reply {
   language?: string; token?: string; kind?: string; title?: string; percentage?: number; cancellable?: boolean  // lsp.progress：`$/progress` 的一条报告（整形见 native/lsp_host_bootstrap.cpp）
   // run.* 都带**实例 id**（多实例运行：IDEA 的 Run 工具窗口按实例开标签）。
   instance?: number; label?: string
-  error?: { code: string; message: string }; durationMs?: number
+  chunkB64?: string; error?: { code: string; message: string }; durationMs?: number
 }
 interface WebView {
   postMessage(message: unknown): void
@@ -319,7 +332,7 @@ export const watchStopped = reactive({ reason: '', restarting: false, attempt: 0
 // blocking the save — but never silent either).
 export const historyNotes = reactive<Array<{ path: string; message: string; at: string }>>([])
 let nextId = 0
-const pending = new Map<number, { resolve: (reply: Reply) => void }>()
+const pending = new Map<number, { resolve: (reply: Reply) => void; onChunk?: (bytes: Uint8Array) => void }>()
 
 /**
  * The single entry point for host (native layer) messages. It lives in a named
@@ -331,6 +344,11 @@ const pending = new Map<number, { resolve: (reply: Reply) => void }>()
 export function handleHostEvent(data: Reply | undefined): boolean {
   // 没有消息体就等于没被消费（原来靠 `data?.event === …` 逐个短路，现在统一前置一次）。
   if (!data) return false
+  if (data.event === 'agent.model.chunk') {
+    if (typeof data.id !== 'number' || typeof data.chunkB64 !== 'string') return false
+    pending.get(data.id)?.onChunk?.(fromBase64(data.chunkB64))
+    return true
+  }
   // One switch on the event name. Every arm either consumes the message (`return true`)
   // or explicitly declines it (`return false`) — the difference matters to callers, so
   // it is stated in every case instead of being implied by falling off the chain.
@@ -494,222 +512,6 @@ export function clearLspDiagnostics(path: string) {
 }
 
 
-export const dapState = reactive<{ running: boolean; paused: boolean; threadId: number; reason: string | null; program: string | null; currentLocation: { path: string; line: number } | null; exitCode: number | null }>(
-  { running: false, paused: false, threadId: 1, reason: null, program: null, currentLocation: null, exitCode: null })
-export const dapConsole = reactive<Array<{ category: string; text: string }>>([])
-export const dapBreakpoints = reactive(new Map<string, DapBreakpoint[]>())  // rel path -> breakpoints
-// The three lists below are what the adapter's `progress` / `module` / `loadedSource`
-// events build up. They are separate from `dapState` because they are collections
-// the panel renders as rows, not fields of the session.
-export interface DapProgress { id: string; requestId: string | null; title: string; message: string; percentage: number | null }
-export interface DapModule { id: string; name: string; type?: string; sourceReference?: number; path?: string; version?: string; symbolStatus?: string; addressRange?: string; isOptimized?: boolean; isUserCode?: boolean; symbolFilePath?: string; dateTimeStamp?: string }
-export interface DapLoadedSource { key: string; name: string; sourceReference?: number; path?: string }
-export const dapProgress = reactive<DapProgress[]>([])
-export const dapModules = reactive<DapModule[]>([])
-export const dapLoadedSources = reactive<DapLoadedSource[]>([])
-// The adapter's thread list can change between two stops. The bridge cannot push
-// into a component's own ref, so it bumps this and the panel refetches — the same
-// `version` signal the file watcher uses.
-export const dapThreadSignal = reactive<{ version: number; reason: string | null; threadId: number | null }>(
-  { version: 0, reason: null, threadId: null })
-let dapThreadId = 1
-const dapCurrentThread = () => dapThreadId
-export function dapSetCurrentLocation(location: { path: string; line: number } | null) { dapState.currentLocation = location }
-
-// DAP ids are "string | number" depending on the adapter; every list here is keyed
-// by the string form so a numeric and a textual id for the same thing cannot both
-// land in the list.
-function idKey(raw: unknown): string | null {
-  if (typeof raw === 'string') return raw || null
-  if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw)
-  return null
-}
-let unnamedProgress = 0
-function applyDapProgress(payload: { phase?: unknown; progressId?: unknown; requestId?: unknown; title?: unknown; message?: unknown; percentage?: unknown }) {
-  const phase = payload.phase
-  if (phase !== 'start' && phase !== 'update' && phase !== 'end') return
-  const key = idKey(payload.progressId)
-  // DAP makes progressId mandatory. An adapter that leaves it out still describes
-  // one operation: a start opens its own row under a synthetic key, while an
-  // update/end can only mean the newest operation still in flight.
-  const id = key ?? (phase === 'start' ? `progress-${++unnamedProgress}` : dapProgress[dapProgress.length - 1]?.id)
-  if (!id) return
-  const existing = dapProgress.find(entry => entry.id === id)
-  if (phase === 'end') {
-    if (existing) dapProgress.splice(dapProgress.indexOf(existing), 1)
-    return
-  }
-  const message = typeof payload.message === 'string' ? payload.message : ''
-  const percentage = typeof payload.percentage === 'number' && Number.isFinite(payload.percentage) ? payload.percentage : null
-  if (phase === 'update') {
-    // A partial update keeps what it does not mention: percentage is often omitted
-    // once an operation becomes indeterminate.
-    if (!existing) return
-    if (message) existing.message = message
-    if (percentage !== null) existing.percentage = percentage
-    return
-  }
-  const title = typeof payload.title === 'string' ? payload.title : existing?.title ?? ''
-  // 'start' for something already open refreshes it; adapters replay their list
-  // after a restart and a second row for one operation would be a lie.
-  if (existing) { existing.title = title; existing.message = message; existing.percentage = percentage; return }
-  dapProgress.push({ id, requestId: idKey(payload.requestId), title, message, percentage })
-}
-// The adapter reports what it actually bound, which can differ from what the user
-// asked for: a breakpoint dropped on a blank line is moved to the next line the
-// adapter can bind. `dapBreakpoints` is what the editor gutter draws from, so
-// fixing it here moves the mark without the editor polling for it.
-// Where each breakpoint id was last reported. The adapter identifies a breakpoint
-// by id across events, so remembering it turns "the line moved" from a guess into
-// a fact. Ids are session-scoped, so this is cleared with the session.
-const dapBreakpointIds = new Map<string, { path: string; line: number }>()
-function applyDapBreakpoint(payload: { verified?: unknown; line?: unknown; path?: unknown; id?: unknown }) {
-  const path = typeof payload.path === 'string' ? payload.path : ''
-  const line = typeof payload.line === 'number' && Number.isFinite(payload.line) ? Math.trunc(payload.line) : 0
-  if (!path || line < 1) return  // nothing to attribute the report to
-  const verified = payload.verified === true
-  const id = idKey(payload.id)
-  // A move is exact when the same id was seen before at a different line of the
-  // same file: that row is the one that moved. Read the previous report before it
-  // is replaced by this one, otherwise there is nothing to compare against.
-  const known = id ? dapBreakpointIds.get(id) : undefined
-  const from = known && known.path === path ? known.line : 0
-  if (id) dapBreakpointIds.set(id, { path, line })
-  const list = dapBreakpoints.get(path) ?? []
-  const target = list.find(point => point.line === line)
-    ?? (from && from !== line ? list.find(point => point.line === from) : undefined)
-    // No id, or this is the first report for it: a verified line that is not in the
-    // local list can only be matched by elimination — when exactly one breakpoint
-    // of this file is still unconfirmed, that is the one the adapter moved.
-    ?? (verified && list.filter(point => point.verified !== true).length === 1
-      ? list.find(point => point.verified !== true) : undefined)
-  if (!target) {
-    // Nothing here is ours: either the adapter is reporting a breakpoint this
-    // client never set (another client, a function breakpoint resolved to a line),
-    // or it rejected a line nobody asked for. The latter is not worth a row.
-    if (!verified) return
-    dapBreakpoints.set(path, [...list, { line, verified: true }].sort((a, b) => a.line - b.line))
-    return
-  }
-  if (target.line !== line) {
-    target.line = line
-    dapBreakpoints.set(path, [...list].sort((a, b) => a.line - b.line))
-  }
-  target.verified = verified
-}
-function applyDapThread(payload: { reason?: unknown; threadId?: unknown; body?: { reason?: unknown; threadId?: unknown } }) {
-  const body = payload.body
-  const reason = typeof payload.reason === 'string' ? payload.reason : typeof body?.reason === 'string' ? body.reason : null
-  const raw = typeof payload.threadId === 'number' ? payload.threadId : typeof body?.threadId === 'number' ? body.threadId : null
-  dapThreadSignal.reason = reason
-  dapThreadSignal.threadId = raw
-  // The panel refetches `dap.threads` on this; the bridge does not keep a thread
-  // list of its own that could drift from the adapter's.
-  dapThreadSignal.version++
-}
-function applyDapModule(payload: { reason?: unknown; module?: { id?: unknown; name?: unknown; type?: unknown; sourceReference?: unknown }; path?: unknown }) {
-  const id = idKey(payload.module?.id)
-  if (!id) return
-  const existing = dapModules.find(entry => entry.id === id)
-  if (payload.reason === 'removed') {
-    if (existing) dapModules.splice(dapModules.indexOf(existing), 1)
-    return
-  }
-  const next: DapModule = { id, name: typeof payload.module?.name === 'string' ? payload.module.name : '' }
-  const type = typeof payload.module?.type === 'string' ? payload.module.type : ''
-  if (type) next.type = type
-  const reference = typeof payload.module?.sourceReference === 'number' ? payload.module.sourceReference : 0
-  if (reference) next.sourceReference = reference
-  if (typeof payload.path === 'string' && payload.path) next.path = payload.path
-  // 'new' for something already known is the same as 'changed': adapters replay the
-  // whole list after a restart, and a duplicate row would be a lie.
-  if (existing) Object.assign(existing, next)
-  else dapModules.push(next)
-}
-function applyDapLoadedSource(payload: { reason?: unknown; source?: { name?: unknown; sourceReference?: unknown }; path?: unknown }) {
-  const name = typeof payload.source?.name === 'string' ? payload.source.name : ''
-  const path = typeof payload.path === 'string' ? payload.path : ''
-  const reference = typeof payload.source?.sourceReference === 'number' ? payload.source.sourceReference : 0
-  // No id in the event: the source reference identifies it when the adapter has
-  // one, otherwise the path, otherwise the display name.
-  const key = reference ? `ref:${reference}` : path ? `path:${path}` : `name:${name}`
-  const existing = dapLoadedSources.find(entry => entry.key === key)
-  if (payload.reason === 'removed') {
-    if (existing) dapLoadedSources.splice(dapLoadedSources.indexOf(existing), 1)
-    return
-  }
-  const next: DapLoadedSource = { key, name }
-  if (reference) next.sourceReference = reference
-  if (path) next.path = path
-  if (existing) Object.assign(existing, next)
-  else dapLoadedSources.push(next)
-}
-
-export function applyDapEvent(event: DapEvent) {
-  // One switch on the event name: the shapes are a closed set, and a switch makes
-  // an unhandled event obvious (it lands in the default instead of silently
-  // falling off the end of an if/else chain).
-  switch (event.event) {
-    case 'stopped': {
-      dapState.paused = true
-      const thread = (event as { threadId?: number }).threadId
-      if (thread) { dapState.threadId = thread; dapThreadId = thread }
-      const reason = (event as { reason?: string }).reason ?? 'stopped'
-      const text = (event as { text?: string }).text
-      dapState.reason = text ? `${reason}: ${text}` : reason
-      return
-    }
-    case 'continued':
-      dapState.paused = false; dapState.reason = null; dapState.currentLocation = null
-      return
-    case 'output': {
-      const output = event as { category?: string; text?: string }
-      dapConsole.push({ category: output.category ?? 'console', text: output.text ?? '' })
-      if (dapConsole.length > 4000) dapConsole.splice(0, dapConsole.length - 2000)
-      return
-    }
-    case 'terminated': {
-      dapState.running = false; dapState.paused = false; dapState.reason = null; dapState.currentLocation = null
-      // 会话结束，能力位跟着作废：新入口的门控不能停留在上一个适配器的声明上。
-      dapRememberCapabilities(undefined)
-      const closed = (event as { connectionClosed?: boolean }).connectionClosed
-      if (!closed) { dapConsole.push({ category: 'console', text: '调试会话已结束。' }); }
-      return
-    }
-    case 'exited': {
-      // The program ended on its own. This deliberately does not touch `running`:
-      // adapters send `terminated` next, and that is the event that ends the
-      // session. What is recorded here is the code the UI has to show.
-      const raw = (event as { exitCode?: unknown }).exitCode
-      dapState.exitCode = typeof raw === 'number' && Number.isFinite(raw) ? Math.trunc(raw) : 0
-      dapConsole.push({
-        category: dapState.exitCode === 0 ? 'telemetry' : 'stderr',
-        text: dapState.exitCode === 0 ? '程序已退出，退出码 0。' : `程序已退出，退出码 ${dapState.exitCode}。`,
-      })
-      return
-    }
-    case 'progress':
-      applyDapProgress(event as { phase?: unknown; progressId?: unknown; requestId?: unknown; title?: unknown; message?: unknown; percentage?: unknown })
-      return
-    case 'module':
-      applyDapModule(event as { reason?: unknown; module?: { id?: unknown; name?: unknown; type?: unknown; sourceReference?: unknown }; path?: unknown })
-      return
-    case 'loadedSource':
-      applyDapLoadedSource(event as { reason?: unknown; source?: { name?: unknown; sourceReference?: unknown }; path?: unknown })
-      return
-    case 'breakpoint':
-      applyDapBreakpoint(event as { verified?: unknown; line?: unknown; path?: unknown; id?: unknown })
-      return
-    case 'thread':
-      applyDapThread(event as { reason?: unknown; threadId?: unknown; body?: { reason?: unknown; threadId?: unknown } })
-      return
-    default:
-      // Everything else (capability, invalidated, memory, ...) falls through
-      // untouched rather than being pushed into state.
-      return
-  }
-}
-
 export async function dapStart(params: DapStartParams): Promise<DapStartResult> {
   const result = await request<DapStartResult>('dap.start', { ...params })
   dapRememberCapabilities(result.capabilities)
@@ -718,8 +520,7 @@ export async function dapStart(params: DapStartParams): Promise<DapStartResult> 
   // progress an adapter left open, and the breakpoint ids it handed out before
   // (they are only meaningful inside one session).
   dapState.exitCode = null
-  dapProgress.splice(0)
-  dapBreakpointIds.clear()
+  resetDapSessionTracking()
   // The adapter reports which lines it actually bound. A line it moved (an empty line
   // in the source) or has not bound yet is NOT a breakpoint the user removed, so the
   // requested list stays the source of truth and only the `verified` flag is updated —
@@ -752,12 +553,11 @@ export async function dapSetBreakpoints(path: string, breakpoints: DapBreakpoint
 }
 export const dapStep = (kind: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut', all = false) =>
   request<DapOk>(`dap.${kind}`, all && kind === 'continue' ? { all: true } : { threadId: dapCurrentThread() })
-export function dapSelectThread(threadId: number) { if (Number.isInteger(threadId) && threadId > 0) { dapThreadId = threadId; dapState.threadId = threadId } }
-export const dapStackTrace = (threadId = dapCurrentThread()) => request<{ frames: DapFrame[]; totalFrames: number }>('dap.stackTrace', { threadId })
+export const dapStackTrace = (threadId = dapCurrentThread(), page?: { startFrame?: number; levels?: number }) => request<{ frames: DapFrame[]; totalFrames: number }>('dap.stackTrace', { threadId, ...page })
 export const dapThreads = () => request<{ threads: DapThread[] }>('dap.threads')
 export const dapSetExceptionBreakpoints = (filters: string[]) => request<DapOk>('dap.setExceptionBreakpoints', { filters })
 export const dapScopes = (frameId: number) => request<{ scopes: DapScope[] }>('dap.scopes', { frameId })
-export const dapVariables = (reference: number) => request<{ variables: DapVariable[] }>('dap.variables', { reference })
+export const dapVariables = (reference: number, page?: { start?: number; count?: number }) => request<{ variables: DapVariable[] }>('dap.variables', { reference, ...page })
 // DAP `setVariable` / `setExpression`（IDEA `XValue.setValue` 与 Watches 的「Set Value…」）：
 // 响应是同一条变量的新值（规范里没有 variables 数组），字段与 DapVariable 一致。
 export const dapSetVariable = (reference: number, name: string, value: string) =>
@@ -766,7 +566,7 @@ export const dapSetExpression = (expression: string, value: string, frameId = 0)
   request<DapVariable>('dap.setExpression', { expression, value, frameId })
 // `evaluate` (IDEA's Evaluate Expression / hover inspect). The body comes back from
 // the adapter untouched, so `type` and `variablesReference` are adapter-specific.
-export interface DapEvaluateResult { result: string; type?: string; variablesReference?: number }
+export interface DapEvaluateResult { result: string; type?: string; reference?: number; variablesReference?: number; named?: boolean; namedVariables?: number; indexedVariables?: number }
 export const dapEvaluate = (expression: string, context: 'hover' | 'watch' | 'repl', frameId: number) =>
   request<DapEvaluateResult>('dap.evaluate', { expression, context, frameId })
 // IDEA's "Disconnect" (as opposed to Stop): ask the adapter to detach and then drop
@@ -828,15 +628,6 @@ export interface DapDisassembleResult { available: boolean; instructions: DapIns
 export const dapDisassemble = (memoryReference: string, instructionCount: number,
   options: { offset?: number; instructionOffset?: number; resolveSymbols?: boolean } = {}) =>
   request<DapDisassembleResult>('dap.disassemble', { memoryReference, instructionCount, ...options })
-// 适配器在 initialize 响应里声明的能力（原样转发）。新增入口全部由能力位门控 ——
-// 规范里 supportsStepBack / supportsReadMemoryRequest / supportsDisassembleRequest /
-// supportsLoadedSourcesRequest / supportsModulesRequest 都**默认 false**，面板据此不渲染入口。
-export const dapCapabilities = reactive<Record<string, unknown>>({})
-export const dapCapability = (name: string) => dapCapabilities[name] === true
-export function dapRememberCapabilities(capabilities: Record<string, unknown> | undefined) {
-  for (const key of Object.keys(dapCapabilities)) delete dapCapabilities[key]
-  Object.assign(dapCapabilities, capabilities ?? {})
-}
 // IDEA's breakpoint view reads the adapter's own remembered list; loading it keeps the
 // gutter in step with a session that was started outside this panel.
 export async function dapLoadBreakpoints(): Promise<Record<string, DapBreakpoint[]>> {
@@ -854,8 +645,7 @@ export async function dapTerminate() {
   dapState.running = false; dapState.paused = false; dapState.reason = null; dapState.currentLocation = null
   // Stopping by hand leaves whatever the adapter was reporting in flight; it is no
   // longer true once the session is gone, and the breakpoint ids die with it.
-  dapProgress.splice(0)
-  dapBreakpointIds.clear()
+  resetDapSessionTracking()
   return request<DapOk>('dap.terminate')
 }
 
@@ -902,4 +692,24 @@ export async function request<T>(method: Method, params: Record<string, unknown>
     trace.code = error instanceof BridgeError ? error.code : 'ERROR'
     throw error
   } finally { trace.durationMs ??= performance.now() - started }
+}
+
+export async function requestStream<T>(params: Record<string, unknown>, onChunk: (bytes: Uint8Array) => void, signal: AbortSignal): Promise<T> {
+  if (!webview) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览没有本地模型传输。')
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+  const id = ++nextId
+  const replyPromise = new Promise<Reply>((resolve, reject) => {
+    const abort = () => {
+      pending.delete(id)
+      reject(new DOMException('Aborted', 'AbortError'))
+      void request('agent.model.cancel', { streamId: id }).catch(() => undefined)
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    pending.set(id, { resolve: reply => { signal.removeEventListener('abort', abort); resolve(reply) }, onChunk })
+    try { webview.postMessage({ id, method: 'agent.model.stream', params }) }
+    catch (error) { pending.delete(id); signal.removeEventListener('abort', abort); reject(error) }
+  })
+  const reply = await replyPromise
+  if (!reply.ok) throw new BridgeError(reply.error?.code ?? 'NATIVE_ERROR', reply.error?.message ?? '原生操作失败')
+  return reply.result as T
 }

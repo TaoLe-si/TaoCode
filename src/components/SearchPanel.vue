@@ -9,8 +9,8 @@ import { beginSearchStream, endSearchStream, searchStream } from '../searchStrea
 // 结果预览面板（上游 FindPopupPanel 里的 UsagePreviewPanel）：窗口计算与文案在 src/searchPreview.ts。
 // `resultLineParts` 是结果列表那一行的行内切分（区间取自宿主报的 column/length，不重新匹配）。
 import { PREVIEW_DEBOUNCE_MS, PREVIEW_SELECT_HINT, PREVIEW_TITLE, PREVIEW_UNAVAILABLE, previewHeader, previewLines, previewSegments, previewWindow, resultLineParts as lineParts } from '../searchPreview'
-// 替换没做完时的交代语（纯判定，见 src/searchReplaceOutcome.ts）。
-import { incompleteNote } from '../searchReplaceOutcome.ts'
+// 替换没做完时的交代语 + 「替换全部」那句确认（纯判定，见 src/searchReplaceOutcome.ts）。
+import { incompleteNote, replaceAllConfirmNote } from '../searchReplaceOutcome.ts'
 // 结果右键菜单（上游 `FindInFiles.Results.ContextMenu` → 「复制路径/引用…」那一组）。
 import { COPY_REFERENCE_GROUP, FIND_COPY_ACTIONS, findResultClipboardText, type FindCopyActionId, type FindResultTarget } from '../copyPathActions'
 // 结果面板键盘选择（上游 `FindPopupPanel.java:830,842-856` 的 ScrollingUtil 与 F3 两条）。
@@ -31,10 +31,12 @@ import StructuralSearchFilters from './StructuralSearchFilters.vue'
 // 结构化模板的收藏/最近/内置/变量补全（上游 ConfigurationManager、ExistingTemplatesComponent、
 // StructuralSearchTemplatesCompletionContributor 的文本子集）：纯规则在 src/structuralSearchConfigs.ts。
 import {
-  BUILTIN_STRUCTURAL_TEMPLATES, configurationName, loadRecentConfigurations, loadSavedConfigurations,
+  configurationName, loadRecentConfigurations, loadSavedConfigurations,
   pushRecentConfiguration, removeConfiguration, saveConfiguration, variableCompletionValues,
-  type StructuralSearchConfig, type StructuralTemplate,
+  type StructuralSearchConfig,
 } from '../structuralSearchConfigs'
+// 模板下拉的三段（内置 / 我的 / 最近）怎么拼住在 src/searchTemplateSections.ts（纯映射，可单测）。
+import { templateSectionsOf, type TemplateRow } from '../searchTemplateSections.ts'
 // 工程排除目录并入搜索排除（原生扫描只认面板两个过滤框 + 自带默认表，见 src/searchExclusions.ts）。
 import { excludedDirsOf, mergeSearchExclude, projectExclusionPatterns } from '../searchExclusions'
 import type { ProjectSettings } from '../bridge'
@@ -81,18 +83,7 @@ const templateOpen = ref(false)
 // 模板里的 `$Var$` 变量补全候选（上游 `StructuralSearchTemplatesCompletionContributor`）：
 // 用原生 datalist 挂到搜索框上（先例：DebugPanel 的 DAP 补全）。
 const variableCandidates = computed(() => (structural.value ? variableCompletionValues(query.value) : []))
-type TemplateRow = StructuralTemplate & { saved?: boolean; recent?: boolean }
-const templateSections = computed<Array<{ title: string; items: TemplateRow[] }>>(() => [
-  { title: '内置模板', items: BUILTIN_STRUCTURAL_TEMPLATES },
-  {
-    title: '我的模板',
-    items: savedTemplates.value.map(config => ({ name: config.name, description: config.query, query: config.query, replacement: config.replacement, saved: true })),
-  },
-  {
-    title: '最近',
-    items: recentTemplates.value.map(config => ({ name: config.name, description: config.query, query: config.query, replacement: config.replacement, recent: true })),
-  },
-])
+const templateSections = computed(() => templateSectionsOf(savedTemplates.value, recentTemplates.value))
 const filtersOpen = ref(false)
 // '' = 「项目」（IDEA 的默认范围，不限定）。
 const scopeName = ref('')
@@ -434,7 +425,7 @@ async function replaceAllOnDisk() {
   if (scopeSet.value) {
     if (!confirmAll.value) {
       confirmAll.value = true
-      note.value = `将替换作用域“${scopeName.value}”内已列出的 ${matches.value.length} 处；范围限定下不会改写未列出的文件。再次点击“全部替换”确认。`
+      note.value = replaceAllConfirmNote({ listed: matches.value.length, files: fileCount.value, query: query.value, replacement: replacement.value, truncated: truncated.value, scope: scopeName.value })
       return
     }
     confirmAll.value = false
@@ -443,7 +434,7 @@ async function replaceAllOnDisk() {
   }
   if (!confirmAll.value) {
     confirmAll.value = true
-    note.value = `将替换工作区内全部匹配${truncated.value ? '（含未列出的部分）' : ''}。再次点击“全部替换”确认。`
+    note.value = replaceAllConfirmNote({ listed: matches.value.length, files: fileCount.value, query: query.value, replacement: replacement.value, truncated: truncated.value, scope: '' })
     return
   }
   const token = ++replaceToken
@@ -618,8 +609,8 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
     <div class="fs-heading">
       <span><Search :size="iconSize.menu" />全局搜索</span>
       <div class="heading-actions">
-        <button class="icon-button" :title="filtersOpen ? '收起筛选' : '筛选'" aria-label="切换文件筛选" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen"><SlidersHorizontal :size="iconSize.control" /></button>
-        <button class="icon-button" title="清空" aria-label="清空搜索" :disabled="!query && !replacement && !total" @click="reset"><X :size="iconSize.control" /></button>
+          <button class="icon-button" aria-label="切换文件筛选" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen"><SlidersHorizontal :size="iconSize.control" /></button>
+          <button class="icon-button" aria-label="清空搜索" :disabled="!query && !replacement && !total" @click="reset"><X :size="iconSize.control" /></button>
       </div>
     </div>
 
@@ -632,38 +623,38 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
             <option v-for="value in variableCandidates" :key="value" :value="value" />
           </datalist>
           <!-- 最近搜索下拉（上游 `SearchTextArea` 的历史；Alt+Down 打开，`FindPopupPanel.java:1237` 的预填用同一张表）。 -->
-          <button v-if="recents.finds.length" class="icon-button fs-history-toggle" type="button" title="搜索历史记录" aria-label="搜索历史记录" :aria-expanded="historyOpen === 'find'" @click="historyOpen = historyOpen === 'find' ? null : 'find'"><History :size="iconSize.control" /></button>
+          <button v-if="recents.finds.length" class="icon-button fs-history-toggle" type="button" aria-label="搜索历史记录" :aria-expanded="historyOpen === 'find'" @click="historyOpen = historyOpen === 'find' ? null : 'find'"><History :size="iconSize.control" /></button>
           <div v-if="historyOpen === 'find'" class="find-history" role="listbox" aria-label="搜索历史记录">
             <button v-for="row in recentRows(recents.finds)" :key="row" class="menu-button find-history-row" role="option" :aria-selected="false" @click="pickRecent('find', row)">{{ row }}</button>
           </div>
         </div>
         <div class="fs-toggles">
-          <button class="fs-toggle" :class="{ on: caseSensitive }" title="区分大小写" aria-label="区分大小写" :aria-pressed="caseSensitive" @click="caseSensitive = !caseSensitive">Aa</button>
-          <button class="fs-toggle" :class="{ on: regex }" title="正则表达式" aria-label="正则表达式" :aria-pressed="regex" @click="regex = !regex">.*</button>
-          <button class="fs-toggle" :class="{ on: wholeWord }" title="全词匹配" aria-label="全词匹配" :aria-pressed="wholeWord" @click="wholeWord = !wholeWord">词</button>
+          <button class="fs-toggle" :class="{ on: caseSensitive }" aria-label="区分大小写" :aria-pressed="caseSensitive" @click="caseSensitive = !caseSensitive">Aa</button>
+          <button class="fs-toggle" :class="{ on: regex }" aria-label="正则表达式" :aria-pressed="regex" @click="regex = !regex">.*</button>
+          <button class="fs-toggle" :class="{ on: wholeWord }" aria-label="全词匹配" :aria-pressed="wholeWord" @click="wholeWord = !wholeWord">词</button>
           <!-- 结构化搜索/替换（上游 `SearchStructurallyAction`/`ReplaceStructurallyAction`）：
                本仓没有 PSI，落点是 src/structuralSearch.ts 的文本子集编译器。 -->
-          <button class="fs-toggle" :class="{ on: structural }" title="结构化模板（$x$ 是变量，同名变量必须匹配同一段文本）" aria-label="结构化模板" :aria-pressed="structural" @click="structural = !structural; if (structural) regex = false">$</button>
+          <button class="fs-toggle" :class="{ on: structural }" aria-label="结构化模板" :aria-pressed="structural" @click="structural = !structural; if (structural) regex = false">$</button>
           <!-- 模板下拉（上游 ExistingTemplatesComponent 的模板树 + ConfigurationManager 的收藏）：
                内置/我的/最近三段，点一行填进搜索与替换框；「存为模板」走提示框取名。 -->
           <div class="fs-template-wrap">
-            <button class="fs-toggle" :class="{ on: templateOpen }" title="结构化模板库（内置 / 我的 / 最近）" aria-label="模板库" :aria-expanded="templateOpen" @click="templateOpen = !templateOpen">模板</button>
+            <button class="fs-toggle" :class="{ on: templateOpen }" aria-label="模板库" :aria-expanded="templateOpen" @click="templateOpen = !templateOpen">模板</button>
             <div v-if="templateOpen" class="fs-template-menu">
               <template v-for="section in templateSections" :key="section.title">
                 <p class="fs-template-head"><span>{{ section.title }}</span><span class="fs-template-count">{{ section.items.length }}</span></p>
                 <p v-if="!section.items.length" class="fs-template-empty">（空）</p>
                 <div v-for="item in section.items" :key="`${section.title}:${item.name}`" class="fs-template-row">
-                  <button class="fs-template-pick" :title="item.description" @click="applyTemplate(item)">
+                  <button class="fs-template-pick" @click="applyTemplate(item)">
                     <strong>{{ item.name }}</strong><span class="fs-template-query">{{ item.query }}</span>
                   </button>
-                  <button v-if="item.saved" class="fs-template-remove" title="删除这个模板" aria-label="删除模板" @click="deleteTemplate(item.name)"><X :size="iconSize.control" /></button>
+                  <button v-if="item.saved" class="fs-template-remove" aria-label="删除模板" @click="deleteTemplate(item.name)"><X :size="iconSize.control" /></button>
                 </div>
               </template>
               <button class="fs-template-save" :disabled="!query.trim()" @click="saveCurrentTemplate">存为模板…</button>
             </div>
           </div>
         </div>
-        <button class="icon-button" title="搜索 (Enter)" aria-label="搜索" :disabled="!canSearch || replacing" @click="runSearch"><Search :size="iconSize.control" /></button>
+        <button class="icon-button" aria-label="搜索" :disabled="!canSearch || replacing" @click="runSearch"><Search :size="iconSize.control" /></button>
       </div>
       <div v-if="filtersOpen" class="fs-filters">
         <label class="fs-filter"><span>包含</span><input v-model="include" type="text" placeholder="*.cpp 或 src/**" aria-label="仅搜索这些文件" spellcheck="false" /></label>
@@ -674,19 +665,17 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
       <div class="fs-row">
         <div class="fs-input-wrap">
           <input ref="replaceInput" v-model="replacement" class="fs-input" type="text" placeholder="替换为" aria-label="替换内容" spellcheck="false" @keydown.enter.ctrl.prevent="replaceAllOnDisk" @keydown="onFieldKeydown($event, 'replace')" />
-          <button v-if="recents.replaces.length" class="icon-button fs-history-toggle" type="button" title="替换历史记录" aria-label="替换历史记录" :aria-expanded="historyOpen === 'replace'" @click="historyOpen = historyOpen === 'replace' ? null : 'replace'"><History :size="iconSize.control" /></button>
+          <button v-if="recents.replaces.length" class="icon-button fs-history-toggle" type="button" aria-label="替换历史记录" :aria-expanded="historyOpen === 'replace'" @click="historyOpen = historyOpen === 'replace' ? null : 'replace'"><History :size="iconSize.control" /></button>
           <div v-if="historyOpen === 'replace'" class="find-history" role="listbox" aria-label="替换历史记录">
             <button v-for="row in recentRows(recents.replaces)" :key="row" class="menu-button find-history-row" role="option" :aria-selected="false" @click="pickRecent('replace', row)">{{ row }}</button>
           </div>
         </div>
-        <button class="fs-replace" :class="{ 'fs-confirm': confirmAll }" :disabled="!canSearch || busy" :title="confirmAll ? '再次点击以确认替换工作区内全部匹配' : '替换工作区内全部匹配（Ctrl+Enter）'" @click="replaceAllOnDisk">{{ confirmAll ? '确认全部替换' : '全部替换' }}</button>
+        <button class="fs-replace" :class="{ 'fs-confirm': confirmAll }" :disabled="!canSearch || busy" @click="replaceAllOnDisk">{{ confirmAll ? '确认全部替换' : '全部替换' }}</button>
       </div>
     </div>
 
     <p v-if="!isDesktop" class="fs-warn">浏览器预览不能全局搜索，请在桌面端使用。</p>
     <p v-else-if="!root" class="fs-warn">尚未打开项目。</p>
-    <!-- 结构化模板的语法说明：只说这个子集真的支持什么，不做 PSI 那套（见 src/structuralSearch.ts 头部）。 -->
-    <p v-if="structural" class="fs-note">结构化模板：<code>$x$</code> 匹配一个标识符（字母/数字/_/$），同名 <code>$x$</code> 必须匹配同一段文本；替换串里的 <code>$x$</code> 会带回捕获。列表变量写量词（<code>$x$+</code> / <code>$x${0,}</code>，按逗号分隔，一项可以是一层括号的调用如 <code>g(b, c)</code>；嵌得更深的那一段本仓不报，也不会报半截）——上游的 <code>$Args$</code> 就是"0 到不限次"那一条约束，不是另一种模型。</p>
     <!-- 修饰符面板（上游 `plugin/ui/filters/FilterPanel`+`FilterTable` 的文本层等价物）：
          模板编不动时不画（错误已经摆在下一行，别再叠一层能改却改不出结果的控件）。 -->
     <StructuralSearchFilters v-if="structural && !structuralError" :template="query" :scope="structuralModel.scope.value" :definitions="structuralModel.definitions.value" :replaceable="Boolean(replacement)" @update:template="query = $event" @update:scope="structuralModel.scope.value = $event" @update:definitions="structuralModel.definitions.value = $event" />
@@ -702,7 +691,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
       <span>{{ replacing ? '正在替换…' : running ? `正在搜索…已找到 ${streamedCount} 条 / ${searchStream.fileCount} 个文件` : `共 ${total} 处 / ${fileCount} 个文件` }}{{ !busy && pendingCount !== total ? `，已选中 ${pendingCount} 处` : '' }}{{ scopeName ? `，范围：${scopeName}` : '' }}</span>
       <span class="fs-status-right">
         <span v-if="truncated" class="fs-truncated" title="结果已截断，替换只覆盖列出的匹配">结果已截断</span>
-        <button v-if="busy" class="fs-cancel" title="放弃本次搜索/替换" @click="cancelSearch">取消</button>
+        <button v-if="busy" class="fs-cancel" @click="cancelSearch">取消</button>
       </span>
     </div>
     <div v-if="searched && total" class="fs-actions">
@@ -716,8 +705,8 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
         <section v-for="group in groups" :key="group.path" class="fs-group">
           <div class="fs-group-head">
             <button class="fs-file" :aria-expanded="!collapsed.has(group.path)" :title="group.path" @click="toggleGroup(group.path)">
-              <ChevronRight v-if="collapsed.has(group.path)" :size="iconSize.menu" />
-              <ChevronDown v-else :size="iconSize.menu" />
+              <ChevronRight aria-hidden="true" v-if="collapsed.has(group.path)" :size="iconSize.menu" />
+              <ChevronDown aria-hidden="true" v-else :size="iconSize.menu" />
               <span class="fs-file-path">{{ group.path }}</span>
               <span class="fs-file-count">{{ group.matches.length }}</span>
             </button>
@@ -737,8 +726,8 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
                   <span class="fs-line"><span v-for="(part, partIndex) in lineParts(match.preview, match.column, match.length)" :key="partIndex" :class="{ 'fs-hit': part.hit }">{{ part.text }}</span></span>
                 </button>
                 <div class="fs-match-actions">
-                  <button class="fs-mini" :disabled="busy" title="替换这一处" @click="replaceOne(match)">替换</button>
-                  <button class="fs-mini" :disabled="busy" title="跳过这一处（不替换）" @click="skipOne(match)">跳过</button>
+                  <button class="fs-mini" :disabled="busy" @click="replaceOne(match)">替换</button>
+                  <button class="fs-mini" :disabled="busy" @click="skipOne(match)">跳过</button>
                 </div>
               </div>
               <div v-if="showed && match.after !== match.preview" class="fs-after">
@@ -750,7 +739,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
         </section>
       </template>
       <div v-else-if="searched" class="fs-empty">没有匹配的结果。</div>
-      <div v-else class="fs-empty">输入关键词后按 Enter 搜索；Enter / Shift+Enter 在结果间移动，Home / End / PageUp / PageDown / F3 跳转（见 src/findResultsNav.ts），勾选后逐条替换。</div>
+      <div v-else class="fs-empty"></div>
     </div>
 
     <!-- 预览面板（上游 `FindPopupPanel` 的 `UsagePreviewPanel` + `myUsagePreviewTitle`）：
@@ -792,105 +781,110 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
 
 <style scoped>
 /* 停靠区被压矮时（真机取证：底部停靠 147px）整个面板改为可滚动 —— 否则结果区会被挤成一条缝。 */
-.fs-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.fs-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; background: var(--editor); color: var(--text); }
 /* 预览面板贴在结果列表下面（上游是一个 0.33 的 splitter，比例可拖；本仓先给固定高度，
    15 行上下 —— `UsagePreviewPanel` 那边的最小高度也是 15 行）。 */
 .fs-preview { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 96px; max-height: 40%; border-top: 1px solid var(--line-strong); background: var(--panel); }
-.fs-preview-head { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-2); min-height: var(--ctrl-height-sm); font-size: 11px; }
-.fs-preview-title { color: var(--muted); }
-.fs-preview-name { color: var(--text); font-family: var(--font-mono); }
-.fs-preview-detail { color: var(--muted); font-variant-numeric: tabular-nums; }
-.fs-preview-body { flex: 1 1 auto; min-height: 90px; overflow: auto; }
-.fs-preview-text { margin: 0; padding: 0 var(--space-2) var(--space-2); background: var(--editor); font: 12px/1.6 var(--font-mono); color: var(--text); white-space: pre; }
+.fs-preview-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--panel-heading-h); padding: 0 var(--space-3); border-bottom: 1px solid var(--line-strong); background: var(--rail); font-size: 11px; }
+.fs-preview-title { flex-shrink: 0; color: var(--secondary); font-weight: 600; }
+.fs-preview-name { min-width: 0; overflow: hidden; color: var(--bright); font: 11px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.fs-preview-detail { flex-shrink: 0; margin-left: auto; color: var(--muted); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
+.fs-preview-body { flex: 1 1 auto; min-height: 90px; overflow: auto; background: var(--editor); }
+.fs-preview-text { margin: 0; padding: 0 var(--space-3) var(--space-2); background: var(--editor); font: 12px/1.6 var(--font-mono); color: var(--text); white-space: pre; }
 .fs-preview-line { display: block; }
-.fs-preview-line.current { background: var(--accent-soft); color: var(--bright); }
+.fs-preview-line.current { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); color: var(--bright); }
 /* 行内命中（上游给命中区间加 SEARCH_RESULT_ATTRIBUTES）：`<mark>` 的浏览器默认底色要盖掉，
    底色取"选中"档，与整行的 current 档分开，两层同时出现时也读得出命中在哪一段。 */
 .fs-preview-hit { background: var(--selected); color: var(--bright); border-bottom: 1px solid var(--accent); }
-.fs-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); height: var(--tab-h); min-height: var(--tab-h); padding: 0 var(--space-1) 0 var(--space-3); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 11px; }
+.fs-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); height: var(--panel-heading-h); min-height: var(--panel-heading-h); padding: 0 var(--space-1) 0 var(--space-3); border-bottom: 1px solid var(--line-strong); background: var(--panel); color: var(--bright); font-size: 11px; font-weight: 600; }
 .fs-heading > span { display: inline-flex; align-items: center; gap: var(--space-2); }
 .fs-heading > span > svg { flex-shrink: 0; color: var(--muted); }
-.fs-form { display: flex; flex-direction: column; gap: var(--space-1); flex-shrink: 0; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
+.fs-form { display: flex; flex-direction: column; gap: var(--space-2); flex-shrink: 0; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line-strong); background: var(--rail); }
 .fs-row { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
 /* 最近搜索下拉：浮层样式复用全局 `.find-history`（src/style.css:506），这一层只负责定位。 */
 .fs-input-wrap { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; }
 .fs-input-wrap .fs-input { flex: 1; }
 .fs-history-toggle { flex-shrink: 0; margin-left: 2px; }
-.fs-input { flex: 1; min-width: 0; min-height: 26px; padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 12px/1.5 var(--font-mono); }
+.fs-input { flex: 1; min-width: 0; min-height: var(--ctrl-height); padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 12px/1.5 var(--font-mono); }
 .fs-input::placeholder { color: var(--muted); font-family: var(--font-ui); }
-.fs-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.fs-input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
+.fs-input-wrap :deep(.find-history) { top: calc(var(--ctrl-height) + 2px); }
 .fs-toggles { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .fs-toggle { width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); padding: 0; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--muted); font: 11px/1 var(--font-mono); }
 .fs-toggle:hover { background: var(--hover); color: var(--bright); }
-.fs-toggle.on { color: var(--accent); background: var(--selected); border-color: var(--line-strong); }
+.fs-toggle.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.fs-toggle:focus-visible, .fs-history-toggle:focus-visible, .fs-template-pick:focus-visible, .fs-template-remove:focus-visible, .fs-template-save:focus-visible, .fs-replace:focus-visible, .fs-filter input:focus-visible, .fs-filter select:focus-visible, .fs-file:focus-visible, .fs-file-replace:focus-visible, .fs-cancel:focus-visible, .fs-action:focus-visible, .fs-match-line:focus-visible, .fs-mini:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 /* 模板库下拉（内置 / 我的 / 最近）：浮层挂在「模板」按钮下方，样式与最近搜索下拉同族。 */
 .fs-template-wrap { position: relative; }
-.fs-template-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 40; width: 280px; max-height: 320px; overflow: auto; padding: var(--space-1) 0; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); box-shadow: 0 6px 18px rgb(0 0 0 / 35%); }
-.fs-template-head { display: flex; justify-content: space-between; margin: 0; padding: var(--space-1) var(--space-2) 0; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.fs-template-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 40; width: 280px; max-height: 320px; overflow: auto; padding: var(--space-1) 0; background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
+.fs-template-head { display: flex; justify-content: space-between; margin: 0; padding: var(--space-2) var(--space-2) var(--space-1); border-top: 1px solid var(--line); color: var(--secondary); font-size: 10px; font-weight: 600; }
 .fs-template-count { color: var(--muted); }
 .fs-template-empty { margin: 0; padding: 0 var(--space-2) var(--space-1); color: var(--muted); font-size: 11px; }
 .fs-template-row { display: flex; align-items: center; }
-.fs-template-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; flex: 1; min-width: 0; padding: 2px var(--space-2); border: 0; background: transparent; color: var(--text); text-align: left; font-size: 11px; }
+.fs-template-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; flex: 1; min-width: 0; min-height: var(--menu-row-height); padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--text); text-align: left; font-size: 12px; }
 .fs-template-pick:hover { background: var(--hover); }
-.fs-template-pick strong { color: var(--bright); font-weight: 500; }
+.fs-template-pick strong { color: var(--bright); font-weight: 600; }
 .fs-template-query { max-width: 100%; color: var(--muted); font-family: var(--font-mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-template-remove { flex-shrink: 0; padding: 0 var(--space-1); border: 0; background: transparent; color: var(--muted); font-size: 12px; }
 .fs-template-remove:hover { color: var(--error); }
-.fs-template-save { display: block; width: calc(100% - var(--space-2) * 2); margin: var(--space-1) var(--space-2) 0; padding: 2px var(--space-2); color: var(--accent); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
+.fs-template-save { display: block; width: calc(100% - var(--space-2) * 2); min-height: var(--ctrl-height-sm); margin: var(--space-1) var(--space-2) 0; padding: 0 var(--space-2); color: var(--accent); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
 .fs-template-save:disabled { color: var(--muted); opacity: .55; }
-.fs-replace { flex-shrink: 0; min-height: 26px; padding: 3px var(--space-2); color: var(--secondary); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
+.fs-replace { flex-shrink: 0; min-height: var(--ctrl-height); padding: 0 var(--space-2); color: var(--secondary); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
 .fs-replace:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .fs-replace:disabled { color: var(--muted); opacity: .55; }
 .fs-replace.fs-confirm { color: var(--on-accent); background: var(--error); border-color: var(--error); }
+.fs-replace.fs-confirm:hover:not(:disabled) { color: var(--on-accent); background: var(--error); border-color: var(--error); }
 .fs-filters { display: flex; flex-direction: column; gap: var(--space-1); }
-.fs-filter { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: 11px; color: var(--muted); }
+.fs-filter { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: 11px; color: var(--secondary); }
 .fs-filter > span { flex-shrink: 0; width: 28px; }
 .fs-filter input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line); border-radius: var(--radius-xs); font: 11px/1.5 var(--font-mono); }
 .fs-filter input::placeholder { color: var(--muted); font-family: var(--font-ui); }
 .fs-warn, .fs-error, .fs-note { margin: 0; padding: var(--space-2) var(--space-3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
-.fs-warn { color: var(--secondary); background: var(--rail); border-bottom: 1px solid var(--line); }
-.fs-error { color: var(--error); background: var(--panel); border-bottom: 1px solid var(--line); }
-.fs-note { color: var(--secondary); background: var(--panel); border-bottom: 1px solid var(--line); }
-.fs-status { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-shrink: 0; padding: var(--space-1) var(--space-3); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); }
+.fs-warn { border-left: 2px solid var(--warning); color: var(--warning); background: var(--warning-bg); }
+.fs-error { border-left: 2px solid var(--error); color: var(--error); background: var(--error-bg); }
+.fs-note { border-left: 2px solid var(--accent); color: var(--secondary); background: var(--accent-soft); }
+.fs-status { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-shrink: 0; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line-strong); background: var(--panel); color: var(--secondary); font-size: 11px; }
 .fs-status-right { display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .fs-truncated { color: var(--error); }
-.fs-cancel { padding: 1px var(--space-2); color: var(--secondary); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 10px; }
+.fs-cancel { min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); color: var(--secondary); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
 .fs-cancel:hover { background: var(--hover); color: var(--bright); }
-.fs-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); flex-shrink: 0; padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); }
-.fs-action { min-height: var(--ctrl-height-sm); padding: 2px var(--space-2); color: var(--secondary); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
+.fs-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); flex-shrink: 0; padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line-strong); background: var(--panel); }
+.fs-action { min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); color: var(--secondary); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
 .fs-action:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .fs-action:disabled { color: var(--muted); opacity: .55; }
 /* 结果区保底高度（真机量到过 8px：内容 58 万像素高、列表只有一条缝）—— 面板放不下时
    由 .fs-panel 滚动，而不是把列表压没（上游的 Find 工具窗也是结果区占满剩余高度）。 */
 .fs-scroll { flex: 1 1 auto; min-height: 96px; overflow: auto; padding-bottom: var(--space-2); }
-.fs-scroll:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-.fs-empty { padding: var(--space-4) var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.fs-scroll:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
+.fs-empty { margin: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3); border-left: 2px solid var(--line-strong); color: var(--secondary); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.fs-scroll > .fs-empty:empty { display: none; }
+.fs-preview-body > .fs-empty { margin: 0; padding: var(--space-3); border-left: 0; color: var(--muted); }
 .fs-group { min-width: 0; }
-.fs-group-head { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
-.fs-file { display: flex; align-items: center; gap: var(--space-1); flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-2) 2px var(--space-1); border: 0; background: transparent; color: var(--secondary); text-align: left; }
+.fs-group-head { display: flex; align-items: center; gap: var(--space-1); min-width: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
+.fs-file { display: flex; align-items: center; gap: var(--space-1); flex: 1; min-width: 0; min-height: var(--tree-row-h); padding: 0 var(--space-2); border: 0; background: transparent; color: var(--secondary); text-align: left; }
 .fs-file:hover { background: var(--hover); }
 .fs-file > svg { flex-shrink: 0; color: var(--muted); }
-.fs-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px/1.6 var(--font-mono); color: var(--text); }
-.fs-file-count { flex-shrink: 0; margin-left: auto; color: var(--muted); font-size: 10px; }
-.fs-file-replace { flex-shrink: 0; margin-right: var(--space-2); padding: 1px var(--space-2); color: var(--secondary); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 10px; }
+.fs-file-path { min-width: 0; overflow: hidden; color: var(--bright); text-overflow: ellipsis; white-space: nowrap; font: 11px/1.5 var(--font-mono); }
+.fs-file-count { flex-shrink: 0; margin-left: auto; color: var(--secondary); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
+.fs-file-replace { flex-shrink: 0; min-height: var(--ctrl-height-sm); margin-right: var(--space-2); padding: 0 var(--space-2); color: var(--secondary); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 10px; }
 .fs-file-replace:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .fs-file-replace:disabled { color: var(--muted); opacity: .5; }
 .fs-matches { display: flex; flex-direction: column; padding: 0 0 var(--space-1); }
-.fs-match { display: flex; flex-direction: column; min-width: 0; padding: 1px var(--space-2) 1px var(--space-3); transition: background-color var(--dur-1) var(--ease); }
+.fs-match { display: flex; flex-direction: column; min-width: 0; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); transition: background-color var(--dur-1) var(--ease); }
 .fs-match:hover { background: var(--hover); }
-.fs-match.current { background: var(--selected); }
+.fs-match.current { background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); }
 .fs-match.skipped { opacity: .5; }
 .fs-match.skipped .fs-line { text-decoration: line-through; }
 .fs-match-main { display: flex; align-items: flex-start; gap: var(--space-1); min-width: 0; }
-.fs-check { flex-shrink: 0; margin: 3px 0 0; accent-color: var(--accent); }
+.fs-check { flex-shrink: 0; width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); margin: 3px 0 0; accent-color: var(--accent); }
 .fs-match-line { display: flex; align-items: flex-start; gap: var(--space-2); flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .fs-match-actions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .fs-mini { padding: 0 var(--space-1); color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: var(--radius-xs); font-size: 10px; }
 .fs-mini:hover:not(:disabled) { background: var(--elevated); border-color: var(--line-strong); color: var(--bright); }
 .fs-mini:disabled { opacity: .45; }
-.fs-pos { flex-shrink: 0; min-width: 46px; text-align: right; color: var(--muted); font: 10px/1.7 var(--font-mono); }
-.fs-line { min-width: 0; overflow: hidden; white-space: pre; text-overflow: ellipsis; color: var(--secondary); font: 11px/1.7 var(--font-mono); }
-.fs-hit { color: var(--bright); background: var(--selected); border-radius: 2px; }
+.fs-pos { flex-shrink: 0; min-width: 46px; text-align: right; color: var(--muted); font: 10px/1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
+.fs-line { min-width: 0; overflow: hidden; white-space: pre; text-overflow: ellipsis; color: var(--secondary); font: 11px/1.6 var(--font-mono); }
+.fs-hit { color: var(--bright); background: var(--selected); border-bottom: 1px solid var(--accent); }
 .fs-after { display: flex; align-items: flex-start; gap: var(--space-1); padding: 0 0 1px 62px; }
 .fs-after-mark { flex-shrink: 0; color: var(--success); font: 10px/1.7 var(--font-mono); }
 .fs-after .fs-line { color: var(--success); }

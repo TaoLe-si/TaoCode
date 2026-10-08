@@ -112,3 +112,15 @@ provideUsageSymbols(null)   // 拔掉（例如切工程）
   认不出的档位按默认档 `All` 兜底（`HierarchyBrowserBaseEx.java:165`），绝不清空列表。
 - 命名作用域那一长串（`HierarchyBrowserBaseEx.java:778-782`）与
   `ConfigureScopesAction`（`:815`）本仓没有宿主 ⇒ **不给行**，不做假控件。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R-1（引用面板换行模型）已接线**：落点 `src/components/ToolWindowView.vue:222` + `toolViewContext.ts:202` 的 `referenceRows`（见 hierarchy/navigation2 处理结果）。
+- **R-2（符号源）** —— 需引用域 owner 注册。**R-3（层级范围下拉）已接线**：`src/App.vue:2331-2332`。
+
+结论：R-1/R-3 已接线；R-2 登记。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「R-1/R-3 已接线；R-2 登记。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

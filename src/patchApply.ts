@@ -20,9 +20,15 @@
 //   · **块内容按 `@@` 声明的两侧行数收**（`PatchReader.readNextHunkUnified`，
 //     `platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/PatchReader.java:335-392`），
 //     所以 `git format-patch` 的邮件头、diffstat 与结尾的 `-- ` 签名都不会被吃进最后一个块；
-//   · 应用时**逐块核对上下文**（`PlainSimplePatchApplier.checkContextLines` 的等价物，
+//   · 应用时**先核块头与正文的账**（`apply/PlainSimplePatchApplier.java:114-122`：块头声明的两侧行数
+//     必须等于正文实际的行数，对不上就是 `patch.simple.apply.hunk.base.body.error` /
+//     `.patched.body.error`，文案在 `platform/vcs-api/vcs-api-core/resources/messages/VcsBundle.properties:444-445`），
+//     再**逐块核对上下文**（`PlainSimplePatchApplier.checkContextLines` 的等价物，
 //     `apply/PlainSimplePatchApplier.java:98`），不猜；核对不上再走**偏移搜索**
 //     （`src/patchFuzzy.ts` = `apply/GenericPatchApplier` 的位置那一半，`apply/GenericPatchApplier.java:74-86`）；
+//     同一道账目闸也挡在**「已应用」判定**（`isAlreadyApplied`）前面：账目不对的块在上游永远到不了
+//     ALREADY_APPLIED 那一档（`apply/GenericPatchApplier.java:121-122` 的 FAILURE 排在 `:124`/`:134`
+//     的 ALREADY_APPLIED 之前，而 `myNotExact` 的落位算的就是块头声明的两个数，`:1241-1242`）；
 //     原写「GNU patch 的 fuzz 属 GenericPatchApplier，本仓没做」—— 实际偏移搜索已做，
 //     没做的是**吃掉上下文行**那一档（`apply/GenericPatchApplier.java:209-223` 那段 fuzz 循环里
 //     `:212` 调的 `complementInsertAndDelete`，函数体在 `:312-320`；`trySolveSomehow` 在 `:363-393`，
@@ -32,7 +38,7 @@
 //     这样整批补丁可以**先全部验证再落盘**（上游 `PathsVerifier` 的用意）。
 //   · 二进制补丁（`GIT binary patch` / base85）不解析：判 `skip` 并给出理由
 //     （上游 `ApplyBinaryFilePatch` + `lib/base85xjava/Base85x`，本仓没有这条解码链）。
-import { detectLineSeparator, looksBinary, normalizeLineSeparators, stripBom } from './vcsFileUtil.ts'
+import { detectLineSeparator, looksBinary, normalizeLineSeparators, patchHunkStartIndex, splitPatchLines, stripBom } from './vcsFileUtil.ts'
 import { applyHunksWithOffsetSearch } from './patchFuzzy.ts'
 
 /** 逐文件的应用结果（上游 `ApplyPatchStatus`，去掉本仓没有的 SKIP/ABORT 之外仍保留同形）。 */
@@ -220,11 +226,11 @@ export function parseUnifiedPatch(text: string): ParsedPatch {
 export type HunkApplyResult = { ok: true; text: string; offsetHunks?: number } | { ok: false; hunk: number; reason: string }
 
 function splitHunkLines(text: string): string[] {
-  return text.split('\n')
+  return splitPatchLines(text)
 }
 
-function joinHunkLines(lines: string[]): string {
-  return lines.join('\n')
+function joinHunkLines(lines: string[], separator = '\n'): string {
+  return lines.join(separator)
 }
 
 /** 块的「原文」行（context + remove）与「新文」行（context + add）。 */
@@ -235,19 +241,57 @@ function afterLines(hunk: PatchHunk): string[] {
   return hunk.lines.filter(line => line.type !== 'remove').map(line => line.text)
 }
 
+/** 一侧的「块头声明行数」与「正文实际行数」是否同一笔账（上游 `PatchHunkUtil.kt:13-28` 的那个 switch）。 */
+function countsOfSide(hunk: PatchHunk, side: 'before' | 'after'): number {
+  const skip: PatchLineType = side === 'before' ? 'add' : 'remove'
+  let count = 0
+  for (const line of hunk.lines) if (line.type !== skip) count++
+  return count
+}
+
 /**
- * 把补丁块应用到文本（`PlainSimplePatchApplier` 的等价物：**逐块核对上下文**，不 fuzz）。
- * 任一块对不上就整文件失败 —— 返回第几块（1 基）与理由，调用方不许写盘。
+ * 块头与正文的账目核对（上游 `PlainSimplePatchApplier.checkContextLines`，
+ * `platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/apply/PlainSimplePatchApplier.java:98-122`）：
+ * `:114-116` 数出正文两侧的 `baseCount` / `patchedCount`，`:117-122` 拿它们与块头算出的跨度
+ * （`baseEnd - baseStart` = 块头声明的 `linesBefore`，见 `PatchReader.java:363-364`）逐一比，
+ * 对不上就 `PatchApplyException`（文案 `VcsBundle.properties:444-445`
+ * `patch.simple.apply.hunk.base.body.error` / `.patched.body.error`）。
+ * 本仓原来没有这一道：块是手构的（不是 `parseUnifiedPatch` 收出来的）时，声明与正文不符会**静默**按正文走。
+ */
+function hunkCountsMismatch(hunk: PatchHunk): string | null {
+  const before = countsOfSide(hunk, 'before')
+  if (before !== hunk.beforeCount) return `块头声明原文 ${hunk.beforeCount} 行，正文实际 ${before} 行`
+  const after = countsOfSide(hunk, 'after')
+  if (after !== hunk.afterCount) return `块头声明新文 ${hunk.afterCount} 行，正文实际 ${after} 行`
+  return null
+}
+
+/**
+ * 把补丁块应用到文本（`PlainSimplePatchApplier` 的等价物：**先核账**（块头声明的行数 = 正文行数），
+ * 再**逐块核对上下文**，不 fuzz）。任一块对不上就整文件失败 —— 返回第几块（1 基）与理由，调用方不许写盘。
+ *
+ * 行尾：目标文本按上游 `LineTokenizer.tokenize(text, false)` 的切法切行（`splitPatchLines`），
+ * 与补丁那一侧（`parseUnifiedPatch` 已把 `\r\n`/`\r` 归一成 `\n`）同一口径 ⇒ CRLF 文件的补丁能对上
+ * （上游同款规矩：`LineOffsetsUtil.java:11-12`「不支持 CRLF，先 convertLineSeparators」+
+ * `BaseRevisionTextPatchEP.java:99`）；写回的文本用**原文件自己的主行尾**（`patchLineEnding`）。
  */
 export function applyHunksToText(text: string, hunks: readonly PatchHunk[]): HunkApplyResult {
+  const separator = patchLineEnding(text)
   const hadTrailingNewline = text.endsWith('\n')
   const source = splitHunkLines(text)
   const target: string[] = []
   let cursor = 0
   for (let index = 0; index < hunks.length; index++) {
     const hunk = hunks[index]!
-    // 块的起点（`beforeStart` 是 1 基，0 = 空文件的插入点）。
-    const start = Math.max(0, hunk.beforeStart - 1)
+    // 账目先核（上游 `apply/PlainSimplePatchApplier.java:117-122`，路径经参考树 `find -iname` 核实为
+    // `platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/apply/PlainSimplePatchApplier.java`，
+    // 派单写的 `platform/diff-impl/…/diff/impl/` 那份在本树里不存在；行号 `:114-115` 数、`:117-122` 比，未漂）：
+    // 块头声明的两侧行数 ≠ 正文实际行数 ⇒ 整块失败，**不进入**后面的上下文核对与偏移搜索。
+    const mismatch = hunkCountsMismatch(hunk)
+    if (mismatch) return { ok: false, hunk: index + 1, reason: `块头与正文不符：${mismatch}` }
+    // 块的起点：`beforeCount === 0` 的纯插入块，块头那个数是「插在第几行之后」（git 的 `@@ -l,s` 语义，
+    // 见 `patchHunkStartIndex` 的注释）；其余情况是 1 基的首行行号。
+    const start = patchHunkStartIndex(hunk.beforeStart, hunk.beforeCount)
     if (start < cursor) return { ok: false, hunk: index + 1, reason: '与上一块重叠' }
     if (start > source.length) return { ok: false, hunk: index + 1, reason: '起点超出文件行数' }
     for (let i = cursor; i < start; i++) target.push(source[i] ?? '')
@@ -262,7 +306,7 @@ export function applyHunksToText(text: string, hunks: readonly PatchHunk[]): Hun
     }
   }
   for (let i = cursor; i < source.length; i++) target.push(source[i] ?? '')
-  let result = joinHunkLines(target)
+  let result = joinHunkLines(target, separator)
   // 补丁声明「新文件的最后一行没有结尾换行」：那就是块里最后一行带 `\ No newline`
   // （上游 `PatchHunk.isNoNewLineAtEnd`，`platform/vcs-api/vcs-api-core/src/com/intellij/openapi/diff/impl/patch/PatchHunk.java:65-70`
   // —— 取的就是 `myLines` 最后一行的 `isSuppressNewLine()`）。落盘时按它决定补不补行尾
@@ -274,8 +318,10 @@ export function applyHunksToText(text: string, hunks: readonly PatchHunk[]): Hun
   const suppress = lastHunk?.lines[lastHunk.lines.length - 1]?.noNewline === true && touchesEnd
   if (suppress) {
     if (result.endsWith('\n')) result = result.slice(0, -1)
-  } else if (hadTrailingNewline && !result.endsWith('\n')) {
-    result += '\n'
+  } else if (hadTrailingNewline && !result.endsWith('\n') && result !== '') {
+    // 原文有结尾换行 ⇒ 补回去。但 `result === ''` 是「整份文件被删空」那一档（正文只剩
+    // `splitPatchLines` 结尾那个空元素），真 `git apply` 给的是**空文件**而不是一个空行 —— 不补。
+    result += separator
   } else if (!hadTrailingNewline && result.endsWith('\n') && text !== '') {
     // 原文没有结尾换行、补丁也没显式声明 ⇒ 保留「无结尾换行」的形态。
     result = result.slice(0, -1)
@@ -286,11 +332,22 @@ export function applyHunksToText(text: string, hunks: readonly PatchHunk[]): Hun
 /**
  * 「这个补丁是不是已经应用过了」：逐块比对新文那一侧（上游 `ApplyTextFilePatch` 用
  * 文件内容与 before/after 两侧比，命中 after 就是 `ALREADY_APPLIED`）。
+ * 起点用 `patchHunkStartIndex`（`+c,0` 的纯删除块，那个 `c` 是「删完之后落在第 c 行之后」）。
+ *
+ * **账目先核**（上游 `apply/GenericPatchApplier.java:121-122`：`myNotExact` 非空 ⇒ `getStatus()` 直接
+ * 返回 FAILURE，这条排在 `:124`/`:134` 那两条 ALREADY_APPLIED **之前**；而 `myNotExact` 装的正是
+ * `SplitHunk.read(hunk)`（`:186`），其落位用的两个数是块头声明的 `getStartLineBefore()` /
+ * `getStartLineAfter()`（`:1241-1242`）⇒ 正文放不下声明的跨度时根本走不到「已应用」那一档）。
+ * 本仓原先没有这一道：块头比正文多报几行的补丁（真实输入 = 半截补丁文件）在这里被判成 `alreadyApplied`，
+ * 于是 `planPatchApplication` 给 `plan.ok = true`，宿主那条「计划不 ok 时一个字节都不写」
+ * （`src/patchApplyHost.ts:64`）被绕开；改名那一档还会产出 `action: 'rename'` + **没打过补丁**的原文，
+ * 把文件改了名而让整块改动静默丢失。
  */
 export function isAlreadyApplied(text: string, hunks: readonly PatchHunk[]): boolean {
+  for (const hunk of hunks) if (hunkCountsMismatch(hunk)) return false
   const source = splitHunkLines(text)
   for (const hunk of hunks) {
-    const start = Math.max(0, hunk.afterStart - 1)
+    const start = patchHunkStartIndex(hunk.afterStart, hunk.afterCount)
     const expected = afterLines(hunk)
     if (start + expected.length > source.length) return false
     for (let i = 0; i < expected.length; i++) if (source[start + i] !== expected[i]) return false
@@ -307,6 +364,12 @@ export function isAlreadyApplied(text: string, hunks: readonly PatchHunk[]): boo
  * 所以档位仍是 SUCCESS（`GenericPatchApplier.getStatus` 的口径）。
  */
 export function applyHunksFlexible(text: string, hunks: readonly PatchHunk[]): HunkApplyResult {
+  // 块头与正文的账目先核一遍（上游 `PlainSimplePatchApplier.java:117-122`）：这笔账不对时
+  // **不许**再走偏移搜索 —— 偏移只救「行号偏了」，不救「行数对不上」。
+  for (let index = 0; index < hunks.length; index++) {
+    const mismatch = hunkCountsMismatch(hunks[index]!)
+    if (mismatch) return { ok: false, hunk: index + 1, reason: `块头与正文不符：${mismatch}` }
+  }
   const exact = applyHunksToText(text, hunks)
   if (exact.ok) return exact
   const searched = applyHunksWithOffsetSearch(text, hunks)

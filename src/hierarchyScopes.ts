@@ -22,6 +22,39 @@
 //         （那张表在桶 13 名下 `src/scopes.ts`），所以本模块**只实现上面五档**，不假装有第六档。
 //   · 范围切换的入口：`HierarchyBrowserBaseEx.java:775` 把 `This Class` 作为一个本地 scope 加进下拉。
 //
+//   · 默认档：**All** —— 上游 `HierarchyBrowserManager.State` 没有默认范围字段，`HierarchyTreeStructure`
+//     构造时的 scopeType 就是 `SCOPE_ALL`（`getSearchScope` 开头那句 `GlobalSearchScope.allScope`
+//     是默认值 `HierarchyTreeStructure.java:133-134`，`SCOPE_ALL` 在那一半根本没有分支，
+//     落到 `:147` 的 else 里 `namedScope == null` 什么也不改），屏上那一档由
+//     `HierarchyBrowserBaseEx.java:165` 的 `state.SCOPE == null ? SCOPE_ALL : state.SCOPE` 定。
+//   · **控件挂在谁身上**（本批 W-2 补的那一半）：基类不加 —— `HierarchyBrowserBaseEx.java:489-490`
+//     的 `prependActions` 是空实现，由子类逐个加，所以"哪一档界面有范围下拉"是**逐视图**的事：
+//       — 调用层次：`platform/lang-impl/src/com/intellij/ide/hierarchy/CallHierarchyBrowserBase.java:61`；
+//         两个方向都真吃范围（`java/java-impl/src/com/intellij/ide/hierarchy/call/CallerMethodsTreeStructure.java:90`
+//         查询侧；`.../call/CalleeMethodsTreeStructure.java:73,80` 查询 + 逐节点，`:51` 构造器那一支）；
+//       — 方法层次：`.../hierarchy/MethodHierarchyBrowserBase.java:85`；
+//       — 类型层次：`platform/lang-impl/src/com/intellij/ide/hierarchy/TypeHierarchyBrowserBase.java:89-94`
+//         **不加**；Java 自己在 `java/java-impl/src/com/intellij/ide/hierarchy/type/TypeHierarchyBrowser.java:47-54`
+//         加了一个匿名 `ChangeScopeAction`（加在 `:49`），`isEnabled()`（`:51-52`）= `!当前视图类型 == getSupertypesHierarchyType()`
+//         ⇒ **「父类型」那一向的上拉是显式禁用的**，Kotlin 同写法
+//         （`plugins/kotlin/code-insight/kotlin.code-insight.k2/src/org/jetbrains/kotlin/idea/k2/codeinsight/hierarchy/types/KotlinTypeHierarchyBrowser.kt:34-40`，
+//         加在 `:36`、`isEnabled` 在 `:37-39`）；
+//         判定源也对得上：`.../type/SubtypesHierarchyTreeStructure.java:47` 用 `getSearchScope(myCurrentScopeType,…)`，
+//         而 `.../type/SupertypesHierarchyTreeStructure.java` 全文**零** scope 引用
+//         （只有 `:35` 的 `psiClass.getResolveScope()`，那是解析域不是搜索范围）；
+//       — LSP 路径（= 本仓唯一的数据源）：**两种层次都不画**——
+//         `platform/lsp-impl/src/impl/features/hierarchy/call/LspCallHierarchyBrowser.kt:30-35` 调完 super
+//         之后把所有 `ChangeScopeAction` remove 掉，`platform/lsp-impl/src/impl/features/hierarchy/type/LspTypeHierarchyBrowser.kt:33-37`
+//         根本不调 super（自己只加父类型/子类型/排序三个动作）；
+//         `platform/lsp-impl/src/impl/features/hierarchy/LspAbstractHierarchyTreeStructure.kt:20-30`
+//         的 `buildChildren` 也从未调 `isInScope`/`getSearchScope`（全树里 `isInScope` 的调用点只有
+//         `CalleeMethodsTreeStructure.java:51,80`、`KotlinCalleeTreeStructure.kt:63,78`、
+//         `PyCallHierarchyTreeStructureBase.java:53`）。
+//     ⇒ 本仓的取舍（留痕，供主代理复核）：严格按 LSP 路径 = 整条下拉都不出现，那 `nodeInScope` 那五档
+//     判据（桶 4 交付、真会滤行）就成了死码；本批取"有判定源的方向保留、上游显式禁用的那一向撤掉"，
+//     即 `hierarchyScopeSupport()` 只对**类型层次·父类型**返回不支持。整条撤或整条留都由宿主那一行决定，
+//     模块不再自作主张地把五档塞给所有视图。
+//
 // 架构不等价处（本仓用本仓架构还原用户可见功能）：
 //   · 上游判"在不在范围内"用的是 PSI 元素 + 模块/测试源根索引；本仓的层级节点只有
 //     `{path, line, name, kind}`（LSP `HierarchyItem`，见 `src/bridge.ts` 的 `LspHierarchyItem`），
@@ -38,6 +71,12 @@
 //
 // 消费链路：`src/hierarchyView.ts`（面板的状态与行过滤都调这里）；判据 `tests/hierarchy-scopes.test.mjs`。
 import { isTestPath } from './navGotoTest.ts'
+// 「工程内」那一半的判定源：层级节点的 `path` 由 native 的 `uri_to_relative` 给出
+// （`native/lsp_host_bootstrap.cpp:18-31`）—— 落在工作区根**内**才剥成相对路径，根**外**
+// （JDK、依赖、jar 里的类）原样返回绝对路径。绝对性判定走已有那一份
+// `src/filenameWidget.ts:145` 的 `isAbsolutePath`（盘符 / 前导 `/` / UNC 三形），不再拼第三份
+// （`src/moduleScopes.ts:151` 那份私有的暂不在本批范围内，登记在报告 §6）。
+import { isAbsolutePath } from './filenameWidget.ts'
 
 /** 五档范围（键 = 上游常量值，别翻成中文键：判据与请求都按上游字符串对齐）。 */
 export type HierarchyScopeId = 'Production' | 'All' | 'This Class' | 'This Module' | 'Test'
@@ -95,10 +134,14 @@ export function nodeInScope(node: HierarchyScopedNode, scope: HierarchyScopeId, 
     case 'All':
       return true
     case 'Production':
-      // 上游还要求"工程内"（`:170-176`）；本仓的层级节点路径全部来自工作区或库文件，
-      // 库文件（绝对路径 / jar 内）用"路径里有分隔符且不在工作区一级目录"判不出工程内外，
-      // 所以这一档只实现"非测试源"那一半 —— 差异记在报告里。
-      return !isTestPath(node.path)
+      // 上游这一档有两个条件（`HierarchyTreeStructure.java:170-177`）：
+      //   ① 编译元素（库/JAR 里的那些）必须**在工程内**才留 —— `:175`
+      //      `if (srcElement.getContainingFile() instanceof PsiCompiledElement && !PsiManager…isInProject(srcElement)) return false;`
+      //      （注释原文说的是 Kotlin 声明被 Java 引用时那种"工程内的编译包装"要留下，真库里的要滤掉）；
+      //   ② 不是测试源 —— `:177` `!TestSourcesFilter.isTestSources(virtualFile, project)`。
+      // 本仓的对应物：①= 路径是工作区相对路径（根外的库文件由 `uri_to_relative` 原样给出绝对路径，
+      // 见文件头那条 import 说明）；②= `isTestPath`。两半都齐 ⇒ 库/JDK 类型不再混在「生产代码」里。
+      return !isAbsolutePath(node.path) && !isTestPath(node.path)
     case 'Test':
       return isTestPath(node.path)
     case 'This Class':
@@ -158,3 +201,72 @@ export function scopeNotice(scope: HierarchyScopeId, kept: number, total: number
   const label = HIERARCHY_SCOPES.find(entry => entry.id === resolveHierarchyScope(scope))?.label ?? ''
   return `${label}：${kept} / ${total}`
 }
+
+// ---------------------------------------------------------------- 范围的适用面（哪一个视图真有这一档控件）
+
+/** 面板的两个视图（`src/hierarchyView.ts` 的 `hierKind`）。 */
+export type HierarchyViewKind = 'call' | 'type'
+
+/** 四个方向（`src/hierarchyView.ts` 的 `hierDirection`）。 */
+export type HierarchyViewDirection = 'incoming' | 'outgoing' | 'supertypes' | 'subtypes'
+
+/** 一个视图/方向组合上「范围」那一档的适用面（宿主按 `supported` 决定画不画，模块不画控件）。 */
+export interface HierarchyScopeSupport {
+  /** 这一档界面上到底有没有范围下拉。 */
+  readonly supported: boolean
+  /** 下拉的档位（不支持就是**空表** —— 空表不是"退回全部五档"，给了就是假控件）。 */
+  readonly tiers: readonly { id: HierarchyScopeId; label: string }[]
+  /** 为什么（上游坐标，逐条可从参考树打开）。 */
+  readonly reason: string
+}
+
+/** 「父类型」方向：上游显式禁用这个控件，且其结构类零判定源。 */
+const SUPERTYPES_UNSUPPORTED: HierarchyScopeSupport = {
+  supported: false,
+  tiers: [],
+  reason: '上游在类型层次里把范围动作的 isEnabled() 定为「当前视图类型 != supertypes」'
+    + '（java/java-impl/src/com/intellij/ide/hierarchy/type/TypeHierarchyBrowser.java:49-52、'
+    + 'KotlinTypeHierarchyBrowser.kt:36-39），而 SupertypesHierarchyTreeStructure.java 全文没有任何 scope 引用'
+    + '（只有 :35 的 getResolveScope，那是解析域）⇒ 这一向没有真判定源，不给档。',
+}
+
+/** 支持时的档位表：**就是** `HIERARCHY_SCOPES` 那一份（不复制、不重排）。 */
+const SUPPORTED_TIERS: readonly { id: HierarchyScopeId; label: string }[] = HIERARCHY_SCOPES
+
+/**
+ * 「范围」这一档控件在**哪个视图、哪个方向**上真的存在（本批 W-2 补的模块侧契约）。
+ *
+ * 上游的注册面是逐个视图的（`HierarchyBrowserBaseEx.java:489-490` 的 `prependActions` 是空的）：
+ *   · 调用层次两个方向都有 —— `CallHierarchyBrowserBase.java:61` 加动作，
+ *     `CallerMethodsTreeStructure.java:90` / `CalleeMethodsTreeStructure.java:73,80` 真的按范围查/滤；
+ *   · 类型层次的**子类型**有 —— `TypeHierarchyBrowser.java:47-54` 加动作且 `isEnabled()` 只禁父类型，
+ *     `SubtypesHierarchyTreeStructure.java:47` 真的用 `getSearchScope(myCurrentScopeType,…)`；
+ *   · 类型层次的**父类型**没有（`SUPERTYPES_UNSUPPORTED` 那条 reason）；
+ *   · 方法层次（`MethodHierarchyBrowserBase.java:85`）本仓没有这个视图，不在这里给档。
+ *
+ * 与本仓架构的取舍（留痕）：本仓数据源只有 LSP，而上游 LSP 路径**两种层次都把该动作摘掉**
+ * （`LspCallHierarchyBrowser.kt:30-35` remove、`LspTypeHierarchyBrowser.kt:33-37` 不调 super，
+ * `LspAbstractHierarchyTreeStructure.kt:20-30` 也从不调 `isInScope`）。严格照抄 = 整条下拉都不出现；
+ * 本批按派单的"没有真判定源的那一档宁可不出现"只撤**上游自己也禁用**的那一向，
+ * 其余保留（本仓的路径过滤是真判定源，按了确实改屏）。不同意这条取舍就整条撤，
+ * 撤的话 `nodeInScope` 一族与它的判据一并退回 —— 这点写进报告 §6 交给主代理判。
+ */
+export function hierarchyScopeSupport(kind: HierarchyViewKind, direction: HierarchyViewDirection): HierarchyScopeSupport {
+  if (kind === 'type' && direction === 'supertypes') return SUPERTYPES_UNSUPPORTED
+  return {
+    supported: true,
+    tiers: SUPPORTED_TIERS,
+    reason: kind === 'call'
+      ? 'CallHierarchyBrowserBase.java:61 注册 ChangeScopeAction；两个方向都真吃范围'
+        + '（CallerMethodsTreeStructure.java:90 查询侧、CalleeMethodsTreeStructure.java:73,80 查询+逐节点）'
+      : 'TypeHierarchyBrowser.java:47-54 注册动作且 isEnabled() 只禁父类型；'
+        + 'SubtypesHierarchyTreeStructure.java:47 用 getSearchScope(myCurrentScopeType,…)',
+  }
+}
+
+/** 这一档在当前视图/方向上**能不能被用户选中**（不支持的视图里任何档都不该被写进状态）。 */
+export function isHierarchyScopeSelectable(scope: string, kind: HierarchyViewKind, direction: HierarchyViewDirection): boolean {
+  const support = hierarchyScopeSupport(kind, direction)
+  return support.tiers.some(entry => entry.id === scope)
+}
+

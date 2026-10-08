@@ -224,3 +224,63 @@ export function nonCodeRenameSummary(extra: NonCodeRenameEdits): string {
   if (extra.truncated) parts.push('已达扫描上限')
   return `${parts.join('，')}。`
 }
+
+/* ── 文件改名/移动的目标冲突（上游 `CopyFilesOrDirectoriesHandler` + `SkipOverwriteChoice`）── */
+
+/** 工作区清单里的一条（`bridge.ts:54` 的 `Entry` 用得上的那两列；本模块不 import bridge）。 */
+export interface WorkspaceEntryLike { path: string; kind?: string }
+
+export interface RenameTargetConflict {
+  /** 已被占用的那个路径（= 用户要改成的目标）。 */
+  path: string
+  /** 目标文件名（提示里印的那一段）。 */
+  name: string
+  /** 占位的是文件还是目录。 */
+  kind: 'file' | 'directory'
+}
+
+const baseNameOf = (path: string) => path.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? path
+
+/**
+ * 改名/移动的目标名是否已被同目录里的另一个条目占着。
+ *
+ * 上游那一档（`platform/lang-impl/src/com/intellij/refactoring/copy/CopyFilesOrDirectoriesHandler.java:543-571`）：
+ *   · `:545` `targetDirectory.findFile(name)` —— **按名字逐字比**（不做大小写归一，本仓同口径：
+ *     路径原样相等才算「同一个条目」）；
+ *   · `:546` 命中且不是它自己才算冲突（`existing != null && !existing.equals(file)`）
+ *     ⇒ 目标位站着**另一个**文件就是冲突；只有「改的就是自己那一份」（纯改大小写的改名）才放行；
+ *   · `:549` 冲突时弹 `SkipOverwriteChoice.askUser(...)`；
+ *   · `:560-563` 选「覆盖」(index 0) 就先把占位文件 `existing.delete()` 掉、走到 `:570` 返回 false 继续改名；
+ *     `:565-566` 否则（跳过/全部跳过/取消）直接 `return true`；
+ *   · 调用方 `RenameProcessor.java:232-233` 问 `checkFileExist`，为 true 时 `:234` `iterator.remove()`
+ *     + `:235` `continue` —— **这个条目从改名集合里去掉**，什么都不会发生；
+ *   · `SkipOverwriteChoice.java:50` 关闭对话框（`selection < 0`）也是 `SKIP`。
+ *
+ * 本仓没有那张四选一（弹层宿主在 `src/App.vue`，本片禁改），所以落的是上游**「跳过」/取消**那一支：
+ * 返回冲突、调用方不改名也不写引用编辑 ⇒ 与「取消不产生副作用」同一口径。
+ * 「覆盖」那一档要做就得连对话框一起做；订正留痕：这里原先登记的
+ * `docs/wiring-requests-2026-10-06-refactor1.md` R2 本仓**没有**那份文档，请求改记在
+ * `docs/wiring-requests-2026-10-06-refactorfix.md` R3（内容同一件事：四选一弹层宿主）。
+ */
+export function renameTargetConflict(
+  from: string,
+  to: string,
+  entries: readonly WorkspaceEntryLike[],
+): RenameTargetConflict | null {
+  if (!from || !to || from === to) return null
+  const hit = entries.find(entry => entry.path === to && entry.path !== from)
+  if (!hit) return null
+  return { path: hit.path, name: baseNameOf(hit.path), kind: hit.kind === 'directory' ? 'directory' : 'file' }
+}
+
+/**
+ * 冲突提示（文案是本仓自拟的 —— 上游那一句在四选一的对话框里：
+ * `RefactoringBundle.properties:492` `dialog.message.file.already.exists.in.directory`
+ * = `File ''{0}'' already exists in directory ''{1}''`，zh 语言包不在社区树里 ⇒ **中文措辞无法核实**；
+ * 这里只把同一件事（谁占了位、什么都没发生）说清，并给出下一步）。
+ */
+export function renameTargetConflictMessage(conflict: RenameTargetConflict, from: string): string {
+  const what = conflict.kind === 'directory' ? '同名的文件夹' : '同名文件'
+  return `重命名未执行：${baseNameOf(from)} 的目标位置已经有${what}「${conflict.name}」。` +
+    '改名与引用更新都没有落盘；要先删除或挪走占位的那个条目，或换一个名字。'
+}

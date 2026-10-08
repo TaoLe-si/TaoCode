@@ -11,11 +11,14 @@
 import { computed, nextTick, ref } from 'vue'
 import { importFoldState } from './editorFoldingState.ts'
 import { restoreCodeVisionSettings } from './codeLensSettings.ts'
+// 快速文档两档的读盘点（键名 `showQuickDocOnMouseHover` / `autoUpdateDocumentation`）。
+import { docHoverPolicyFromSettings } from './docHoverPolicy.ts'
 import { cloneProgress, defaultGeneralSettings, defaultProjectSettings, isDesktop, normalizeEditorSettings, request,
          type AppState, type Entry, type GeneralSettingsState, type PluginList, type ProjectForm, type ProjectSettings, type Workspace } from './bridge.ts'
 import type { SyntheticNode } from './components/FileTree.vue'
 import { availableJdks } from './buildHost.ts'
 import { externalLibraryEntries } from './externalLibraries.ts'
+import { fileIconFor, registerFileIconProvider } from './ideViewExtensionPoints.ts'
 import { JAVA_SDK_TYPE, SdkTable, createSdk } from './rootsSdkTable.ts'
 import { errorMessage } from './errors.ts'
 import { normalizeSettingsShape } from './settingsInspector.ts'
@@ -27,9 +30,14 @@ import { isProjectTrusted, mergeTrustEntries, needsTrustPrompt, rememberSessionT
 import { installExternalLinkGate, linkDialogIsMounted, openExternalUrl, type ExternalLinkPromptRequest } from './externalLinkLauncher.ts'
 import type { AppInfo } from './helpActions.ts'
 import { EnvironmentKeyRegistry, createHeadlessEnvironmentService } from './environmentKeys.ts'
+import { environmentKeyProvidersFromExtensions } from './environmentKeyProviders.ts'
 import { checkRequiredEnvironmentKeysActivity, registerStartupActivity, resetStartupProgress,
          runStartupActivities, type StartupActivityContext } from './startupActivities.ts'
 import { registerPreloadingActivity, runPreloadingActivities } from './preloadingActivities.ts'
+import { importRunAnythingRecentDirectories } from './runAnythingRecentDirectories.ts'
+import { setSystemDateTimeFormats } from './dateTimeFormat.ts'
+// 低层打开闸门（上游 `LowLevelProjectOpenProcessor`）：`openWorkspace` 发请求前先判一条路径能不能开。
+import { projectOpenDecision } from './projectOpenCheck.ts'
 
 /** 未保存修改的离开选择（IDEA `SaveDocumentsChoice`）。宿主也用它标注提示框，所以导出。 */
 export type LeaveChoice = 'save' | 'discard' | 'cancel'
@@ -62,6 +70,7 @@ export interface WorkspaceLifecycleDeps {
   navForward: any
   treeVersion: any
   places: any
+  changePlaces: any
   projectSettings: any
   bookmarks: any
   runConfigName: any
@@ -82,10 +91,31 @@ export interface WorkspaceLifecycleDeps {
   openFile: (path: string, internal?: boolean) => unknown
 }
 
+// ── `com.intellij.fileIconProvider`（上游 `Core.analyzer.xml:31`）的 bundled 两支 ──────
+// 外部库与临时文件这两个合成根（上游对应 `PsiBasedFileIconProvider`（`lang.impl.xml:1155`）与
+// `ScratchFileServiceImpl$FilePresentation`（`:911`）——本仓没有 `Icon`，给一个图标名串）。
+// 第三方按同一 id 挂的 provider 优先级更高（`fileIconFor` 取第一个非空者），于是「原版插件给某个文件
+// 换图标」在本仓有落点。合成的两个 `\u0000` 前缀路径不落到磁盘，只在这张表里。
+//
+// **为什么登记在模块加载时、而不是 `createWorkspaceLifecycle()` 体内**：bundled 贡献必须与宿主
+// 的装配解耦 —— 与 `src/customFoldingProviders.ts` / `src/environmentKeyProviders.ts` 同一纪律
+// （`extensionPoints.ts` 的注释里逐条登记着「在模块加载时挂成 bundled 贡献」）。原先这两行落在工厂
+// 体内（本文件的工厂体不缩进，看不出来），于是**只有真正起过宿主**的进程里才有这两支 —— 判据
+// `tests/ep-component-mount.test.mjs` 的「bundled 外部库图标 provider 仍在」因此长期是红的，
+// 而真机表现完全正常，属于「靠运行路径侥幸成立」的那一类。
+registerFileIconProvider({
+  id: 'LibrariesFileIconProvider',
+  getIcon: ({ path }) => (path === '\u0000libraries' ? 'libraries' : null),
+})
+registerFileIconProvider({
+  id: 'ScratchFileIconProvider',
+  getIcon: ({ path }) => (path === '\u0000scratches' ? 'scratches' : null),
+})
+
 export function createWorkspaceLifecycle(deps: WorkspaceLifecycleDeps) {
   const { notify, isDesktop, recentProjects, editorSettings, generalSettings, gitAvailable, defaultParent, appError,
           loading, pluginList, busy, working, leavePrompt, allTabs, save, resetLsp, resetHierarchy, workspace,
-          workspaceEpoch, closeAllPanes, navBack, navForward, treeVersion, places, projectSettings, bookmarks,
+          workspaceEpoch, closeAllPanes, navBack, navForward, treeVersion, places, changePlaces, projectSettings, bookmarks,
           runConfigName, selectRunConfig, useProjectSettings, offerSessionRestore, menu, palette, notice, binaryView,
           projectError, projectForm, projectMode, projectBusy, cancelling, openFile } = deps
 // 受信任项目（IDEA `TrustedProjects` + `TrustedPaths`，落点见 src/trustedProjects.ts）：
@@ -212,6 +242,7 @@ installExternalLinkGate({
 })
 async function refreshAppState() {
   const state = await request<AppState>('app.state')
+  setSystemDateTimeFormats(state.systemDateTimeFormats)
   recentProjects.value = state.recentProjects
   // 老版本把「不显示面包屑」编码进 breadcrumbsPlacement（三值），源码里位置只有上下两个值；
   // 在读盘这一处迁移回 showBreadcrumbs + placement，避免旧值在下次保存时被原生校验拒绝。
@@ -226,6 +257,18 @@ async function refreshAppState() {
     enabledGroups: editorSettings.value.codeVisionEnabledGroups,
     codeVisionVisibleEntries: editorSettings.value.codeVisionVisibleEntries,
   })
+  // 快速文档那两档同样在读盘这一拍折回运行时真值（`src/docHoverPolicy.ts` 的 `docHoverPolicy` 单例
+  // = 上游 `EditorSettingsExternalizable` 那份应用级单例的等价物，两个消费方直接读它：
+  // 「在鼠标移动时显示」→ `src/docHoverContent.ts:162` 的 `shouldShowDocOnHover()`；
+  // 「选区更改时自动刷新文档」→ `src/quickDocHost.ts:232` 的 `shouldAutoUpdateDoc()`）。
+  // 为什么必须在这里，而不是等设置页打开：这两把键**早就登记在** `EditorSettings` 与
+  // `native/settings_schema.cpp:419` 的默认值表里（旧存档缺键由原生逐键补默认，不按字段数量判损坏），
+  // 但读链以前**断在这里** —— 磁盘值从来没人灌进那张运行时表，于是"存得下、读不回"：
+  // 用户在弹层齿轮上关掉自动更新（或手改 projects.json）之后，运行时永远按出厂的"开"走。
+  // 订正留痕（2026-10-06 codevision2）：`docHoverPolicy.ts:50-52` 原来写「登记与否不影响本模块 …
+  // 登记请求在 docs/wiring-requests-2026-10-06-bucket3.md 的 S1」—— 键其实早就登记了（S1 已落地），
+  // 缺的一直是这一行调用。
+  docHoverPolicyFromSettings(editorSettings.value)
   // 与 editorSettings 同一处收口：旧版本留下的未知键、手改坏的类型不进内存（见 src/settingsInspector.ts）。
   generalSettings.value = normalizeSettingsShape(defaultGeneralSettings, state.general).value
   gitAvailable.value = state.gitAvailable
@@ -283,7 +326,7 @@ function answerLeave(choice: LeaveChoice) {
   leavePrompt.value = null
   prompt?.resolve(choice)
 }
-async function activateWorkspace(result: Workspace) {
+async function activateWorkspace(result: Workspace, formatOnSaveFallback = editorSettings.value.formatOnSave) {
   resetLsp()
   resetHierarchy()
   resetStartupProgress()
@@ -294,13 +337,26 @@ async function activateWorkspace(result: Workspace) {
   navForward.value = []
   treeVersion.value++
   places.value = []
+  changePlaces.value = []
+  // 最近目录缓存跟着项目走（上游那份是项目级服务，`RunAnythingContextRecentDirectoryCache.kt:13-14`）：
+  // 换项目那一刻先清空，读回来的那份再灌进去 —— 中间失败（下面那个 try 报错）也不会把上一个项目的目录串过来。
+  importRunAnythingRecentDirectories(undefined, '')
   useProjectSettings(structuredClone(defaultProjectSettings))
   try {
-    const loaded = await request<ProjectSettings>('project.settings.get')
+    let loaded = await request<ProjectSettings>('project.settings.get')
+    if (loaded.formatOnSave === undefined) {
+      const migrated = await request<{ settings: ProjectSettings }>('project.settings.update', {
+        formatOnSave: formatOnSaveFallback,
+      })
+      loaded = migrated.settings
+    }
     useProjectSettings(loaded)
     // 折叠状态跟着项目走（上游存在项目的 workspace 文件里）：读回来的那份灌进会话内存档，
     // 没有就清空（换项目时不能把上一个项目的折叠状态带过来）。
     importFoldState(loaded?.foldingState)
+    // Run Anything「最近目录」同一处收口：键缺 = 老存档 = 空表（补默认，不判损坏），
+    // 第二个实参是上游开目录选择器时给的起始目录（`RunAnythingChooseContextAction.kt:138` 的 `guessProjectDir()`）。
+    importRunAnythingRecentDirectories(loaded, result.root)
     await refreshAppState()
     selectRunConfig()
   } catch (error) { notify(`项目已打开，但读取设置失败：${errorMessage(error)}`, true) }
@@ -320,6 +376,12 @@ async function activateWorkspace(result: Workspace) {
 // 磁盘上存在的 jar，再加一行项目 SDK —— 口径与为什么这么排都写在那儿。scratches 仍然是
 // 真实的 scratch/ 文件夹。
 const syntheticNodes = ref<SyntheticNode[]>([])
+/** 两支 bundled `fileIconProvider`（外部库 / scratch 合成根）的登记在**模块加载时**，见文件里那段注释。 */
+/** 合成根那一行的图标：先问 EP（第三方可能换掉），认不出两个合成图标名就退回内建那一档。 */
+function syntheticIcon(path: string, fallback: 'libraries' | 'scratches'): 'libraries' | 'scratches' {
+  const icon = fileIconFor({ path, isDirectory: true })
+  return icon === 'libraries' || icon === 'scratches' ? icon : fallback
+}
 /**
  * 本会话的 SDK 表（`ProjectJdkTable` 的等价物，`src/rootsSdkTable.ts`）。
  * 上游那张表是进程级单例（`ProjectJdkTable.java:28-30`），本仓跟着工作区会话重建 ——
@@ -329,7 +391,7 @@ const sdkTable = new SdkTable()
 async function refreshSyntheticNodes() {
   // 容器节点本身**无条件存在**，即使一行子节点都没有（上游 `getChildren()` 返空列表就完事，
   // 没有空状态占位；`ProjectViewPaneTest.kt:47-56` 就是这么断言的）。
-  const libraries: SyntheticNode = { path: '\u0000libraries', label: '外部库', icon: 'libraries', entries: [] }
+  const libraries: SyntheticNode = { path: '\u0000libraries', label: '外部库', icon: syntheticIcon('\u0000libraries', 'libraries'), entries: [] }
   try {
     const [files, jdk] = await Promise.all([
       request<{ files: string[] }>('workspace.files').then(result => result.files, () => [] as string[]),
@@ -344,7 +406,7 @@ async function refreshSyntheticNodes() {
   const nodes: SyntheticNode[] = [libraries]
   try {
     const scratches = await request<Entry[]>('workspace.list', { path: 'scratch' })
-    nodes.push({ path: '\u0000scratches', label: '临时文件与控制台', icon: 'scratches', entries: scratches.map(item => ({ ...item, path: item.path })) })
+    nodes.push({ path: '\u0000scratches', label: '临时文件与控制台', icon: syntheticIcon('\u0000scratches', 'scratches'), entries: scratches.map(item => ({ ...item, path: item.path })) })
   } catch { /* scratch/ may not exist yet */ }
   syntheticNodes.value = nodes
 }
@@ -378,6 +440,13 @@ async function projectJdkForTree(): Promise<{ name: string; version: string; hom
 async function openWorkspace(path?: string) {
   menu.value = null
   if (working.value || !await confirmLeave('切换项目')) return
+  // 低层打开闸门（上游 `LowLevelProjectOpenProcessor.beforeProjectOpened`，规则在
+  // `src/projectOpenCheck.ts`）：给定了路径就先判它是不是一条可打开的项目目录 ——
+  // `cancel` 时不发请求，把原因直接说给用户（此前是宿主拒绝后回一句原始错误）。
+  if (path) {
+    const decision = projectOpenDecision({ path })
+    if (decision.result === 'cancel') { notify(decision.message ?? '这个路径不能作为项目打开。', true); return }
+  }
   busy.value = true
   try {
     // The folder picker opens in the configured default project directory when there is one
@@ -388,7 +457,7 @@ async function openWorkspace(path?: string) {
     // 否则欢迎页背后挂着一个用户拒绝了的项目（上游的 CANCEL 也是"不打开/不链接"）。
     if (!await confirmTrust(result)) { await request('workspace.close'); await refreshAppState(); return }
     await activateWorkspace(result)
-    notify(isDesktop ? `已打开 ${result.root}` : '已打开内存示例；保存不会写入磁盘。')
+    notify(isDesktop ? `已打开 ${result.root}` : `已打开 ${result.name}`)
   } catch (error) { appError.value = errorMessage(error); notify(errorMessage(error), true) }
   finally { busy.value = false }
 }
@@ -409,9 +478,11 @@ async function closeWorkspace() {
     workspace.value = null
     closeAllPanes()
     importFoldState(undefined)   // 关项目：折叠状态跟着项目走，别带进下一个
+    importRunAnythingRecentDirectories(undefined)   // 同上：Run Anything 的最近目录也是项目级那一份
     projectSettings.value = structuredClone(defaultProjectSettings)
     bookmarks.value = []
     places.value = []
+    changePlaces.value = []
     runConfigName.value = ''
     binaryView.value = null
     palette.value = false
@@ -481,7 +552,7 @@ async function submitProject() {
     // 上游 `CreateProjectTest` 断言新建项目默认就是受信任的 —— 直接记进清单。
     if (mode === 'clone' && !await confirmTrust(result)) { await request('workspace.close'); await refreshAppState(); return }
     if (mode === 'create' && isDesktop) await saveTrustedPaths(rememberTrust(trustEntries(), result.root, true))
-    await activateWorkspace(result)
+    await activateWorkspace(result, mode === 'create' ? false : editorSettings.value.formatOnSave)
     projectMode.value = null
     notify(`${mode === 'create' ? '已创建' : '已克隆'}并打开 ${result.root}`)
     if (mode === 'create' && form.template === 'java') await openFile('src/Main.java', true)
@@ -507,11 +578,17 @@ async function cancelProject() {
 //   · `postStartup`：合成节点（外部库/临时文件）与会话恢复询问 —— 原先是在 `activateWorkspace`
 //     里直接调的两行，现在按启动序列跑（顺序、每个活动一次、失败互不打断）。
 const environmentKeys = new EnvironmentKeyRegistry()
+// 提供方来自 EP（上游 `PluginEnvironmentKeyProvider`/`JvmEnvironmentKeyProvider` 按 bundled 贡献挂在
+// `com.intellij.environmentKeyProvider` 上，见 src/environmentKeyProviders.ts）；第三方按同一 EP id 挂的
+// 提供方也在这里被收编 ⇒ 登记在册之后 headless 存根与 `isRegistered` 才看得见那些键。
+// 内置两条都没有必需键 ⇒ 不改变下面的缺失检查行为。
+const environmentKeyProviders = environmentKeyProvidersFromExtensions()
+for (const provider of environmentKeyProviders) environmentKeys.register(provider)
 registerStartupActivity(checkRequiredEnvironmentKeysActivity({
   headless: () => !isDesktop,
   service: createHeadlessEnvironmentService({ registry: environmentKeys,
     warn: message => { console.warn(`[environment] ${message}`) } }),
-  providers: [],   // 本仓还没有键提供方（EnvironmentKeyProvider EP）：真实工程里由插件/宿主贡献
+  providers: environmentKeyProviders,   // EP 上的全部提供方（bundled 两条 + 第三方贡献）
   report: message => { notify(`缺少必需的环境键：\n${message}`, true) },
 }))
 registerStartupActivity({ id: 'taocode.refreshSyntheticNodes', phase: 'postStartup', run: () => refreshSyntheticNodes() })

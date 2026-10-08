@@ -2,9 +2,11 @@ import { computed, nextTick, reactive, ref } from 'vue'
 import { request, type Entry } from './bridge.ts'
 import { sortProjectEntries, type ProjectTreeSortSettings } from './projectTreeSort.ts'
 import { DEFAULT_NESTING_RULES, nestSiblings, type NestingRule } from './projectTreeNesting.ts'
+import { modifyProjectTreeChildren, type TreeStructureProviderNode } from './ideViewExtensionPoints.ts'
 import { MAX_COMPACT_CHAIN, compactName, singleDirectoryChild } from './projectTreeCompactDirs.ts'
+import { fullExpandTargets, fullyExpandPaths, isTreeExpandable, treeNodeActionTarget, type TreeNodeAction } from './treeNodeActions.ts'
 
-export interface SyntheticNode { path: string; label: string; icon: 'libraries' | 'scratches'; entries: Entry[] }
+export interface SyntheticNode { path: string; label: string; icon: 'libraries' | 'scratches' | 'plugin'; entries: Entry[] }
 export interface ProjectTreeRow { entry: Entry; level: number; parent?: string; synthetic?: SyntheticNode; nested?: boolean }
 
 // One model per mounted project view, never per directory or process-wide.
@@ -43,9 +45,53 @@ export function createProjectTreeModel(options: {
     ...options.synthetic().map(syntheticEntry),
   ]
   const synthetic = (path: string) => options.synthetic().find(node => node.path === path)
-  const descendants = (path: string) => project(path === '' && hasProjectRoot() ? options.entries() : synthetic(path)?.entries ?? children.get(path) ?? [])
+  /**
+   * 这一行挂哪个合成来源。`options.synthetic()` 里那份是内建的两个合成根；EP 的
+   * `TreeStructureProvider` 还能往任意一层插**新的**合成容器（上游 `NestingTreeNode`
+   * 那种带子节点的合成行），它们不在内建表里，所以这里记下 provider 给过的记号，
+   * 行渲染（图标 / 标签 / 子列表）才认得出来。
+   */
+  const providerSynthetics = new Map<string, SyntheticNode>()
+  const syntheticSourceOf = (entry: Entry): SyntheticNode | undefined => {
+    const known = synthetic(entry.path)
+    if (known) return known
+    return providerSynthetics.get(entry.path)
+  }
+  const descendants = (path: string) => project(path === '' && hasProjectRoot() ? options.entries() : syntheticSourceOf({ path, name: '', kind: 'directory' })?.entries ?? children.get(path) ?? [])
   const nestingRules = () => options.nestingRules?.() ?? DEFAULT_NESTING_RULES
-  const nest = (entries: Entry[]) => nestSiblings(entries, nestingRules())
+  /**
+   * 「先过 `com.intellij.treeStructureProvider` EP，再套内建的折叠」：上游 `TreeStructureProvider.modify`
+   * 就是在**显示之前**改这一层子节点（`TreeStructureProvider.java:42-47`；内建的
+   * `NestingTreeStructureProvider` 也走这条 EP，`lang.impl.xml:1548`）。本仓把内建折叠留在
+   * `nestSiblings` 里，把 EP 这一趟放在它**前面** —— 没有第三方 provider 时
+   * `modifyProjectTreeChildren` 原样返回入参（`Entry` → 可移植节点 → `Entry` 是恒等映射），
+   * 于是既有行为一个字节都不变；第三方 provider 可以过滤/重排这一层。
+   */
+  const toProviderNode = (entry: Entry): TreeStructureProviderNode =>
+    ({ id: entry.path, name: entry.name, isDirectory: entry.kind === 'directory', path: entry.path })
+  /**
+   * 把一个 EP 节点还原成 `Entry`。provider 产出的**新合成容器**（带 `synthetic` 记号）在还原时
+   * 记进 `providerSynthetics`，行渲染与「点开取子列表」才能认出这一档 —— 这正是 item 1 的
+   * 最后一公里：光跑 EP 而不认它产出的行，第三方挂上来的子树画不出来。
+   */
+  const fromProviderNode = (node: TreeStructureProviderNode): Entry => {
+    if (node.synthetic && !synthetic(node.path)) {
+      providerSynthetics.set(node.path, { path: node.path, label: node.name, icon: 'plugin', entries: [] })
+    }
+    return { name: node.name, path: node.path, kind: node.isDirectory ? 'directory' : 'file' }
+  }
+  const nest = (entries: Entry[]) => {
+    // `modifyProjectTreeChildren` 的第三个参数是上游 `ViewSettings` 的可移植子集：把本仓当前
+    // 折叠口径（扁平化包 / 显示成员）如实透给 provider，第三方才能按设置改这一层
+    // （此前省略 ⇒ provider 永远看到空对象，条件式 provider 与上游行为不一致）。
+    // 这两个键不在 `ProjectTreeSortSettings` 的类型面上（那是纯排序设置），所以按可移植形状取。
+    const settings = options.sortSettings?.() as Record<string, unknown> | undefined
+    const providers = modifyProjectTreeChildren(null, entries.map(toProviderNode), {
+      flattenPackages: settings?.flattenPackages as boolean | undefined,
+      showMembers: settings?.showMembers as boolean | undefined,
+    })
+    return nestSiblings(providers.map(fromProviderNode), nestingRules())
+  }
   /**
    * 「压缩目录」（`ProjectView.CompactDirectories`）：只有一个子目录的目录与那个子目录并成一行 ——
    * 上游那条 while 在 `ScopeViewTreeModel.java:595-608`，`getSingleDirectory` 在 `:657-661`，
@@ -108,7 +154,10 @@ export function createProjectTreeModel(options: {
         if (seen.has(entry.path)) continue
         seen.add(entry.path)
         const children = nestedMap.get(raw.path)
-        result.push({ entry, level, parent, synthetic: synthetic(entry.path), nested })
+        // 行挂哪个合成来源：先按路径查，provider 新加的节点按它自己的 `synthetic` 记号现造一个。
+        // 这一条就是 item 1 的最后一公里 —— 光跑 EP 而不认它产出的行，第三方挂上来的子树画不出来。
+        const syntheticSource = syntheticSourceOf(entry)
+        result.push({ entry, level, parent, synthetic: syntheticSource, nested })
         if (expanded.has(entry.path)) visit(children ?? descendants(entry.path), level + 1, entry.path, children !== undefined)
       }
     }
@@ -162,7 +211,7 @@ export function createProjectTreeModel(options: {
   async function fetch(entry: Entry, token: number): Promise<Entry[] | undefined> {
     if (!valid(token) || entry.kind !== 'directory') return
     if (entry.path === '' && hasProjectRoot()) return options.entries()
-    const node = synthetic(entry.path)
+    const node = syntheticSourceOf(entry)
     if (node) return node.entries
     // Pseudo library entries have no filesystem capability.
     if (entry.path.startsWith('\u0000')) return []
@@ -231,6 +280,23 @@ export function createProjectTreeModel(options: {
     if (expanded.has(entry.path)) collapse(entry.path)
     else expanded.add(entry.path)
   }
+  /**
+   * 「全部折叠」。上游这条链是（pvtree5 逐行复开过的坐标）：
+   *   · `platform/platform-api/src/com/intellij/ide/projectView/...` 之外，项目视图的 expander
+   *     在 `platform/lang-impl/src/com/intellij/ide/projectView/impl/AbstractProjectViewPane.java:803-806`
+   *     **把 strict 覆写成 `false`**（`super.collapseAll(tree, false, keepSelectionLevel)`）——
+   *     泛用的 `DefaultTreeExpander.kt:49-51` 给的是 `collapseAll(tree, 1)`，`:53-55` 再传 strict=**true**，
+   *     所以「顶层留不留开」不是 DefaultTreeExpander 定的，是这一处覆写定的；
+   *   · `platform/platform-api/src/com/intellij/util/ui/tree/TreeUtil.java:892-925`：
+   *     `:889` 的参数文档就写着「use false if a single top level node should not be collapsed」，
+   *     `:911` 的 `if (!strict && row == 0) break` 就是那一格留开的来源（自底向上扫，走到第 0 行时
+   *     strict 仍是 false 就直接跳过不折）；`:899-904` 的 `minCount`（根不可见时 +1）决定「第 0 行」
+   *     在模型里是项目根还是顶层条目；`:907` 的 prohibited 保护的是**它自己与它的祖先链**
+   *     （`TreePath.isDescendant(a)` 判的是「a 是不是这条路径的子孙」，不是反过来），
+   *     `:916` 那一支在**有多个顶层根**时把 strict 翻成 true ⇒ 第 0 行也一起折掉。
+   * ⇒ 单项目根时折叠完看到的是项目名下面那一排（各自收着），而不是整棵树只剩项目名一行。
+   * 没有选中行时（`:897` 取不到 leadSelectionPath ⇒ `:922` 的 `return`）不动选择。
+   */
   function collapseAll() {
     const selectedIndex = rows.value.findIndex(row => row.entry.path === selected.value)
     let ancestor = selectedIndex
@@ -238,7 +304,11 @@ export function createProjectTreeModel(options: {
     const path = rows.value[ancestor]?.entry.path
     cancelPending()
     expanded.clear()
-    if (path !== undefined) { select(path); void focus(path) }
+    if (path !== undefined) {
+      // 上游那条 prohibited：这一行不进折叠表，所以它的子行照样列得出来。
+      expanded.add(path)
+      select(path); void focus(path)
+    }
   }
   /**
    * 批量展开（`expandAll` / `expandRecursively`）共用的一趟递归。开的是**任何有子行的行**，
@@ -353,7 +423,10 @@ export function createProjectTreeModel(options: {
     const wantedSelection = new Set(selection)
     const wantedFocus = selected.value
     const wantedAnchor = anchor
-    const hadFocus = elements.get(wantedFocus) === document.activeElement
+    // `document` 在浏览器里永远存在，但这个模型也被判据在 Node 里直接跑（不挂 DOM）——
+    // 直接摸 `document.activeElement` 会让整条 refresh 链在无 DOM 环境抛 ReferenceError。
+    // 焦点这件事只在真壳里有意义，所以判一下再问。
+    const hadFocus = typeof document !== 'undefined' && elements.get(wantedFocus) === document.activeElement
     cancelPending()
     const token = epoch
     const revision = selectionRevision
@@ -399,11 +472,40 @@ export function createProjectTreeModel(options: {
     if (hasProjectRoot()) expanded.add('')
     children.clear()
     compacted.clear()
-    selected.value = ''
+    // provider 挂的合成节点也跟着这一份树走：换工作区后旧 provider 的行不该留着。
+    providerSynthetics.clear()
     selection.clear()
     anchor = undefined
     elements.clear()
   }
   function dispose() { reset(); disposed = true }
-  return { rows, expanded, selected, selection, loading, children, elements, tabStop, select, onFocus, focus, toggle, collapseAll, expandAll, expandRecursively, getSelectedEntries, canExpandRecursively, reveal, navigate, refresh, reset, dispose, hasNested }
+
+  /**
+   * 树节点的展开/折叠动作（上游 `ide/actions/tree` 那一族，`$default.xml:27-35` 的三个裸小键盘键）。
+   * 规则与上限在 `src/treeNodeActions.ts`（纯函数 + 单测）；这里只把结果落进 `expanded`。
+   * `expand`/`collapse` 作用在**当前选中行**上（上游 `TreeExpandCollapse` 取 lead selection path）。
+   */
+  async function runTreeNodeAction(action: TreeNodeAction) {
+    const rowList = rows.value.map(row => ({ path: row.entry.path, kind: row.entry.kind, hasChildren: hasNested(row.entry.path) }))
+    const selectedList = [...selection]
+    if (action === 'ExpandTreeNode') {
+      const target = treeNodeActionTarget(selectedList, rowList)
+      if (!target) return
+      const entry = rows.value.find(row => row.entry.path === target)?.entry
+      if (entry && isTreeExpandable({ path: entry.path, kind: entry.kind, hasChildren: hasNested(entry.path) })) await expand(entry)
+      return
+    }
+    if (action === 'CollapseTreeNode') {
+      const target = treeNodeActionTarget(selectedList, rowList)
+      if (target && expanded.has(target)) collapse(target)
+      return
+    }
+    // FullyExpandTreeNode：全选中路径（无选中取根 = 第一行），按 (300, 10) 上限逐层开。
+    const targets = fullExpandTargets(selectedList, rowList)
+    const parents = new Map<string, string>()
+    for (const row of rows.value) parents.set(row.entry.path, row.parent ?? '')
+    const paths = fullyExpandPaths(targets, rowList.map(row => ({ ...row, parent: parents.get(row.path) ?? '' })))
+    for (const path of paths) expanded.add(path)
+  }
+  return { rows, expanded, selected, selection, loading, children, elements, tabStop, select, onFocus, focus, toggle, collapseAll, expandAll, expandRecursively, getSelectedEntries, canExpandRecursively, reveal, navigate, refresh, reset, dispose, hasNested, runTreeNodeAction }
 }

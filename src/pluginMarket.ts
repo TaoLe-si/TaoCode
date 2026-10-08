@@ -51,6 +51,13 @@ export interface MarketplacePlugin {
   releaseDate?: number
   size?: string
   changeNotes?: string
+  /**
+   * 清单里声明的签名（`PluginSignatureVerifier` 的输入面）。本仓没有密码学验签通道
+   * （见 `src/pluginSignature.ts`），所以这两个字段只做**形状校验**：有 `signature` 就用它，
+   * 否则认 64 位十六进制的 `sha256` 摘要。界面据此显示「签名 未校验 / 未签名」。
+   */
+  signature?: string
+  sha256?: string
 }
 
 export interface MarketplaceCatalog {
@@ -177,6 +184,8 @@ export function parseMarketplaceCatalog(text: string, fallbackName = '本地仓�
       releaseDate: asNumber(record.releaseDate),
       size: asText(record.size) || undefined,
       changeNotes: asText(record.changeNotes) || undefined,
+      signature: asText(record.signature) || undefined,
+      sha256: asText(record.sha256) || undefined,
     })
   })
   return { catalog: { name, plugins }, errors }

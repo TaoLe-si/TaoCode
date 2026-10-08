@@ -142,3 +142,17 @@ const JAR_ARGS: RunConfigFieldDef = {
   菜单里显示的 keys 与实际绑定**一致**（不是假文案），所以本轮按「已留痕偏差」保留。
   若主代理要照上游收干净，需要同时改 `src/keymap.ts:267-268` 与 `src/menus/buildMenu.ts:47`（两个都是保留文件），
   并决定是否给「重新构建项目」配一个新键。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-Runcfg-1 已接线**：`src/App.vue` 的 `<TestRunnerPanel>` 已带 `@jump`（见 bucket11c / bucketW）。
+- **W-Runcfg-2 / runcfg2 R1 / runcfg3 J1（JAR 类型五处同改）** —— `src/settingsModel.ts`（保留）+ `src/runConfigEditors.ts` / `runConfigTree.ts`（本 lane）。复核 `RunConfig['type']` 已含 `'jar'`（`:31`）、`runConfigEditors.ts:135` 已有 jar 条目、`runConfigTree.ts` 走家族表 ⇒ 五处已同改。
+- **W-Runcfg-3 / R4** —— 判词（`scripts/verdict_table.py`），非本 lane。
+- **W-Runcfg-4 / R3（重新构建键位）** —— 保留文件，非本 lane。
+
+结论：W-Runcfg-1 / W-Runcfg-2 已接线；其余非本 lane。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W-Runcfg-1 / W-Runcfg-2 已接线；其余非本 lane。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

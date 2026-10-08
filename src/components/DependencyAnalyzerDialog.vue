@@ -67,7 +67,7 @@ const emptyText = computed(() => warningsOnly.value ? '没有带告警的依赖�
 <template>
   <div class="analyzer-backdrop" role="dialog" aria-modal="true" aria-label="依赖分析">
     <div class="analyzer">
-      <header>
+      <header class="analyzer-header">
         <strong>依赖分析 · {{ projectLabel }}</strong>
         <span class="analyzer-summary">{{ summary.groups }} 个坐标 / {{ summary.dependencies }} 条出现<template v-if="summary.conflicts"> · {{ summary.conflicts }} 个版本冲突</template><template v-if="summary.unresolved"> · {{ summary.unresolved }} 个无法解析</template></span>
         <button class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.control" /></button>
@@ -118,20 +118,20 @@ const emptyText = computed(() => warningsOnly.value ? '没有带告警的依赖�
 </template>
 
 <style scoped>
-.analyzer-backdrop { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.35); }
-.analyzer { display:flex; flex-direction:column; width:min(920px,92vw); height:min(620px,86vh); background:var(--panel); border:1px solid var(--line); box-shadow:var(--popup-shadow); }
-header { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2); border-bottom:1px solid var(--line); font-size:12px; }
+.analyzer-backdrop { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; background:var(--backdrop); }
+.analyzer { display:flex; flex-direction:column; width:min(920px,92vw); height:min(620px,86vh); background:var(--popup-background); color:var(--popup-foreground); border:var(--popup-border); border-radius:var(--popup-radius); box-shadow:var(--popup-shadow); }
+.analyzer-header { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2); border-bottom:1px solid var(--line); font-size:12px; }
 .analyzer-summary { color:var(--muted); font-size:11px; }
-header .icon-button { margin-left:auto; }
+.analyzer-header .icon-button { margin-left:auto; }
 .analyzer-toolbar { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2); font-size:11px; }
 .analyzer-toolbar input[type="search"] { flex:1; min-width:80px; background:var(--editor); color:var(--text); border:1px solid var(--line); }
 .analyzer-toolbar label { display:flex; align-items:center; gap:3px; white-space:nowrap; color:var(--muted); }
-.analyzer-scopes { display:flex; flex-wrap:wrap; gap:4px; padding:0 var(--space-2) var(--space-2); }
+.analyzer-scopes { display:flex; flex-wrap:wrap; gap: var(--space-1); padding:0 var(--space-2) var(--space-2); }
 .scope-chip { border:1px solid var(--line); background:var(--editor); color:var(--text); font-size:10px; padding:1px 6px; cursor:pointer; }
 .scope-chip.off { color:var(--muted); text-decoration:line-through; }
 .analyzer-body { display:flex; flex:1; min-height:0; border-top:1px solid var(--line); }
 .analyzer-list { flex:1; min-width:0; margin:0; padding:2px; overflow:auto; list-style:none; font:11px/1.7 var(--font-mono); }
-.analyzer-list li { display:flex; align-items:center; gap:4px; padding:1px 4px; cursor:pointer; transition: background-color var(--dur-1) var(--ease); }
+.analyzer-list li { display:flex; align-items:center; gap: var(--space-1); padding: 1px var(--space-1); cursor:pointer; transition: background-color var(--dur-1) var(--ease); }
 .analyzer-list li:hover { background:var(--hover); }
 .analyzer-list li.selected { background:var(--selected); }
 .analyzer-list li.warning .name { color:var(--warning, var(--error)); }

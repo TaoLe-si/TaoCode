@@ -39,8 +39,8 @@ test('createStickyLines 出口的那一份也带着 navigateLine（接线时不�
   const settings = { value: { showStickyLines: true, stickyLinesLimit: 2 } }
   const outline = { value: OUTLINE }
   const { stickyLines } = createStickyLines({ editorSettings: settings, outline, currentLine: () => 8, language: () => 'java' })
-  assert.deepEqual(stickyLines.value.map(entry => entry.name), ['load', 'Inner'], '上限截断仍按最内层留')
-  assert.deepEqual(stickyLines.value.map(entry => entry.navigateLine), [2, 5])
+  assert.deepEqual(stickyLines.value.map(entry => entry.name), ['Config', 'load'], '上限截断按上游留最外两层（被裁的是最内的 Inner，`VisualStickyLines.kt:144-148` 排满即 break）')
+  assert.deepEqual(stickyLines.value.map(entry => entry.navigateLine), [0, 2])
 })
 
 test('落点留痕：模块头引了 StickyLine.kt 与 LSP 取数那两条（不然下次又被当成"IDEA 一般是…"）', () => {

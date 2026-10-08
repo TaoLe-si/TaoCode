@@ -33,6 +33,9 @@ Json shape_scopes(const Json& body);
 /** `setVariable` / `setExpression` 的回答：一条变量的新值（规范里没有 variables 数组）。 */
 Json shape_set_variable(const Json& body);
 
+/** `evaluate` -> {result, type?, reference, variablesReference, named, namedVariables?, indexedVariables?}。 */
+Json shape_evaluate(const Json& body);
+
 /** `variables` -> {variables}。 */
 Json shape_variables(const Json& body);
 

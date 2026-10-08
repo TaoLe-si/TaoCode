@@ -22,7 +22,7 @@
 // 本组件**只搬模板**，样式与状态仍留在 App.vue / 各自的模块里（class 名一个没改）。
 import BranchPopup from './BranchPopup.vue'
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { ChevronDown, Cog, Crosshair, Ellipsis, FileCode2, FolderOpen, GitBranch, Hammer, Play, Search, SlidersHorizontal, Square, Bug } from 'lucide-vue-next'
+import { ChevronDown, Crosshair, Ellipsis, FileCode2, FolderOpen, GitBranch, Hammer, Play, SlidersHorizontal, Square, X, Bug } from 'lucide-vue-next'
 import { request } from '../bridge'
 import {
   groupRunDashboardRows, readRunDashboardTypes, runDashboardPresentTypes, runDashboardRows, runDashboardSummary,
@@ -33,7 +33,10 @@ import {
   runConfigWidthAfterDrag, runToolbarSlotActionRows, visibleRunToolbarSlots, writeRunToolbarLayout,
   RUN_TOOLBAR_SLOT_LABELS, type RunToolbarLayout, type RunToolbarSlotActionId, type RunToolbarSlotActionRow, type RunToolbarSlotId,
 } from '../runToolbarSlots.ts'
-import { activeRunInstance, focusRunInstance, runInstanceList } from '../runInstances.ts'
+import {
+  activeRunInstance, focusRunInstance, markRunInstanceStopping, resolveStopActionTargets, runInstanceList, runInstanceRows,
+  stopActionState, stopChooserItems, stoppableCandidates, STOP_LABELS, type StopChooser,
+} from '../runInstances.ts'
 import {
   executionTargetPopupEntries, executionTargetsToolbarEntry, listExecutionTargets, readActiveExecutionTargetId,
   writeActiveExecutionTargetId, type ExecutionTargetPopupEntry,
@@ -41,6 +44,8 @@ import {
 import { availableJdks, type JdkInfo } from '../buildHost.ts'
 import { loadTargetEnvironments } from '../targetEnvironments.ts'
 import { iconSize } from '../uiIcons'
+// 右端两颗走 IDEA 原样图标（`AllIcons.Actions.Find` / `AllIcons.General.Settings`，见 toolWindowIcons.ts）。
+import { IdeaSearchIcon, IdeaSettingsIcon } from './icons/toolWindowIcons.ts'
 import { ACCESSIBLE_NAME_PREFIX } from '../filenameWidget'
 import { mainToolbarFocusHost, moveToolbarFocus, restoreFocusFromMainToolbar } from '../mainToolbarFocus.ts'
 
@@ -172,7 +177,11 @@ function pickDashboardInstance(id: number) {
   focusRunInstance(id)
   dashboardOpen.value = false
 }
+// 请求一发出就把这一格标成「正在结束」，与工具条那条停止走的是同一个记号（`runActions.ts:525`）。
+// 上游读的是 `ProcessHandler.isProcessTerminating()` 这个内存字段，本仓宿主只在进程**结束时**才回
+// 一条 `run.exit` ⇒ 不记这一笔，从仪表盘停的实例永远进不了 Kill process 那一档。
 async function stopDashboardInstance(id: number) {
+  markRunInstanceStopping(id)
   try { await request('run.stop', { instance: id }) } catch { /* 进程可能刚结束 */ }
 }
 onBeforeUnmount(() => { if (dashboardTimer !== undefined) clearInterval(dashboardTimer) })
@@ -269,13 +278,13 @@ const c = props.ctx
   <!-- 键盘：上游 `MainToolbarFocusSupport.install()`（`:44-48`）把 Esc 注册成工具栏上的自定义快捷键，
        并在 `installHeaderToolbarFocusTraversalPolicy`（`:216-224`）里把 ←/→ 加进遍历键。这里同一个位置。 -->
   <div class="topbar-toolbar" @keydown="onToolbarKeydown">
-    <div class="project-widget"><button class="header-widget" :aria-expanded="c.projectWidgetOpen" aria-haspopup="menu" :aria-label="`项目 ${c.workspace.name}`" :title="c.workspace.root" @click.stop="c.toggleProjectWidget"><FolderOpen :size="iconSize.rail" /><span class="project-widget-name">{{ c.workspace.name }}</span><ChevronDown :size="iconSize.dense" :class="{ 'project-widget-caret': true, open: c.projectWidgetOpen }" /></button><div v-if="c.projectWidgetOpen" class="project-widget-popup" role="menu" :aria-label="`项目 ${c.workspace.name}`"><input :value="c.projectWidgetQuery" class="project-widget-search" placeholder="搜索项目（名称或路径）" aria-label="搜索项目" @input="c.setProjectWidgetQuery(($event.target as HTMLInputElement).value)" @keydown.esc.stop="c.projectWidgetQuery ? c.setProjectWidgetQuery('') : c.closeProjectWidget()" /><template v-for="group in c.projectWidgetGroups" :key="group.label"><div class="project-widget-group" role="presentation">{{ group.label }}</div><button v-for="project in group.items" :key="`${group.label}:${project.path}`" class="menu-button project-widget-row" role="menuitem" :disabled="c.working || !project.available" :title="project.path" @click="c.pickProjectFromWidget(project)"><span class="menu-item-icon"><FolderOpen :size="iconSize.menu" /></span><span class="project-widget-details"><span class="project-widget-title">{{ project.name }}</span><span class="project-widget-path">{{ project.path }}</span><span v-if="c.branchOfProject(project.path)" class="project-widget-branch"><GitBranch :size="iconSize.inline" />{{ c.branchOfProject(project.path) }}</span></span></button></template><p v-if="!c.projectWidgetGroups.length" class="menu-empty">没有匹配的项目</p></div></div>
+    <div class="project-widget"><button class="header-widget" :aria-expanded="c.projectWidgetOpen" aria-haspopup="menu" :aria-label="`项目 ${c.workspace.name}`" :title="c.isDesktop ? c.workspace.root : undefined" @click.stop="c.toggleProjectWidget"><FolderOpen aria-hidden="true" :size="iconSize.rail" /><span class="project-widget-name">{{ c.workspace.name }}</span><ChevronDown aria-hidden="true" :size="iconSize.dense" :class="{ 'project-widget-caret': true, open: c.projectWidgetOpen }" /></button><div v-if="c.projectWidgetOpen" class="project-widget-popup" role="menu" :aria-label="`项目 ${c.workspace.name}`"><input :value="c.projectWidgetQuery" class="project-widget-search" placeholder="搜索项目（名称或路径）" aria-label="搜索项目" @input="c.setProjectWidgetQuery(($event.target as HTMLInputElement).value)" @keydown.esc.stop="c.projectWidgetQuery ? c.setProjectWidgetQuery('') : c.closeProjectWidget()" /><template v-for="group in c.projectWidgetGroups" :key="group.label"><div class="project-widget-group" role="presentation">{{ group.label }}</div><button v-for="project in group.items" :key="`${group.label}:${project.path}`" class="menu-button project-widget-row" role="menuitem" :disabled="c.working || !project.available" :title="c.isDesktop ? project.path : undefined" @click="c.pickProjectFromWidget(project)"><span class="menu-item-icon"><FolderOpen aria-hidden="true" :size="iconSize.menu" /></span><span class="project-widget-details"><span class="project-widget-title">{{ project.name }}</span><span v-if="c.isDesktop" class="project-widget-path">{{ project.path }}</span><span v-if="c.branchOfProject(project.path)" class="project-widget-branch"><GitBranch aria-hidden="true" :size="iconSize.inline" />{{ c.branchOfProject(project.path) }}</span></span></button></template><p v-if="!c.projectWidgetGroups.length" class="menu-empty">没有匹配的项目</p></div></div>
 
     <!-- IDEA 新 UI 的 `main.toolbar.git.Branches` widget（Git4Idea 挂在 `MainToolbarVCSGroup` 的
          anchor="first"，而该组在 `MainToolbarLeft` 里 —— 解析结果见 actionGroupStructure.txt:2479-2483）：
          点它打开**分支弹窗**（GitBranchesPopup），不是切到源代码管理工具窗口。 -->
     <div v-if="c.gitHead" class="branch-widget-anchor">
-      <button class="header-widget branch-widget" :aria-expanded="c.branchPopupOpen" aria-haspopup="dialog" :title="`当前分支 ${c.gitHead}（点击切换 / 新建）`" aria-label="Git 分支" @click.stop="c.branchPopupOpen ? c.closeBranchPopup() : c.openBranchPopup()"><GitBranch :size="iconSize.rail" /><span>{{ c.gitHead }}</span><span v-if="c.gitAheadBehind.available && (c.gitAheadBehind.ahead || c.gitAheadBehind.behind)" class="header-widget-count">{{ c.gitAheadBehind.ahead ? `↑${c.gitAheadBehind.ahead}` : '' }}{{ c.gitAheadBehind.behind ? `↓${c.gitAheadBehind.behind}` : '' }}</span></button>
+      <button class="header-widget branch-widget" :aria-expanded="c.branchPopupOpen" aria-haspopup="dialog" :title="`当前分支 ${c.gitHead}（点击切换 / 新建）`" aria-label="Git 分支" @click.stop="c.branchPopupOpen ? c.closeBranchPopup() : c.openBranchPopup()"><GitBranch aria-hidden="true" :size="iconSize.rail" /><span>{{ c.gitHead }}</span><span v-if="c.gitAheadBehind.available && (c.gitAheadBehind.ahead || c.gitAheadBehind.behind)" class="header-widget-count">{{ c.gitAheadBehind.ahead ? `↑${c.gitAheadBehind.ahead}` : '' }}{{ c.gitAheadBehind.behind ? `↓${c.gitAheadBehind.behind}` : '' }}</span></button>
       <BranchPopup v-if="c.branchPopupOpen" :branches="c.gitBranches" :current="c.gitHead" :busy="c.working" @action="c.onBranchAction" @close="c.closeBranchPopup()" />
     </div>
 
@@ -288,9 +297,9 @@ const c = props.ctx
         :aria-expanded="c.filenamePopup" aria-haspopup="listbox"
         :aria-label="`${ACCESSIBLE_NAME_PREFIX} ${c.filenameLabel}`" :title="c.filenameTooltip"
         @click.stop="c.toggleFilenamePopup" @mouseup="c.onFilenameMouseUp"
-      ><FileCode2 :size="iconSize.rail" /><span class="filename-text">{{ c.filenameLabel }}</span></button>
+      ><FileCode2 aria-hidden="true" :size="iconSize.rail" /><span class="filename-text">{{ c.filenameLabel }}</span></button>
       <div v-if="c.filenamePopup" class="filename-popup" role="listbox" :aria-label="`${ACCESSIBLE_NAME_PREFIX} ${c.filenameLabel}`">
-        <button v-for="row in c.filenameRecentRows" :key="row.path" class="menu-button filename-row" role="option" :aria-selected="false" :title="row.path" @click="c.pickRecentFile(row.path)"><FileCode2 :size="iconSize.menu" :class="`filename-${c.recentFileKind(row.path)}`" /><span class="filename-row-text">{{ row.name }}</span></button>
+        <button v-for="row in c.filenameRecentRows" :key="row.path" class="menu-button filename-row" role="option" :aria-selected="false" :title="row.path" @click="c.pickRecentFile(row.path)"><FileCode2 aria-hidden="true" :size="iconSize.menu" :class="`filename-${c.recentFileKind(row.path)}`" /><span class="filename-row-text">{{ row.name }}</span></button>
       </div>
     </div>
 
@@ -336,7 +345,7 @@ const c = props.ctx
         <!-- 运行/停止这一对是状态指示而不是主图标，14px = `--icon-size-control`（`IntUiBridgeMenu.kt:107` 那一族）。
              这一档原先是 CSS 的 `.topbar .run-button > svg` 写死的，模板什么都不写 —— 现在模板声明、
              CSS 只兜底，两边不会再各说各话。 -->
-        <button class="header-widget run-button" :class="{ running: c.runState.running }" :title="c.runWidgetTitle" aria-label="运行" @click="c.runState.running ? void c.stopRun() : void c.runSelectedConfig(false)"><Play v-if="!c.runState.running" :size="iconSize.control" /><Square v-else :size="iconSize.control" /></button>
+        <button class="header-widget run-button" :class="{ running: c.runState.running }" :aria-pressed="c.runState.running" :title="c.runWidgetTitle" :aria-label="c.runState.running ? '停止' : '运行'" @click="c.runState.running ? void c.stopRun() : void c.runSelectedConfig(false)"><Play v-if="!c.runState.running" :size="iconSize.control" /><Square v-else :size="iconSize.control" /></button>
         <button class="header-widget debug-button" :title="c.debugButtonTitle" aria-label="调试" :disabled="!c.isDesktop || !c.workspace || c.dapState.running" @click="void c.runSelectedConfig(true)"><Bug :size="iconSize.rail" aria-hidden="true" /></button>
         <button class="header-widget stop-button" title="停止 (Ctrl+F2)" aria-label="停止" :disabled="!c.runState.running && !c.dapState.running" @click="void c.stopAnyProcess()"><Square :size="iconSize.control" aria-hidden="true" /></button>
         <!-- `MoreRunToolbarActions`：运行 widget 的收尾弹层（重新运行 / 停止全部 / 编辑运行配置）。 -->
@@ -377,37 +386,37 @@ const c = props.ctx
                   <span class="run-dashboard-state" :class="`state-${row.state}`">{{ row.statusText }}</span>
                   <span class="run-dashboard-elapsed">{{ row.elapsedText }}</span>
                 </button>
-                <button v-if="row.state === 'running'" type="button" class="run-dashboard-stop" :aria-label="`停止${row.title}`" :title="`停止${row.title}`" @click="stopDashboardInstance(row.id)"><Square :size="iconSize.inline" aria-hidden="true" /></button>
+                <button v-if="row.stoppable" type="button" class="run-dashboard-stop" :class="{ killing: row.kill }" :aria-label="row.stopText" :title="row.stopText" @click="stopDashboardInstance(row.id)"><X v-if="row.kill" :size="iconSize.inline" aria-hidden="true" /><Square v-else :size="iconSize.inline" aria-hidden="true" /></button>
               </div>
             </template>
           </div>
         </div>
       </div>
-    </div><button class="icon-button" title="随处搜索 (Shift+Shift)" aria-label="随处搜索" :disabled="c.working" @click="c.openSearchEverywhere()"><Search :size="iconSize.rail" /></button><button class="icon-button" title="设置 (Ctrl+Alt+S)" aria-label="打开设置" :disabled="c.working" @click="c.openSettings()"><Cog :size="iconSize.rail" /></button></div>
+    </div><button class="icon-button" title="随处搜索 (Shift+Shift)" aria-label="随处搜索" :disabled="c.working" @click="c.openSearchEverywhere()"><IdeaSearchIcon :size="iconSize.rail" /></button><button class="icon-button" title="设置 (Ctrl+Alt+S)" aria-label="打开设置" :disabled="c.working" @click="c.openSettings()"><IdeaSettingsIcon :size="iconSize.rail" /></button></div>
   </div>
 </template>
 
 <style scoped>
 /* 「更多」弹层（`MoreRunToolbarActions`）：贴着运行 widget 右下方展开，宽度按内容。 */
 .header-run-more { position: relative; display: inline-flex; }
-.run-more-popup { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; min-width: 176px; padding: var(--space-1); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--shadow-2); }
+.run-more-popup { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; min-width: 176px; padding: var(--space-1); background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
 .run-more-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); width: 100%; }
 .run-more-row:disabled { color: var(--muted); }
 .run-more-keys { color: var(--muted); font-size: 10px; }
 /* ExecutionTargetsToolbarGroup：活动目标是本机时整格不渲染（ExecutionTargetComboBoxAction.kt:60-63）。 */
 .header-targets { position: relative; display: inline-flex; }
-.targets-popup { position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; gap: 1px; min-width: 200px; max-height: 320px; overflow: auto; padding: var(--space-1); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--shadow-2); }
+.targets-popup { position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; gap: 1px; min-width: 200px; max-height: 320px; overflow: auto; padding: var(--space-1); background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
 .targets-separator { margin: 0; padding: 2px var(--space-2); color: var(--muted); font-size: 10px; text-transform: uppercase; }
 .targets-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); width: 100%; }
 .targets-row:disabled { color: var(--muted); }
 .targets-row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .targets-row-check { color: var(--accent); font-size: 10px; }
 /* 运行仪表盘（执行域 dashboard 的可移植子集）：实例行 + 状态/时长 + 单实例停止。 */.header-run-dashboard { position: relative; display: inline-flex; }
-.run-dashboard-popup { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; gap: 1px; min-width: 260px; max-height: 320px; overflow: auto; padding: var(--space-1); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--shadow-2); }
+.run-dashboard-popup { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; gap: 1px; min-width: 260px; max-height: 320px; overflow: auto; padding: var(--space-1); background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
 .run-dashboard-summary { margin: 0; padding: 2px var(--space-2); color: var(--muted); font-size: 10px; }
 /* 类型开关（`RunDashboardManager.setTypes` 那一档）+ 分组头（`RunDashboardGroup.getName()`）。 */
 .run-dashboard-types { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px var(--space-2); border-bottom: 1px solid var(--line); }
-.run-dashboard-chip { padding: 1px var(--space-2); border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--muted); font-size: 10px; }
+.run-dashboard-chip { padding: 1px var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); background: transparent; color: var(--muted); font-size: 10px; }
 .run-dashboard-chip.active { border-color: var(--accent); color: var(--accent); }
 .run-dashboard-chip:hover { background: var(--hover); }
 .run-dashboard-group { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin: 0; padding: var(--space-1) var(--space-2) 1px; color: var(--text); font-size: 11px; font-weight: 600; }
@@ -420,6 +429,9 @@ const c = props.ctx
 .run-dashboard-state.state-running { color: var(--accent); }
 .run-dashboard-state.state-failed { color: var(--error); }
 .run-dashboard-elapsed { font-size: 10px; color: var(--muted); }
-.run-dashboard-stop { border: 0; padding: 2px 4px; background: transparent; color: var(--muted); cursor: pointer; line-height: 0; }
+.run-dashboard-stop { border: 0; padding: 2px var(--space-1); background: transparent; color: var(--muted); cursor: pointer; line-height: 0; }
 .run-dashboard-stop:hover { color: var(--error); }
+/* 「正在结束」那一格点下去是 Kill process（`StopAction.java:106-110`、`ExecutionBundle.properties:203`），
+   与运行标签条的 `.run-tab-close.killing` 同一个标法（复用既有 --error 令牌，不新造颜色）。 */
+.run-dashboard-stop.killing { color: var(--error); }
 </style>

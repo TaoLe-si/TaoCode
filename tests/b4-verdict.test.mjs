@@ -92,12 +92,29 @@ test('四档计数自洽，且与表尾那句一致', () => {
   // `ExpandAllRegionsAction`）、`ApplyDefaultStateMode` 三档（`UpdateFoldRegionsOperation`）、
   // 按偏移查询的公开面（`CodeFoldingManager`/`CodeFoldingManagerImpl`）、逐条轻签名替身
   // （`DocumentFoldingInfo`）共 7 条 `[~]` → `[x]`，四档从 3/37/0/29 变成 10/30/0/29。
-  assert.equal(count('[x]'), 10)
-  assert.equal(count('[~]'), 30)
+  // 2026-10-06 第四轮（foldverdict lane，判决簿订正 + 升档）：`CodeFoldingPassFactory`（工厂与 pass
+  // 是同一个两行对象，"没有 Project 级 pass 对象"在 `CodeFoldingPass` 行已判 `[x]`）、
+  // `CodeFoldingNecromancer`/`CodeFoldingNecromancy`（跨会话落盘链路整条在 `src/editorFoldingState.ts`
+  // + `src/workspaceLifecycle.ts`，原判的"缺"是不适用的模型缓存 + 指错对象）、`EditorFoldingInfo`
+  // （PSI 指针那一层是 §D.2 的 `[-]`-类事实，用户可见那一判由 `auto` 标记 + `foldSelectionOutcome` 覆盖）、
+  // `FoldingPolicy`（两处"缺"分别是 §D.2 的签名族与一个纯 trace 缓冲）、`CollapseRegionAction`/
+  // `ExpandRegionAction`（原判"缺按 PSI 判折叠态/可折叠"的那层在上游那两份文件里根本不存在）
+  // 共 7 条 `[~]` → `[x]`，四档从 10/30/0/29 变成 17/23/0/29。
+  // 2026-10-06 第五轮（foldchordverdict lane，chord 键位那十行复判）：foldchord 已落地（`src/foldingKeymap.ts:49-55`
+  // 的五条 `Ctrl-* 1..5` → `src/editorCommands.ts:291-295` 的 `foldingKeymap` → `src/components/CodeEditor.vue:882`，
+  // 旧的单段 `Ctrl-*` 已摘），`ExpandToLevel1..5Action` 五条 `[~]` → `[x]`；`ExpandAllToLevel1..5Action` 五条**维持
+  // `[~]`**（命令/菜单/行为三面全落，只有 chord 那一面在 CodeMirror 里与 `Ctrl-*` 不可分：字符键首查摘 Shift，
+  // `@codemirror/view/dist/index.js:9251` + `:9106-9116`，实测 `tests/editor-folding.test.mjs:474-489`）。
+  // 四档从 17/23/0/29 变成 **22/18/0/29**。
+  // 2026-10-06 第九轮（b1b7verdict lane）：`FoldingUtil` / `CodeFoldingSettings` / `CodeFoldingSettingsImpl`
+  // 三条 `[~]` → `[x]`（foldcheck 审计结论：可移植面全落、其余已判 `[-]`），四档从 30/10/0/29 变成 33/7/0/29。
+  // **这道门是硬编码数字**（不是自洽推导）：任何升档必须同时改这里的四个数与下面那条表尾正则。
+  assert.equal(count('[x]'), 33)
+  assert.equal(count('[~]'), 7)
   assert.equal(count('[ ]'), 0)
   assert.equal(count('[-]'), 29)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 69)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 10 \+ `\[~\]` 30 \+ `\[ \]` 0 \+ `\[-\]` 29 = 69/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 33 \+ `\[~\]` 7 \+ `\[ \]` 0 \+ `\[-\]` 29 = 69/,
     '表尾的和数要与逐条表一致')
 })
 

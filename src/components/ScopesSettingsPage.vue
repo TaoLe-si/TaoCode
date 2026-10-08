@@ -27,7 +27,7 @@
 //     查询不到名字的 `$引用` 恒不匹配（源码同）。
 import { computed, ref, watch } from 'vue'
 import {
-  ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleHelp, Copy, FileText, Folder, Plus, Save, Trash2,
+  ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, FileText, Folder, Plus, Save, Trash2,
 } from 'lucide-vue-next'
 import { request, type NamedScopeSetting, type ProjectFileList, type ProjectSettings } from '../bridge'
 import {
@@ -36,7 +36,7 @@ import {
 import { moduleScopeModel, scopeFileSystem, type ScopeFileSystem } from '../moduleScopes'
 import { matchedJars } from '../externalLibraries'
 import {
-  analysisScope, analysisUiOptions, isStandardAnalysisScope, scopeSummary, setAnalysisScopeNamed,
+  analysisScope, analysisUiOptions, isStandardAnalysisScope, setAnalysisScopeNamed,
   setAnalysisScopeNamedScopes, setAnalysisUiOption, STANDARD_ANALYSIS_SCOPES,
 } from '../analysisScope'
 
@@ -252,7 +252,7 @@ function applyNodes(recursive: boolean, include: boolean) {
     set = include ? includeInto(set, add) : excludeFrom(set, add)
     applied += 1
   }
-  if (!applied) { note.value = '递归包含对单个文件没有意义（源码这里的 createPackageSet 返回 null）。'; return }
+  if (!applied) { note.value = '请选择文件夹。'; return }
   note.value = ''
   draft.value[selected.value] = { ...current.value, pattern: set === null ? '' : scopeText(set) }
 }
@@ -382,8 +382,6 @@ const analysisChoiceKnown = computed(() => analysisScope.value.kind !== 'named'
   || appliedScopes.value.some(entry => entry.name === (analysisScope.value.namedScope ?? '')))
 
 const analysisKind = computed(() => analysisScope.value.kind)
-const analysisSummary = computed(() => scopeSummary())
-
 /** 「包含测试代码」那一档（`BaseAnalysisActionDialog.java:100-101` + `:218-222`）。 */
 const includeTestSources = computed<boolean>({
   get: () => analysisUiOptions.value.analyzeTestSources,
@@ -401,15 +399,15 @@ defineExpose({ dirty, getDraft })
 
 
   <section class="scope-page">
-    <p v-if="!root" class="field-hint">先打开一个项目才能编辑作用域：作用域随项目保存。</p>
+    <p v-if="!root" class="field-hint">先打开一个项目。</p>
     <p v-else-if="filesNote" class="field-hint">{{ filesNote }}</p>
 
     <div class="scope-split">
       <div class="scope-master">
         <!-- ScopeChooserConfigurable.createActions（:92-109）：添加（本地/共享）· 删除 · 复制 · 另存为 · 上移 · 下移 -->
         <div class="scope-actions">
-          <button type="button" :disabled="!root" title="添加本地作用域" @click="addScope(false)"><Plus :size="iconSize.control" />本地</button>
-          <button type="button" :disabled="!root" title="添加共享作用域（随 .idea 提交）" @click="addScope(true)"><Plus :size="iconSize.control" />共享</button>
+          <button type="button" :disabled="!root" title="添加本地作用域" @click="addScope(false)"><Plus aria-hidden="true" :size="iconSize.control" />本地</button>
+          <button type="button" :disabled="!root" title="添加共享作用域（随 .idea 提交）" @click="addScope(true)"><Plus aria-hidden="true" :size="iconSize.control" />共享</button>
           <button type="button" :disabled="!current" title="删除" aria-label="删除作用域" @click="removeScope()"><Trash2 :size="iconSize.control" /></button>
           <button type="button" :disabled="!current" title="复制" aria-label="复制作用域" @click="copyScope()"><Copy :size="iconSize.control" /></button>
           <button type="button" :disabled="!current" title="另存为另一个持有者" aria-label="另存为另一个持有者" @click="saveAs()"><Save :size="iconSize.control" /></button>
@@ -436,18 +434,13 @@ defineExpose({ dirty, getDraft })
       </div>
 
       <div class="scope-detail">
-        <p v-if="!current" class="field-hint">选择一个作用域以查看或编辑它的明细。</p>
-        <template v-else>
+        <template v-if="current">
           <h4>作用域“{{ current.name || '（未命名）' }}”</h4>
           <!-- ScopeConfigurable.createTopRightComponent（:103-108）：Share through VCS + 问号 -->
           <label class="checkbox-row">
             <input v-model="current.shared" type="checkbox" />
             <span>通过 VCS 共享</span>
           </label>
-          <p class="field-hint">
-            <CircleHelp :size="iconSize.menu" aria-hidden="true" />
-            共享作用域保存在 <code>.idea</code> 目录里，可以随版本控制分享给其他人；本地作用域只存在本机。
-          </p>
 
           <!-- ScopeEditorPanel:220 label.scope.pattern -->
           <label class="field-row scope-pattern">
@@ -468,13 +461,6 @@ defineExpose({ dirty, getDraft })
             <span v-if="compiled.position !== null" class="scope-pos">pos:{{ compiled.position }}</span>
           </p>
           <p v-if="note" class="field-hint bad">{{ note }}</p>
-          <!-- rerun 时 ScopeEditorPanel:713-715 把 provider 的提示放在模式框下面 -->
-          <p class="field-hint">
-            用 <code>file:*.txt</code> 匹配项目里所有 txt 文件；用 <code>file:路径//*</code> 递归匹配某个内容根目录下的全部文件；
-            用 <code>projectPath:路径//*</code> 从项目根递归匹配某个目录。组合符：<code>||</code> 并、<code>&amp;&amp;</code> 交、<code>!</code> 非、
-            <code>( )</code> 分组、<code>$名称</code> 引用另一个作用域。
-          </p>
-
           <div class="scope-tree-row">
             <div class="scope-tree" role="tree" aria-label="项目文件">
               <div
@@ -510,10 +496,6 @@ defineExpose({ dirty, getDraft })
             </div>
           </div>
           <!-- MyTreeCellRenderer 的两个颜色（:873-875） -->
-          <p class="field-hint scope-legend">
-            <span class="scope-dot all" />递归包含
-            <span class="scope-dot some" />部分包含
-          </p>
         </template>
       </div>
     </div>
@@ -521,9 +503,6 @@ defineExpose({ dirty, getDraft })
     <!-- 分析范围（BaseAnalysisActionDialog.java:100-102 / :204-206 / :218-222）：命名作用域单选 + 那一档开关 -->
     <div class="analysis-box">
       <h4 class="analysis-title">分析</h4>
-      <p class="field-hint">
-        整工程检查（Analyze › Inspect Code 在本仓的等价物）只在选中的范围里找问题。当前范围：{{ analysisSummary }}。
-      </p>
       <div class="analysis-radios" role="radiogroup" aria-label="分析范围">
         <!-- 上游这一档 = scope.option.whole.project（中文包 messages/CodeInsightBundle.properties:468「整个项目(&P)」）。
              本仓沿用「全部项目」：`scopeSummary()` 与 `src/components/ProblemsPanel.vue:484` 的重置按钮都是这句。 -->
@@ -545,7 +524,7 @@ defineExpose({ dirty, getDraft })
           <span>{{ scope.title }}</span>
         </label>
       </div>
-      <p v-if="!appliedScopes.length" class="field-hint">还没有已应用的作用域：先添加并应用，才能把它选成分析范围。</p>
+      <p v-if="!appliedScopes.length" class="field-hint">还没有已应用的作用域。</p>
       <p v-if="analysisKind === 'named' && !analysisChoiceKnown" class="field-hint bad">
         当前分析范围引用的作用域已经不在项目里，整工程检查会一个文件都找不到。
       </p>
@@ -564,15 +543,15 @@ defineExpose({ dirty, getDraft })
   </section>
 </template>
 <style scoped>
-.scope-page { display: flex; flex-direction: column; gap: 8px; }
-.scope-split { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.6fr); gap: 12px; align-items: start; }
-.scope-master { border: 1px solid var(--line); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
-.scope-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.scope-page { display: flex; flex-direction: column; gap: var(--space-2); }
+.scope-split { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: var(--space-3); align-items: start; }
+.scope-master { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.scope-actions { display: flex; gap: var(--space-1); flex-wrap: wrap; }
 .scope-actions button { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; padding: 2px 6px; }
 .scope-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; }
-.scope-list li { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 4px; }
+.scope-list li { display: flex; align-items: center; gap: 6px; padding: 2px var(--space-1); border-radius: var(--radius-sm); }
 .scope-list li.active { background: var(--selection, rgba(127, 127, 127, 0.18)); }
-.scope-list input { flex: 1; min-width: 0; border: 1px solid transparent; background: transparent; color: inherit; font: inherit; padding: 2px 4px; border-radius: 3px; }
+.scope-list input { flex: 1; min-width: 0; border: 1px solid transparent; background: transparent; color: inherit; font: inherit; padding: 2px var(--space-1); border-radius: var(--radius-xs); }
 .scope-list input:focus { border-color: var(--line); background: var(--panel, transparent); }
 /* 错误/校验失败态统一走 --error（IDEA 的 JBColor.RED / Validation error 同一语义色）。
    原先三处写死 #c0392b，换深色主题不跟随，是这一页唯一不合群的颜色。 */
@@ -587,28 +566,31 @@ defineExpose({ dirty, getDraft })
 .scope-dot.shared { background: var(--secondary); }
 .scope-dot.all { background: var(--accent); }
 .scope-dot.some { background: var(--line-strong); }
-.scope-detail { display: flex; flex-direction: column; gap: 4px; }
+.scope-detail { display: flex; flex-direction: column; gap: var(--space-1); }
 .scope-detail h4 { margin: 0; font-size: 13px; }
 .scope-pattern input { flex: 1; }
 .scope-pattern .mono, .field-row .mono { font-family: ui-monospace, Consolas, monospace; }
-.scope-tree-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
-.scope-tree { border: 1px solid var(--line); border-radius: 6px; padding: 4px; max-height: 260px; overflow: auto; }
-.scope-tree ul { list-style: none; margin: 0; padding-left: 12px; }
+.scope-tree-row { display: grid; grid-template-columns: 1fr auto; gap: var(--space-2); align-items: start; }
+.scope-tree { border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--space-1); max-height: 260px; overflow: auto; }
+.scope-tree ul { list-style: none; margin: 0; padding-left: var(--space-3); }
 .scope-tree > ul { padding-left: 0; }
-.scope-node { display: flex; align-items: center; gap: 4px; padding: 1px 4px; border-radius: 3px; cursor: default; }
+.scope-node { display: flex; align-items: center; gap: var(--space-1); padding: 1px var(--space-1); border-radius: var(--radius-xs); cursor: default; }
 .scope-node.chosen { background: var(--selection, rgba(127, 127, 127, 0.22)); }
 .scope-node.mark-all > span:last-child { color: var(--accent); }
 .scope-node.mark-some > span:last-child { color: var(--secondary); }
 .scope-caret { width: 14px; border: 0; background: transparent; color: inherit; padding: 0; display: inline-flex; align-items: center; }
-.scope-buttons { display: flex; flex-direction: column; gap: 4px; }
-.scope-legend { display: flex; align-items: center; gap: 6px; }
+.scope-buttons { display: flex; flex-direction: column; gap: var(--space-1); }
 /* 分析那一节：单选组 + 复选框（BaseAnalysisActionDialog 的范围面）。 */
-.analysis-box { border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.analysis-box { border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--space-2); display: flex; flex-direction: column; gap: var(--space-1); }
 .analysis-title { margin: 0; font-size: 13px; }
-.analysis-radios { display: flex; flex-wrap: wrap; gap: 4px 12px; }
-.analysis-radio { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.analysis-radios { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+.analysis-radio { display: inline-flex; align-items: center; gap: var(--space-1); font-size: 12px; }
 .analysis-radio input { flex-shrink: 0; }
 .analysis-radio input:disabled + span { color: var(--muted); }
 .scope-pos { margin-left: 6px; opacity: 0.75; }
-.scope-footer { display: flex; align-items: center; gap: 8px; }
+.scope-footer { display: flex; align-items: center; gap: var(--space-2); }
+@media (max-width: 840px) {
+  .scope-split { grid-template-columns: minmax(0, 1fr); }
+  .scope-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 </style>

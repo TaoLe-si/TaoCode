@@ -2,8 +2,8 @@
 
 | 档 | 类数 |
 |---|---:|
-| [x] | 0 |
-| [~] | 574 |
+| [x] | 3 |
+| [~] | 571 |
 | [ ] | 0 |
 | [-] | 181 |
 | 合计 | 755 |
@@ -76,7 +76,7 @@
 | `PresentationData` | pv/project-view | `[~]` | 251 |  |  |  | 从未出现 |
 | `RootsProvider` | pv/project-view | `[~]` | 37 |  |  |  | 从未出现 |
 | `SettingsProvider` | pv/project-view | `[~]` | 21 |  |  |  | 从未出现 |
-| `TreeStructureProvider` | pv/project-view | `[~]` | 72 |  |  |  | 从未出现 |
+| `TreeStructureProvider` | pv/project-view | `[x]` | 72 |  |  |  | 从未出现 |
 | `ViewSettings` | pv/project-view | `[~]` | 160 |  |  |  | 只被注释引用 |
 | `FileEditorPositionListener` | pv/structure-view | `[~]` | 32 |  |  |  | 从未出现 |
 | `ModelListener` | pv/structure-view | `[~]` | 32 |  |  |  | 从未出现 |
@@ -128,7 +128,7 @@
 | `TodoPanelSettings` | pv/todo | `[~]` | 35 |  |  |  | 只被注释引用 |
 | `HelpID` | pv/project-view | `[~]` | 26 |  |  |  | 从未出现 |
 | `ProjectView` | pv/project-view | `[~]` | 166 |  |  |  | 真实代码 |
-| `ProjectViewNodeDecorator` | pv/project-view | `[~]` | 28 |  |  |  | 从未出现 |
+| `ProjectViewNodeDecorator` | pv/project-view | `[x]` | 28 |  |  |  | 从未出现 |
 | `ProjectViewSettings` | pv/project-view | `[~]` | 203 |  |  |  | 只被注释引用 |
 | `ExpandRecursivelyAction` | pv/project-view | `[-]` | 65 | Y |  |  | 从未出现 |
 | `ImportModuleFromImlFileAction` | pv/project-view | `[~]` | 100 |  |  |  | 从未出现 |
@@ -247,7 +247,7 @@
 | `StructureViewModuleNode` | pv/project-view-nodes | `[~]` | 63 |  |  |  | 从未出现 |
 | `SyntheticLibraryElementNode` | pv/project-view-nodes | `[~]` | 87 |  |  |  | 从未出现 |
 | `projectViewUtil` | pv/project-view-nodes | `[~]` | 151 |  |  |  | 从未出现 |
-| `StructureViewExtension` | pv/structure-view | `[~]` | 23 |  |  |  | 从未出现 |
+| `StructureViewExtension` | pv/structure-view | `[x]` | 23 |  |  |  | 从未出现 |
 | `StructureViewFactoryEx` | pv/structure-view | `[~]` | 31 |  |  |  | 从未出现 |
 | `StructureViewWrapper` | pv/structure-view | `[~]` | 29 |  |  |  | 从未出现 |
 | `ModuleGroupingTreeHelperTest` | pv/project-view | `[-]` | 516 |  |  | Y | 从未出现 |

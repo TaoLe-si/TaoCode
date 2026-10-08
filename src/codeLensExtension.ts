@@ -38,6 +38,22 @@ import { codeVisionContextActions, codeVisionGroupId, codeVisionGroupName, codeV
 // 按文件的 lens 快照（`src/codeLensCache.ts`，上游 `LspCodeLensCache` + `LspHighlightingCache`）：
 // 编辑期间把旧的条目**留着**并跟着文档挪，而不是整行消失等新数据。
 import { createCodeLensCache } from './codeLensCache.ts'
+// 文档修订号：上游那份陈旧判据（`LspHighlightingCache.kt:68-71`/`:92`/`:173`）读的是
+// `Document.modificationStamp`（`Document.java:25` "incremented whenever the content changes"），
+// CodeMirror 这一侧的等价物是**「`Text` 对象身份 → 稳定整数」**：`Text` 不可变，改一次正文换一个新对象，
+// 改选区、派发装饰都不换。仓内已有这一份号源（`src/semanticHighlighting.ts:339-354`，
+// 注释原文「与上游 `modificationStamp` 同形」），同一条上游基类的另一条具名缓存已经在用它
+// （`src/editorInlayHints.ts:230` 发请求前取号、`:259` 回包时再取一次当接受闸门）。
+// 订正留痕（2026-10-06 codelensfix）：这里原来读的是 `editor.state.seq` —— **`EditorState` 上没有 `seq`**
+// （`@codemirror/state` 6.7.6 的 `dist/index.d.ts` 全文零命中、实跑恒为 `undefined`、`vue-tsc` 报 TS2339），
+// 于是那两个闸门（同版去重 / 回包时正文变过就拒收）实际一直在拿 `undefined` 自己比自己。
+// 同一结论仓内写过两次：`src/completionUi.ts:106-108`、`src/docHoverContent.ts:123-130`。
+import { semanticRevisionOf } from './semanticHighlighting.ts'
+// 服务器主动要求重取（`workspace/codeLens/refresh`）时踢这个编辑器补刷一拍 —— 上游那一条链是
+// `LspServerNotificationsHandlerImpl.kt:348-350` → `LspFeaturesRefreshing.refreshCodeLenses`
+// （`LspFeaturesRefreshing.kt:31-38`）→ `CodeVisionHost.invalidateProvider(...)`，两件事：
+// 作废缓存（`src/lspServerMessages.ts` 的 `handleRefresh` 统一做）+ **当场重新问一次**（就是这里）。
+import { addLspRefreshListener } from './lspServerMessages.ts'
 import { ICON_SIZE } from './uiIcons.ts'
 
 /**
@@ -73,14 +89,18 @@ function codeLensIconSvg(icon: CodeLensTitleIcon): string {
 /** 一条可点击的 Code Vision 条目。 */
 /**
  * 右键一条 Code Vision → 那个上下文菜单（上游 `CodeVisionContextPopup.kt:19-35`：
- * `entry.extraActions` + 「隐藏这一组」+「全部隐藏」+「Lens Settings…」，
+ * `entry.extraActions` + 「隐藏这一组」+「全部隐藏」+「`&Configure…`」（文案键
+ * `LensListPopup.tooltip.settings`，原文 `CodeVisionBundle.properties:10`），
  * 由 `ProjectCodeVisionModelImpl.handleLensRightClick`（`:45-48`）弹出）。
  *
  * 本仓的两条收窄，都不是省事：
  *   · 服务端 lens 的 `extraActions` 恒为空 —— 那几条是 Java/Kotlin 插件往
  *     `CodeVisionEntry.extraActions` 上挂的，LSP 协议里没有这个字段；
- *   · 「Lens Settings…」（`:24`）不渲染：本仓没有 Code Vision 设置页（要新建组件 +
- *     `src/settingsTreeMeta.ts` 的树节点，都是别人的文件），放上去就是一枚假按钮。
+ *   · 「`&Configure…`」（`:24`）不渲染：页**有**了（`src/components/CodeVisionSettingsPage.vue`，
+ *     挂在 `src/components/SettingsDialog.vue:808` 的 `code.vision` 一节，2026-10-06 codelens2 订正
+ *     —— 原来这条写的是「本仓没有 Code Vision 设置页」），缺的是**打开它的那只手**：本渲染通道手里没有
+ *     `openSettings`，那是宿主（保留文件 `src/components/CodeEditor.vue`）的依赖，
+ *     放上去就是一枚点了没反应的条目 ⇒ 接线请求 C-2（`docs/wiring-requests-2026-10-06-codelens2.md`）。
  * 所以这里只有上游那两条 `!Hide` / `!HideAll`，文案逐字取中文包
  * （`localization-zh.jar messages/CodeVisionBundle.properties:13-14`）。
  *
@@ -297,6 +317,16 @@ export interface CodeLensDeps {
   localChannel?: CodeVisionLocalChannel
   /** 刷新延迟覆盖（测试用；产品路径用 `codeLens.ts` 的默认策略）。 */
   policy?: CodeLensRefreshPolicy
+  /**
+   * 当前文件路径 —— 快照缓存按它分槽（上游 `LspHighlightingCache` 的
+   * `fileToCachedHighlightingsSnapshot` 就是按 `VirtualFile` 分的，`LspHighlightingCache.kt:38-41`）。
+   * **可选**：宿主（保留文件 `src/components/CodeEditor.vue`）还没传这一行，没传时退化成
+   * "一个控制器一个槽"—— 缓存只用来做**请求侧**的三件事（同版本去重 / 首拍不走去抖 /
+   * 在飞期间文档变了就拒收），不用来"回显旧内容"，所以串不了数据：换文件必然换一个 `Text` 对象、
+   * 修订号必变，`peek` 一定给 `shouldRequest: true`。代价只是换文件后那一拍仍被当成
+   * "不是第一次问"（少一次 0ms 首拍）。接线请求 C-1 给的就是这一行。
+   */
+  path?: () => string
 }
 
 export interface CodeLensController {
@@ -343,6 +373,12 @@ export function createCodeLens(deps: CodeLensDeps): CodeLensController {
   // 留着它是因为闸变了要拿同一批条目**原地重画**：上游的监听器触发的也只是「重新收集」，
   // 不是「重新问服务器」（`CodeVisionSettings.kt:120` → `LensInvalidateSignal`）。
   let lastLenses: readonly AnchoredLens[] = []
+  // 按文件（宿主没给 path 时 = 按这个控制器）的 lens 快照：只管**请求侧**那三件事
+  // —— 同一文档版本已经问过就不再问（`LspHighlightingCache.kt:93-103`）、这个文件第一次问
+  // 不走去抖（`:50-51` + `:146` + `:161-163`）、回包时文档版本已经不是发请求那一版就**拒收**
+  // （`:170-177`）。理由写在 `src/codeLensCache.ts` 的文件头。
+  const cache = createCodeLensCache()
+  const cachePath = () => deps.path?.() ?? ''
   const applyGateChange = () => { deps.view()?.dispatch({ effects: codeVisionGateChanged.of(null) }) }
   // 设置表里任何一格变了（总闸 / 某一组 / 每锚点条数）都要按新档重画。上游是三个监听器做同一件事：
   // `CodeVisionSettings.kt:59` 的 `globalEnabledChanged`、`:120` 的 `providerAvailabilityChanged`、
@@ -375,20 +411,34 @@ export function createCodeLens(deps: CodeLensDeps): CodeLensController {
   async function run() {
     const editor = deps.view()
     if (!editor || !deps.enabled() || inFlight) return
+    const path = cachePath()
+    // 发请求**之前**取号（上游 `LspHighlightingCache.kt:88` 的 `settleRequestStamp`，即
+    // `:158` `getDocument(file)?.modificationStamp`）：回包时要拿它现读的那一个比。
+    const revision = semanticRevisionOf(editor.state.doc)
+    // 上游 `:93-103` 的那道去重闸：同一个文档修订已经问过一次 ⇒ 不再问第二次。
+    // 触发点很密（每次编辑、每次焦点、本地通道每一轮计数），而这一条请求是**整文档**的。
+    if (!cache.beginRequest(path, revision)) return
     inFlight = true
     const mine = generation
     try {
       const result = await deps.query()
       const target = deps.view()
       // 期间换过文档（`target !== editor`）或发生过 `reset`（generation 变了）：这次的答案已经过期。
-      if (target !== editor || generation !== mine) return
+      if (target !== editor || generation !== mine) { cache.endRequest(path, revision); return }
       const local = anchorCodeVisionEntries(readLocalEntries(deps))
       // 服务端没这个能力时 `available` 为 false —— 但那**不代表**没有条目可显示：
       // 本地提供者（上游那组挂在 EP 上的内置 provider）不经过 LSP，所以照样要画。
       const server = result.available ? anchoredLenses(result.items) : []
-      target.dispatch({ effects: setCodeLens.of(mergeLensesWithLocal(local, server)) })
+      const merged = mergeLensesWithLocal(local, server)
+      // 回包这一拍**再取一次号**：在飞期间用户又打了字 ⇒ 这份答案的**行号是对旧文档算的**，
+      // 直接画会把条目挂到别的行上。上游同一句在 `LspHighlightingCache.kt:170-177`
+      // （`document.modificationStamp != docModStamp` ⇒ 不收，并且立刻再排一次）；
+      // 本仓同一个闸门的另一处消费见 `src/editorInlayHints.ts:259`。
+      if (!cache.accept(path, revision, semanticRevisionOf(target.state.doc), merged)) { schedule('change'); return }
+      target.dispatch({ effects: setCodeLens.of(merged) })
     } catch {
       // 服务器没有 codeLens 能力时只清掉服务端那半；本地条目仍要留着（见上面那条注释）。
+      cache.endRequest(path, revision)
       if (generation === mine) {
         const local = anchorCodeVisionEntries(readLocalEntries(deps))
         deps.view()?.dispatch({ effects: setCodeLens.of(local) })
@@ -403,13 +453,43 @@ export function createCodeLens(deps: CodeLensDeps): CodeLensController {
   function schedule(trigger: CodeLensTrigger = 'change') {
     if (!deps.enabled()) return
     if (inFlight) { queued = true; return }
+    const editor = deps.view()
+    // `peek` 只读不写，真正发请求前还要过 `beginRequest` 那道闸，所以这里问一句没有副作用。
+    // 没有视图时就没有文档、也就没有修订号可问（产品路径上 `enabled()` 里已经含"有视图"，
+    // 这一格为 null 只可能来自判据直接把控制器拎出来跑）。
+    const decision = editor ? cache.peek(cachePath(), semanticRevisionOf(editor.state.doc)) : null
+    // 「没变不重问」：上游 `LspHighlightingCache.kt:68-71` 的 `getHighlightings` 只在
+    // `highlightingsSnapshot?.docModStamp != docModStamp` 时才排重取，`:92` 那一档写得更直白
+    // （"a response for the same document version has been applied while this trigger was settling" ⇒ return）。
+    // 本仓的编辑触发点是宿主那一句 `codeLens.schedule()`（`src/components/CodeEditor.vue:1010`，
+    // 只在 `update.docChanged` 里发）与在飞期间攒下的补跑，所以这一档只压 `change`：
+    // `focus`（重新拿到焦点，正文**没**变，别处的引用计数变了）与 `open`（本地通道抓完一轮 /
+    // 服务器一句 `workspace/codeLens/refresh`）都不是"这一篇正文又改过"，那些恰恰是要重问的时刻 ——
+    // 上游对它们走的是另一条链（`:292-303` 的 `invalidate` 抹掉去重闸 + `CodeVisionHost` 的失效信号）。
+    if (decision && trigger === 'change' && !decision.shouldRequest) return
+    // 首拍不走去抖（上游 `LspHighlightingCache.kt:50-51` 的 `so the file-open latency is unaffected`
+    // 与 `:146` 那个 `!isFirstPullFor(file)` 判据）：宿主在切文件那一拍发的是**无参** `schedule()`
+    // （`CodeEditor.vue:1054`/`:1079` ⇒ `change` 档 400ms），这个文件从来没答过一次的时候不该再等
+    // 那 400ms。
+    const delay = decision?.firstPull ? 0 : codeLensRefreshDelay(trigger, deps.policy)
     if (timer !== undefined) clearTimeout(timer)
-    timer = window.setTimeout(() => { timer = undefined; void run() }, codeLensRefreshDelay(trigger, deps.policy))
+    timer = window.setTimeout(() => { timer = undefined; void run() }, delay)
   }
 
   // 本地通道抓完一轮后要补刷一拍（`open` 档的去抖是 0ms，`codeLens.ts` 的 `codeLensRefreshDelay`）。
   // 挂在这里而不是宿主那一侧：宿主只给一个通道对象就行，回调顺序不用它操心。
   deps.localChannel?.attach(() => schedule('open'))
+  // 服务器一句 `workspace/codeLens/refresh` = "你手里那批 lens 过期了，**现在**重取"。
+  // 上游对这一句做两件事：`LspServerNotificationsHandlerImpl.kt:348-350` → `LspFeaturesRefreshing
+  // .refreshCodeLenses`（`LspFeaturesRefreshing.kt:31-38`）把失效信号发给 `CodeVisionHost`；而
+  // 客户端那头的 `LspClientImpl.kt:222-233` 是"清完缓存 **再当场 scheduleRefresh/refreshCodeLenses**"。
+  // 本仓第一件（作废缓存）早已在 `src/lspServerMessages.ts` 的 `handleRefresh` 里做了，这一行补第二件。
+  // 先 `invalidate` 再 `schedule('open')`：前者抹掉"这一版已经问过"的闸（上游 `invalidate` 的注释
+  // `:294-298` 写得很直白 —— 不抹的话强制重取会被 dedup 掉），后者按 0ms 那一档立刻再问一次。
+  const stopRefreshListener = addLspRefreshListener('workspace/codeLens/refresh', () => {
+    cache.invalidate(cachePath())
+    schedule('open')
+  })
 
   return {
     extension: [
@@ -438,8 +518,17 @@ export function createCodeLens(deps: CodeLensDeps): CodeLensController {
       generation++
       queued = false
       if (timer !== undefined) { clearTimeout(timer); timer = undefined }
+      // 换语言服务/关掉这一族：快照整份丢掉（上游客户端换掉时走的是 `clearCache()`，
+      // `LspHighlightingCache.kt:263-270` —— 四张 map 全清并取消在飞的那条。本仓的"取消"由
+      // 上面的 `generation` 承担：回来的答案 `generation !== mine`，不会再落盘）。
+      cache.clear()
       deps.view()?.dispatch({ effects: setCodeLens.of([]) })
     },
-    dispose() { stopSettingsWatch(); if (timer !== undefined) clearTimeout(timer) },
+    dispose() {
+      stopSettingsWatch()
+      stopRefreshListener()
+      cache.clear()
+      if (timer !== undefined) clearTimeout(timer)
+    },
   }
 }

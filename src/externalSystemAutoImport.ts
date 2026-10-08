@@ -482,6 +482,67 @@ export function runExtensionsSafely<E, R>(extensions: readonly E[], action: (ext
 /** `ExternalSystemUnlinkedProjectSettings.isEnabledAutoLink` 的默认值（上游实现默认 true）。 */
 export const AUTO_LINK_DEFAULT = true
 
+// ---------------------------------------------------------------- 未链接工程通知（UPN）的文案
+//
+// 上游本体：`platform/external-system-impl/src/com/intellij/openapi/externalSystem/autolink/
+// UnlinkedProjectStartupActivity.kt:141-197`（`installUnlinkedProjectScanner` → `updateNotification`
+// 的三分支 `:172-181`：已链接 ⇒ expire、有构建文件 ⇒ notify、否则 expire；`hasBuildFiles` 在
+// `:266-271`，**只看工程目录的直接子项**）与 `UnlinkedProjectNotificationAware.kt:42-74`
+// （`:60` INFORMATION + `:62` `setSuggestionType(true)`、`:63` help、`:64` link 动作、`:65` skip 动作、
+// `:61` 一个 displayId ⇒ 同一个工程只挂一条）。
+// 文案全部来自 `platform/external-system-api/resources/messages/ExternalSystemBundle.properties`，
+// 逐条打开数过：
+//   · `:14` `unlinked.project.notification.title={0} ''{1}'' build scripts found`
+//   · `:15` `unlinked.project.notification.load.action=Load {0} Project`
+//   · `:16` `unlinked.project.notification.skip.action=Skip`
+//   · `:17-21` `unlinked.project.notification.help.text=` 那四行
+//     （“The IDE can import project information (e.g. sources and dependencies) from the {0} build script.
+//       If you are unsure or this is not a {0} project, press 'Skip'.
+//       You'll be able to import the {0} project later from context menu of {0} build script.”）
+// 取文案的那一层是 `platform/external-system-api/src/com/intellij/openapi/externalSystem/ui/
+// ExternalSystemTextProvider.kt:20-45`（Gradle **没有**覆盖它 —— 全树只有
+// `plugins/ant/src/com/intellij/lang/ant/config/impl/AntTextProvider.kt:12` 覆盖了 link 动作那一档），
+// 所以下面这套就是 Gradle 实际显示的那套。
+
+/**
+ * 这条通知的 displayId —— 上游给的是**真字面量**，不是本仓自取（本轮逐条开文件核过）：
+ *   · `UnlinkedProjectNotificationAware.kt:61` `.setDisplayId(UNLINKED_NOTIFICATION_ID)`
+ *   · 同文件 `:143` `private const val UNLINKED_NOTIFICATION_ID = "external.system.autolink.unlinked.project.notification"`
+ *   · 同一个字符串还登记在 `platform/external-system-impl/resources/META-INF/ExternalSystemExtensions.xml:51-53`：
+ *     那条 `notificationGroup id="External System Auto-Link Notification Group" displayType="STICKY_BALLOON"`
+ *     的 `notificationIds=` 白名单里（上游的 id 白名单就是这个 XML 属性，本仓/native 侧没有另一套表可查）。
+ * 本仓的兑现面：同一个 displayId 顶替旧的那条（`src/notices.ts:87-91`），与上游 `:40` 的
+ * `notifiedNotifications`「同一个工程只挂一条」同形；它也当「不再显示」那条的记账 id
+ * （`src/notificationDoNotAsk.ts:161-163` 走 `configureDoNotAskOption` 的 displayId 分支）。
+ * 那个上游组**没有**登记进 `src/notificationGroups.ts`（本 lane 不改那张注册表）⇒ 这条通知落进
+ * 「未分组」，行为与 `displayType="STICKY_BALLOON"` 一致（弹气球 + 进通知中心）；组的登记请求另文提。
+ */
+export const UNLINKED_PROJECT_DISPLAY_ID = 'external.system.autolink.unlinked.project.notification'
+
+/** 一条未链接工程通知要的四段话（`UnlinkedProjectNotificationAware.kt:55/:63/:64/:65` 的四个取文案点）。 */
+export interface UnlinkedProjectNotice {
+  readonly title: string
+  readonly helpText: string
+  readonly linkAction: string
+  readonly skipAction: string
+}
+
+/**
+ * 按上游那四条 bundle 原文直译（`{0}` = 构建系统可读名、`{1}` = 工程名）。
+ * `systemReadableName` 传 `ProjectSystemId.readableName`（本仓 Gradle 那条 = `externalSystemModel.ts` 的
+ * `GRADLE_SYSTEM`，`readableName` = “Gradle”）。
+ */
+export function unlinkedProjectNotice(systemReadableName: string, projectName: string): UnlinkedProjectNotice {
+  return {
+    title: `找到 ${systemReadableName} 工程「${projectName}」的构建脚本`,
+    helpText: `IDE 可以从 ${systemReadableName} 构建脚本导入项目信息（例如源码与依赖）。`
+      + `如果不确定，或这不是一个 ${systemReadableName} 工程，请按「跳过」。`
+      + `之后你也可以从 ${systemReadableName} 构建脚本的右键菜单里导入这个工程。`,
+    linkAction: `加载 ${systemReadableName} 工程`,
+    skipAction: '跳过',
+  }
+}
+
 // ---------------------------------------------------------------- 自动重载的合并窗（esa/autoimport 缺项 ④）
 //
 // 上游不是「脏了就立刻重载」：`AutoImportProjectTracker.kt`（platform/external-system-impl/

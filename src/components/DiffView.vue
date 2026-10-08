@@ -38,13 +38,60 @@ import {
 import { canGoNext, canGoPrev, changeBlocks, goNext, goPrev } from '../diffNavigation'
 import { buildSearchRegex, findStatusText } from '../editorSearch'
 import {
+  activeCombinedFile, canGoNextFile, canGoPrevFile, combinedFiles, filePositionLabel, stepFile,
+  type CombinedDiffFile,
+} from '../diffCombined'
+import {
   DEFAULT_DIFF_SEARCH_OPTIONS, collectDiffMatches, foldToExpand, highlightPieces,
   nextDiffMatchIndex, type DiffSearchOptions,
 } from '../diffSearch'
+// 差异查看器扩展（上游 `com.intellij.diff.DiffExtension.onViewerCreated`，EP
+// `com.intellij.diff.DiffExtension`，宿主见 src/debugDiffExtensionPoints.ts）：每次本组件
+// 换一个显示对象（切文件/切模式）就等于"创建了一个查看器"，把钩子派发给 EP 贡献者。
+// 内建没有贡献者 ⇒ 逐字沿用既有行为；原版 IDEA 插件挂进来即在这条链上生效。
+import { applyDiffExtensions } from '../debugDiffExtensionPoints'
 
-const props = defineProps<{ path: string; subtitle?: string; rows: DiffRow[]; unified: string; truncated?: boolean; closable?: boolean; leftText?: string; rightText?: string }>()
+const props = defineProps<{ path: string; subtitle?: string; rows: DiffRow[]; unified: string; truncated?: boolean; closable?: boolean; leftText?: string; rightText?: string;
+  /**
+   * 多文件**合成**差异（上游 `CombinedDiffViewer`，见 `src/diffCombined.ts` 文件头）：
+   * 给了非空的一份就进入合成档 —— 工具带多出一组「上一个/下一个文件 + 位置」，
+   * 视图显示当前选中文件的差异（块内导航仍走下面那套 F7/Shift+F7）。
+   * 缺省不给 = 逐字沿用单文件行为（既有六个调用方零改动）。
+   */
+  files?: CombinedDiffFile[] }>()
 const emit = defineEmits<{ close: [] }>()
 const mode = ref<'sides' | 'unified'>('sides')
+// ── 合成档（多文件）─────────────────────────────────────────────────────────────────
+// 有 `files` 时 `path`/`rows`/`unified`/`subtitle`/`truncated` 都取**当前选中文件**那一份；
+// 没有时逐字用 props（单文件行为一字未改）。块间导航不绕圈（`canGoNextFile`/`canGoPrevFile`）。
+const combined = computed(() => combinedFiles(props.files))
+const combinedActive = ref(0)
+const inCombined = computed(() => combined.value.length > 0)
+const activeFile = computed(() => activeCombinedFile(combined.value, combinedActive.value))
+// `files` 换了（新一批变更 / 换了比较目标）就把位置收回第一个块。
+watch(() => props.files, () => { combinedActive.value = 0 })
+const fileRows = computed<DiffRow[]>(() => (inCombined.value ? activeFile.value?.rows ?? [] : props.rows))
+const fileUnified = computed<string>(() => (inCombined.value ? activeFile.value?.unified ?? '' : props.unified))
+const filePath = computed(() => (inCombined.value ? activeFile.value?.path ?? '' : props.path))
+const fileSubtitle = computed(() => (inCombined.value ? activeFile.value?.subtitle : props.subtitle))
+const fileTruncated = computed(() => (inCombined.value ? activeFile.value?.truncated === true : props.truncated === true))
+const canPrevFile = computed(() => canGoPrevFile(combinedActive.value, combined.value.length))
+const canNextFile = computed(() => canGoNextFile(combinedActive.value, combined.value.length))
+const filePosition = computed(() => filePositionLabel(combinedActive.value, combined.value.length))
+function stepFileBlock(forward: boolean) {
+  const next = stepFile(combinedActive.value, combined.value.length, forward)
+  if (next === combinedActive.value) return
+  combinedActive.value = next
+}
+// 「查看器已创建」的派发点（见上面的 import 说明）：显示对象或模式一变就通知一次。
+// `binary` 一律 false —— 能进到这个组件的都是文本差异（二进制在更上层就被分流）。
+watch([filePath, mode], () => {
+  applyDiffExtensions(
+    { path: filePath.value, viewerKind: mode.value === 'unified' ? 'unified' : 'side-by-side' },
+    { path: filePath.value },
+    { title: fileSubtitle.value ?? filePath.value, binary: false },
+  )
+}, { immediate: true })
 
 // 行内高亮五档的展示名（上游 `HighlightPolicy.java:11-15` 的五个枚举值）。
 // 前三项的中文与随 IDE 发货的中文包一致；`split`/`none` 两条本机取不到中文取值，
@@ -76,8 +123,9 @@ watch([comparison, highlight], ([c, h]) => {
 })
 
 // 有原始文本时按当前档位重算；否则用父级给的（native 对齐的那一份）。
+// 合成档（多文件）下"父级给的那一份"= 当前选中文件的行表（`fileRows`）。
 const effectiveRows = computed(() => {
-  if (!canChoosePolicy.value) return props.rows
+  if (!canChoosePolicy.value) return fileRows.value
   return buildDiffRows((props.leftText ?? '').split('\n'), (props.rightText ?? '').split('\n'), {
     comparison: comparison.value, highlight: highlight.value,
   })
@@ -344,8 +392,8 @@ function onEscape() { if (searchOpen.value) closeSearch() }
 // 与变更视图右键那两条同源，不在这里另抄一份中文。
 /** 成功那一句（上游 `VcsBundle.properties:447` `patch.copied.to.clipboard`；本地树没有中文包 ⇒ 按英文原文直译）。 */
 const PATCH_COPIED_TEXT = '补丁已复制到剪贴板。'
-/** 补丁文本 = 父级给的那一份（前端侧由 `src/diffText.ts` 的 `generateUnifiedDiff` 生成，宿主侧是 `git diff`）；纯空白视作没有。 */
-const patchText = computed(() => (props.unified.trim() ? props.unified : ''))
+/** 补丁文本 = 父级给的那一份（前端侧由 `src/diffText.ts` 的 `generateUnifiedDiff` 生成，宿主侧是 `git diff`）；纯空白视作没有。合成档下取当前文件那一份。 */
+const patchText = computed(() => (fileUnified.value.trim() ? fileUnified.value : ''))
 /** 上游 `DiffViewerCreatePatchActionProvider.java:71-76` 用的是 `setEnabledAndVisible` —— 没有补丁文本时那颗按钮**不出现**。 */
 const canCopyPatch = computed(() => patchText.value !== '')
 const patchCopied = ref(false)
@@ -356,17 +404,27 @@ async function copyPatch() {
   await copyToClipboard(text)
   patchCopied.value = true
 }
-// 换了差异（另一个文件 / 另一份冲突预览）就把那句提示撤掉，否则它说的是上一份补丁。
-watch(() => props.unified, () => { patchCopied.value = false })
+// 换了差异（另一个文件 / 另一份冲突预览 / 合成档里换了一个文件）就把那句提示撤掉，否则它说的是上一份补丁。
+watch(() => [props.unified, combinedActive.value], () => { patchCopied.value = false })
 </script>
 
 <template>
   <div class="diff-view" tabindex="0" @keydown.f7.exact.prevent="goToChange(true)" @keydown.shift.f7.exact.prevent="goToChange(false)"
        @keydown.f3.exact.prevent="stepSearch(true)" @keydown.shift.f3.exact.prevent="stepSearch(false)"
-       @keydown.ctrl.f.exact.prevent="openSearch" @keydown.esc.exact="onEscape">
+       @keydown.ctrl.f.exact.prevent="openSearch" @keydown.esc.exact="onEscape"
+       @keydown.alt.shift.left.exact.prevent="stepFileBlock(false)" @keydown.alt.shift.right.exact.prevent="stepFileBlock(true)">
     <div class="diff-head">
-      <span class="diff-title">{{ path }}<small v-if="subtitle">{{ subtitle }}</small></span>
+      <span class="diff-title">{{ filePath }}<small v-if="fileSubtitle">{{ fileSubtitle }}</small></span>
       <span class="diff-stats"><b class="add">+{{ stats.added }}</b><b class="del">−{{ stats.removed }}</b></span>
+      <!-- 多文件合成档的**块间**导航（上游 `CombinedNextBlockAction`/`CombinedPrevBlockAction` 复用
+           `Diff.NextChange`/`Diff.PrevChange` 那两条 id，`CombinedDiffActions.kt:29-82`；
+           键位 `$default.xml:609-614` = Alt+Shift+Left/Right，见根上的 keydown）。
+           没有 `files` 时整组不出现（单文件视图一字未改）。 -->
+      <div v-if="inCombined" class="diff-nav diff-file-nav" role="group" aria-label="文件间导航">
+        <button class="find-icon-button" type="button" :disabled="!canPrevFile" title="上一个文件 (Alt Shift Left)" aria-label="上一个文件" @click="stepFileBlock(false)"><ChevronUp :size="iconSize.control" /></button>
+        <span class="diff-file-pos" role="status" aria-label="文件位置">{{ filePosition }}</span>
+        <button class="find-icon-button" type="button" :disabled="!canNextFile" title="下一个文件 (Alt Shift Right)" aria-label="下一个文件" @click="stepFileBlock(true)"><ChevronDown :size="iconSize.control" /></button>
+      </div>
       <!-- 上一个 / 下一个差异（上游 `DiffNextDifferenceAction` / `DiffPreviousDifferenceAction`，F7 / Shift+F7；
            `PrevNextDifferenceIterableBase` 的边界语义：两端禁用，不走回头路）。 -->
       <div class="diff-nav" role="group" aria-label="差异导航">
@@ -435,7 +493,7 @@ watch(() => props.unified, () => { patchCopied.value = false })
       </div>
       <button v-if="closable" class="icon-button" title="关闭" aria-label="关闭差异" @click="emit('close')"><X :size="iconSize.action" /></button>
     </div>
-    <p v-if="truncated" class="diff-note">差异行数超过上限，后续部分未显示。</p>
+    <p v-if="fileTruncated" class="diff-note">差异行数超过上限，后续部分未显示。</p>
     <div v-if="effectiveRows.length && mode === 'sides'" class="diff-sides">
       <template v-for="(item, index) in items" :key="index">
         <!-- 收起来的未更改片段：一行标记，点它展开（上游那里是 5 个空格的占位文本，见 src/diffFold.ts） -->
@@ -474,7 +532,7 @@ watch(() => props.unified, () => { patchCopied.value = false })
     </div>
     <!-- 只剩补丁文本的场合（rows 为空）与「无差异」兜底仍走 pre：
          a <p> would collapse the patch's newlines and indentation. -->
-    <pre v-else class="diff-body">{{ unified || '（无差异）' }}</pre>
+    <pre v-else class="diff-body">{{ fileUnified || '（无差异）' }}</pre>
   </div>
 </template>
 
@@ -497,6 +555,9 @@ watch(() => props.unified, () => { patchCopied.value = false })
 .diff-view .diff-head { flex-wrap: wrap; }
 .diff-folds { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
 .diff-nav { display: inline-flex; align-items: center; gap: var(--space-1); }
+/* 合成档（多文件）的块间导航：位置读数与两侧箭头同高同一档控件（`CombinedDiffMainToolbar` 的块计数）。 */
+.diff-file-nav { padding-right: var(--space-1); border-right: 1px solid var(--line); }
+.diff-file-pos { min-width: 44px; color: var(--muted); font: 11px var(--font-ui); text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .diff-nav button:disabled { opacity: .4; cursor: default; }
 /* 复制补丁的那句结果提示（上游是 `VcsNotifier.notifySuccess(patch.copied.to.clipboard)`，
    `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/patch/CreatePatchCommitExecutor.java:353-354`；

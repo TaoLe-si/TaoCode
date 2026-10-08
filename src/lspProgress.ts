@@ -17,7 +17,7 @@
 //
 // 本模块只做"事件 → 任务表"这一段（纯函数 + 一个 reactive 表）；聚合与取消归 progressPanel。
 import { reactive } from 'vue'
-import { expireLspMessageRequestsOnStop, handleLspServerMessageEvent } from './lspServerMessages.ts'
+import { expireLspDynamicRegistrationsOnStop, expireLspMessageRequestsOnStop, handleLspServerMessageEvent } from './lspServerMessages.ts'
 
 // 服务器**主动**发来的那几条消息/请求（showMessage、logMessage、showMessageRequest、
 // 五条 workspace/…/refresh）的处置不在本模块：注册表、丢弃计数与回选都在
@@ -150,6 +150,9 @@ export function handleLspProgressEvent(event: string | undefined, data: LspProgr
     // 它还没答完的问句（`window/showMessageRequest`）同一拍按 null 收掉 —— 上游是同一个理由：
     // 客户端没法再替一个已经不存在的服务器留着这个 future（`LspServerNotificationsHandlerImpl.kt:378`）。
     expireLspMessageRequestsOnStop(typeof data.language === 'string' ? data.language : '')
+    // 它登记的动态能力也同一拍作废：上游那张表挂在客户端实例上（`LspDynamicCapabilities.kt:117`），
+    // 客户端没了表就跟着没了。留着的话，下一次重启的服务器问「有没有 inlayHint 注册」会读到上一台的账。
+    expireLspDynamicRegistrationsOnStop(typeof data.language === 'string' ? data.language : '')
     return true
   }
   if (event !== 'lsp.progress') return false

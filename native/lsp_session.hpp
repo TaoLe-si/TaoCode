@@ -39,6 +39,12 @@ public:
     };
     // Diagnostics ready for the UI: workspace-relative path + contract-shaped array.
     using DiagnosticsSink = std::function<void(std::string path, Json diagnostics)>;
+    // 同一条推送，**带上整批的 `PublishDiagnosticsParams.version`**（第三条参数：整数，或
+    // null = 服务器没声明）。为什么是"再加一条 sink"而不是把上面那条改成三参：注册两参 lambda 的
+    // 那一句在 `native/main.cpp`（本轮禁写，且它在 CMakeLists.txt:100 里是 `TaoCode` 目标的一部分），
+    // 改元数会当场把宿主编坏。两条 sink 每条推送**只走一条**（先版本化的、再退两参的），
+    // 见 native/lsp_host_bootstrap.cpp 的 `set_diagnostics` 回调 —— 不会重复发两次事件。
+    using VersionedDiagnosticsSink = std::function<void(std::string path, Json diagnostics, Json version)>;
     // Contract-shaped result or a JSON-RPC error object.
     using ResultHandler = std::function<void(Json result, Json error)>;
     // Fired after the session itself wrote a file (a server-driven workspace edit),
@@ -64,6 +70,11 @@ public:
     long generation() const noexcept { return generation_; }
     void set_edit_sink(EditSink on_edit) { on_edit_ = std::move(on_edit); }
     void set_progress_sink(ProgressSink on_progress) { on_progress_ = std::move(on_progress); }
+    // 注册了它，一条推送才会把整批的版本号交到宿主手上；没注册就退回两参的 `DiagnosticsSink`
+    // （那条照旧丢版本，与本轮之前的行为逐字一致 —— 宿主接线前不能出现半条新事件）。
+    void set_versioned_diagnostics_sink(VersionedDiagnosticsSink sink) {
+        on_diagnostics_versioned_ = std::move(sink);
+    }
 
     // 语言服务线程的投递入口（宿主建好 Session 后设置）。读线程上的回调**只记录状态**，
     // 真正的发送交回那条线程：回调一旦抱着 `Session::mutex_` 去写服务器，就会和"在
@@ -217,6 +228,9 @@ private:
     std::filesystem::path root_;
     std::vector<std::filesystem::path> extra_roots_;
     DiagnosticsSink on_diagnostics_;
+    // 与上面那条同一个线程纪律：宿主在 `Session` 建好、任何 Host 起来之前登记
+    // （main.cpp 的 configure_lsp 就是这个次序），读线程只读不写。
+    VersionedDiagnosticsSink on_diagnostics_versioned_;
     EditSink on_edit_;
     ProgressSink on_progress_;
     std::function<void(std::function<void()>)> owner_post_;

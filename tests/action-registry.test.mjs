@@ -101,11 +101,15 @@ test('构建菜单与本地历史行由注册表驱动：改注册表就改菜�
   const started = []
   const rows = createBuildMenuRows({
     isDesktop: true, workspace, runState,
-    startBuild: rebuild => started.push(rebuild), stopRun: () => {}, showOutput: () => {},
+    startBuild: (rebuild, filesOnly) => started.push(filesOnly ? `file:${rebuild}` : rebuild), stopRun: () => {}, showOutput: () => {},
   })
   const byId = new Map(rows.map(row => [row.id, row]))
-  assert.deepEqual([...byId.keys()], ['build.project', 'build.rebuild', 'build.stop', 'build.rule1', 'build.output'])
+  assert.deepEqual([...byId.keys()], ['build.project', 'build.rebuild', 'build.file', 'build.stop', 'build.rule1', 'build.output'])
   assert.equal(byId.get('build.project').keys, 'Ctrl F9')
+  // 「编译当前文件」那一行传 filesOnly=true（上游 CompileAction 的 compile(files) 支）。
+  byId.get('build.file').run()
+  assert.deepEqual(started, ['file:false'], 'build.file 的 run 传 filesOnly')
+  started.length = 0
   assert.equal(byId.get('build.project').enabled(), true)
   // 运行中：构建/重构建关闭，停止构建打开 —— 谓词来自注册表里的那一条。
   runState.running = true

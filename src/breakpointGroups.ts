@@ -20,8 +20,11 @@
 //   · 树上的复选框就是逐断点的启用标记：`nodeStateDidChangeImpl` → `item.setEnabled(...)`
 //     （`BreakpointItemsTreeController.java:79-82`），组节点有任一孩子启用就呈勾选态（同文件 :126-128）。
 //   · 「设为默认」由 `SetAsDefaultGroupAction` 写进 `XBreakpointManager`（`BreakpointsDialog.java:561-576`、
-//     `XBreakpointManagerImpl.java:779`），**新断点**自动落进默认组
+//     `XBreakpointManagerImpl.java:783` 的 `setDefaultGroup`），**新断点**自动落进默认组
 //     （`XBreakpointManagerImpl.java:248`、`:421` 的 `state.setGroup(myDefaultGroup)`）。
+//     **订正留痕（dapfix）**：这一句原来指同文件的 `:779`，而 `:779` 是**读**的那一个
+//     （`getDefaultGroup()`），写的是同文件 `:783` `setDefaultGroup(...)`；
+//     「写进管理器」这句话的主语必须是指 setter。行号由本机 `awk NR==n` 逐行数出。
 //
 // 状态为什么是模块单例：这份「组 / 谁被停用」既被「查看断点…」对话框写，也被 Debug 面板
 // 发断点的那条路读（取消勾选 = 不再发给适配器）。两边必须是同一份，否则在对话框里取消了断点、
@@ -271,9 +274,14 @@ export function breakpointGroupNodes(refs: readonly string[]): BreakpointGroupNo
  *
  * **上游没有「组的改名」与「删除组」**：组不是实体，只是断点上的一个字符串
  * （`platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui/XBreakpointGroup.java:10-42`
- * 只有 `getName`/`compareTo`/`expandedByDefault`/`getIcon`，`XBreakpointCustomGroup.java:16-38` 多一个
- * `isDefault`；组名清单永远是从断点上 distinct+sorted 取的，`BreakpointsDialog.java:326-335`），
+ * 只有 `getName`/`compareTo`/`expandedByDefault`/`getIcon`（另有 `toString`/`equals`/`hashCode`），
+ * `platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointCustomGroup.java:16-38`
+ * 多一个 `isDefault`（`:35-37`）；组名清单永远是从断点上 distinct+sorted 取的，`BreakpointsDialog.java:326-335`），
  * 所以「改名/删除」在上游就等于「整组搬到另一个名字」⇒ 本仓不另造假控件。
+ * **订正留痕（dapfix）**：上面那个 `XBreakpointCustomGroup` 实体原先只写**裸文件名**，紧跟在上一行的
+ * `platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui/` 之后 ⇒ 读起来像在 xdebugger-api 那一格里，
+ * 而参考树里它只有一处真身（`find . -name` 只有一个结果）：在 `.../breakpoints/ui/grouping/` 那一格，
+ * 与 `XBreakpointCustomGroupingRule` 同目录。区间 `:16-38` 本来就对（类体），歪的只有路径。
  * 目标名与源名相同 ⇒ 一条都不动（返回空数组，调用方据此不落盘、不重发）。
  */
 export function moveGroupContents(refs: readonly string[], from: string, to: string | null): string[] {
@@ -282,7 +290,9 @@ export function moveGroupContents(refs: readonly string[], from: string, to: str
   return assignBreakpointsToGroup(groupMembers(refs, from), group || null)
 }
 
-/** 「移至组」子菜单里的目标清单（上游 `:325-335` 那份 distinct+sorted，`:337` 一条分隔线，`:338` 再接「新建…」）。
+/** 「移至组」子菜单里的目标清单（上游 `:326-335` 那份 distinct+sorted，`:337` 一条分隔线，`:338` 再接「新建…」。
+ *  **留痕**：dap3 把这一段写成 `:325-335`，dap4 重数参考树后 `:325` 是空行、`res = new ArrayList<>()` 在 `:323`、
+ *  那条 stream 从 `:326` 起 —— 与同文件 `:14` 与 `moveGroupContents` 说明块里那两处引用统一成 `:326-335`。
  *  清单本身**只有已有组**：新建那一项走 `resolveNewGroupName`（同一个 `MoveToGroupAction` 家族的第三支）。 */
 export function groupMoveTargets(refs: readonly string[], exclude: string): string[] {
   return groupNames(refs).filter(name => name !== exclude)

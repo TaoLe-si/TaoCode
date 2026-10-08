@@ -40,17 +40,10 @@ const OPTIONS = [
 <template>
   <div class="input-row">
     <label :for="selectId">保存时去除行尾空白</label>
-    <select :id="selectId" v-model="settings.stripTrailingSpaces" aria-describedby="editor-strip-spaces-hint">
+    <select :id="selectId" v-model="settings.stripTrailingSpaces">
       <option v-for="option in OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
     </select>
   </div>
-  <p id="editor-strip-spaces-hint" class="field-hint">
-    上游 “Remove trailing spaces on:”（<code>EditorOptionsPanel.kt:156-157</code>），默认「Modified lines」=
-    <code>EditorSettingsExternalizable.java:73</code> 的 <code>Changed</code>。只清**本次改动过的行**是上游
-    <code>DocumentImpl.isLineModified</code> 那一档；保存 pass 的执行体与判据在 <code>src/editorSaveTransforms.ts</code>。
-  </p>
-  <label class="checkbox-row"><input v-model="settings.ensureNewLineAtEof" type="checkbox" aria-describedby="editor-line-feed-hint" /><span>确保每个保存的文件都以换行结尾</span></label>
-  <p id="editor-line-feed-hint" class="field-hint restore-hint">上游 “Ensure every saved file ends with a line break”（<code>EditorOptionsPanel.kt:147-149</code>），默认关 —— <code>EditorSettingsExternalizable.java:74</code> 的 <code>IS_ENSURE_NEWLINE_AT_EOF = false</code>。</p>
-  <label class="checkbox-row"><input v-model="settings.keepTrailingSpacesOnCaretLine" type="checkbox" aria-describedby="editor-keep-caret-hint" /><span>光标所在行保留行尾空白</span></label>
-  <p id="editor-keep-caret-hint" class="field-hint restore-hint">上游 “Keep trailing spaces on caret line”（<code>EditorOptionsPanel.kt:153-155</code>），默认开 —— <code>EditorSettingsExternalizable.java:142</code>。关掉时光标那一行也会被清（执行体 <code>src/editorSaveTransforms.ts</code> 的 <code>keepTrailingSpacesOnCaretLine</code>）。</p>
+  <label class="checkbox-row"><input v-model="settings.ensureNewLineAtEof" type="checkbox" /><span>确保每个保存的文件都以换行结尾</span></label>
+  <label class="checkbox-row"><input v-model="settings.keepTrailingSpacesOnCaretLine" type="checkbox" /><span>光标所在行保留行尾空白</span></label>
 </template>

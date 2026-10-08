@@ -115,7 +115,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <span class="keymap-status">
           {{ customizedCount }} 个自定义键位<template v-if="recordingRow"> · 正在录「{{ recordingRow.label }}」，Esc 取消</template>
         </span>
-        <button class="subtle-button" @click="restoreDefaults()"><RotateCcw :size="iconSize.menu" />恢复默认</button>
+        <button class="subtle-button" @click="restoreDefaults()"><RotateCcw aria-hidden="true" :size="iconSize.menu" />恢复默认</button>
         <button class="icon-button" :disabled="!recordingRow" title="清除选中动作的键位" aria-label="清除选中动作的键位" @click="recordingRow && clearKeys(recordingRow)"><X :size="iconSize.menu" /></button>
       </div>
       <p v-if="note" class="field-hint validation-error keymap-note">{{ note }}</p>

@@ -24,6 +24,7 @@ export function gotoFilterTitle(): string {
 export interface NavigateContext {
   active: any
   cycleBookmark: any
+  cycleBookmarkInEditor: any
   goBack: any
   goForward: any
   hasEditor: any
@@ -180,6 +181,9 @@ export function createNavigateMenuRows(ctx: NavigateContext): MenuRow[] {
     { id: 'navigate.bookmarkMnemonic', title: () => ctx.bookmarkMnemonicLabel(), keys: 'Ctrl F11', keywords: 'bookmark mnemonic digit 书签编号', enabled: ctx.hasEditor, run: ctx.openMnemonicPrompt },
     { id: 'navigate.bookmarkNext', title: '下一个书签', keywords: 'next bookmark project wide 下一个书签', run: () => ctx.cycleBookmark(false) },
     { id: 'navigate.bookmarkPrevious', title: '上一个书签', keywords: 'previous bookmark project wide 上一个书签', run: () => ctx.cycleBookmark(true) },
+    // 上游 GotoNext/PreviousBookmarkInEditor（intellij.platform.bookmarks.xml:74-79）：只在这个文件里走、默认不回绕。
+    { id: 'navigate.bookmarkNextInEditor', title: '编辑器内下一个行书签', keywords: 'next bookmark in editor line 编辑器内下一个书签', enabled: ctx.hasEditor, run: () => ctx.cycleBookmarkInEditor(false) },
+    { id: 'navigate.bookmarkPreviousInEditor', title: '编辑器内上一个行书签', keywords: 'previous bookmark in editor line 编辑器内上一个书签', enabled: ctx.hasEditor, run: () => ctx.cycleBookmarkInEditor(true) },
     { id: 'view.bookmarks', title: '书签窗口', keys: 'Shift F11', keywords: 'bookmarks tool window list 书签窗口', enabled: () => Boolean(ctx.workspace.value), run: () => ctx.showView('bookmarks') },
   ]
   return rows

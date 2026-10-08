@@ -10,8 +10,15 @@
 // 按类型的开关、点击动作都还没有接（那一处文件贴着机检行数上限、本批冻结）。
 // 先把规则落在这里并用判据锁住，接线时编辑器只做"读设置 → 过滤 → 挂事件"三件事。
 //
-// `tooltip` / `command` 目前**也被宿主丢掉**（`native/lsp_session.cpp` 的 inlayHint 整形只发
-// label/padding/kind）—— 点击规则要真正生效，宿主得先把这两个字段转发过来（bridge 的类型也要加）。
+// `tooltip` / `command` 由宿主转发（`native/lsp_session_kinds.cpp:578-594`，原判词写的
+// `native/lsp_session.cpp` 是旧坐标，2026-10-06 的 `restsix` 复核已订正），本文件的
+// `inlayHintCommand` / `inlayHintTooltip` 就是它们的消费点。
+//
+// 参数提示的**排除列表**这一档：规则本体在 `src/inlayHintExcludeList.ts`（上游
+// `ParameterHintExcludeListService.kt:93-105` + `filtering/MethodMatcher.kt` + `filtering/StringMatcherBuilder.kt`），
+// 本文件只负责"从设置里把清单读出来"，过滤发生在 `src/inlayHintLayout.ts` 的归位链里。
+
+import { DEFAULT_PARAMETER_HINT_EXCLUDE_LIST } from './inlayHintExcludeList.ts'
 
 /** 宿主整形后的内联提示（形状与 `src/bridge.ts` 的 `LspInlayHint` 一致；`command` 是待转发字段）。 */
 export interface InlayHintLike {
@@ -28,14 +35,25 @@ export interface InlayHintLike {
   tooltip?: string
 }
 
-/** 按类型的开关（设置页三格；默认全开，与 IDEA 的出厂一致）。 */
+/** 按类型的开关（设置页三格；默认全开，与 IDEA 的出厂一致）+ 参数提示的排除清单。 */
 export interface InlayHintToggles {
   type: boolean
   parameter: boolean
   other: boolean
+  /**
+   * 参数提示排除清单（一行一条模式，规则见 `src/inlayHintExcludeList.ts`）。
+   * 上游它不在"勾选框"那一档里 —— `ParameterHintsSettingsPanel.kt:18-22` 是一个独立的
+   * "Exclude list…" 入口，但**生效点**与这三格同一个（`ExcludeListPanel.kt:122` 保存后
+   * `refreshParameterHintsOnNextPass()`）。本仓把它折进同一份"该显示什么"里，
+   * 于是改清单和改勾选走的是同一条重画链（`inlayHintTogglesKey`）。
+   * 可选：老 state 与老调用点没这一项就是"不排除任何东西"。
+   */
+  parameterHintExcludeList?: readonly string[]
 }
 
-export const DEFAULT_INLAY_HINT_TOGGLES: InlayHintToggles = { type: true, parameter: true, other: true }
+export const DEFAULT_INLAY_HINT_TOGGLES: InlayHintToggles = {
+  type: true, parameter: true, other: true, parameterHintExcludeList: DEFAULT_PARAMETER_HINT_EXCLUDE_LIST,
+}
 
 /** 一个提示属于哪一组（LSP `kind` → 设置页的那一格）。 */
 export type InlayHintGroup = 'type' | 'parameter' | 'other'
@@ -60,22 +78,51 @@ export const INLAY_HINT_SETTING_KEYS: Record<InlayHintGroup, InlayHintSettingKey
   other: 'showOtherInlayHints',
 }
 
+/**
+ * 参数提示排除清单那把键的名字（**唯一**定义处：设置页与读侧都从这里取，不许现抄字符串）。
+ * 它对应上游 `ParameterNameHintsSettings`（`@Storage("parameter.hints.xml")`，`:47`）里按语言存的
+ * added/removed 差量；本仓没有"按语言"这一层（只有一个 LSP provider），所以是**一把全局清单键**。
+ * 登记状态：见 `docs/batch-2026-10-06-inlayparams.md` §6（模型 + native 键表/默认值/校验 + 预览白名单
+ * 那六处在别的 lane 的禁写文件里，本 lane 只写读侧与消费侧）。
+ */
+export const INLAY_HINT_EXCLUDE_LIST_SETTING_KEY = 'parameterHintExcludeList' as const
+
 /** 设置里那三格的来源形状（`EditorSettings` 的那三个字段；窄接口，老 state 缺键也吃得下）。 */
 export interface InlayHintSettingSource {
   showTypeInlayHints?: unknown
   showParameterInlayHints?: unknown
   showOtherInlayHints?: unknown
+  /** 排除清单（`string[]`）；键没登记 / 老 state 没有 ⇒ 按默认（空清单 = 不排除）。 */
+  [INLAY_HINT_EXCLUDE_LIST_SETTING_KEY]?: unknown
 }
 
-/** 把编辑器设置的那三把键折成本模块要的形态（缺项按默认全开，坏值不崩）。 */
+/** 清单读侧的容错口径：不是数组就整个忽略，数组里只留非空字符串（上游 `ExcludeListPanel.kt:118` 丢空行、`mapNotNull` 丢坏模式）。 */
+function readExcludeList(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return DEFAULT_PARAMETER_HINT_EXCLUDE_LIST
+  const list = value.filter(item => typeof item === 'string' && item.trim() !== '')
+  return list.length === 0 ? DEFAULT_PARAMETER_HINT_EXCLUDE_LIST : list
+}
+
+/** 把编辑器设置的那三把键折成本模块要的形态（缺项按默认全开，坏值不崩；排除清单缺项按默认空）。 */
 export function inlayHintToggles(settings: InlayHintSettingSource | null | undefined): InlayHintToggles {
   const read = (key: InlayHintSettingKey) => settings?.[key] !== false
-  return { type: read(INLAY_HINT_SETTING_KEYS.type), parameter: read(INLAY_HINT_SETTING_KEYS.parameter), other: read(INLAY_HINT_SETTING_KEYS.other) }
+  return {
+    type: read(INLAY_HINT_SETTING_KEYS.type),
+    parameter: read(INLAY_HINT_SETTING_KEYS.parameter),
+    other: read(INLAY_HINT_SETTING_KEYS.other),
+    parameterHintExcludeList: readExcludeList(settings?.[INLAY_HINT_EXCLUDE_LIST_SETTING_KEY]),
+  }
 }
 
-/** 三档拼成一行（watch 的比较键：数组每次都是新引用，拿它当依赖会每拍都触发）。 */
+/**
+ * 三档（+ 排除清单）拼成一行（watch 的比较键：数组每次都是新引用，拿它当依赖会每拍都触发）。
+ * 清单为空时**不追加后缀** —— 上游那一条的语义是"保存差量后刷新提示"（`ExcludeListPanel.kt:122`），
+ * 空清单与"没有这一档"必须是同一个比较键，否则老 state 每拍都重画。
+ */
 export function inlayHintTogglesKey(toggles: InlayHintToggles): string {
-  return `${toggles.type},${toggles.parameter},${toggles.other}`
+  const base = `${toggles.type},${toggles.parameter},${toggles.other}`
+  const list = toggles.parameterHintExcludeList ?? []
+  return list.length === 0 ? base : `${base}|${list.join('|')}`
 }
 
 /** 这条提示在当前开关下显示吗。 */

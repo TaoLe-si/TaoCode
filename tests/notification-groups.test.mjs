@@ -277,3 +277,14 @@ test('EventLogPanel 的样式只走 tokens，且图标按钮带 title 与 aria-l
   assert.match(panel, /:aria-label=/)
   assert.match(panel, /<MoreHorizontal :size="iconSize\.menu" \/>/, '图标走 lucide + iconSize 阶梯')
 })
+
+// lspmsg R1a/R1b（2026-10-06 主代理落地）：把分级真正兑现到界面上的两段。
+test('LSP 分级：info/trace 那一档不被 errors/warnings 抢走，且通知通道真的带着条目自带的 displayId', () => {
+  // 前缀表是**首个命中** ⇒ `lsp:log:info:` 必须排在 `lsp:log:` 前面（上游 LOG_INFO_TRACE：
+  // LspServerNotificationsHandlerImpl.kt:402-403 与组 id 字面值 :476）。
+  assert.equal(noticeGroupId(entry(1, { displayId: 'lsp:log:info:java' })), 'LSP window/logMessage: info, log; $/logTrace')
+  assert.equal(noticeGroupId(entry(1, { displayId: 'lsp:log:message:java' })), 'LSP window/logMessage: errors, warnings')
+  const notices = readFileSync(join(root, 'src/progressNotices.ts'), 'utf8')
+  assert.match(notices, /displayId: message\.displayId \|\| `lsp:message:\$\{message\.language\}`/,
+    '条目自带的 displayId 必须优先，否则算好的分级在界面上全塌成一个组')
+})

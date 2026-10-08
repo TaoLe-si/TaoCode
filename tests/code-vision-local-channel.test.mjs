@@ -8,6 +8,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
+import { EditorState } from '@codemirror/state'
+
 import { createCodeLens } from '../src/codeLensExtension.ts'
 import { anchorCodeVisionEntries, problemsVisionProvider, createCodeVisionRegistry } from '../src/codeVisionProviders.ts'
 import { groupAnchoredLenses } from '../src/codeLens.ts'
@@ -19,18 +21,32 @@ import { groupAnchoredLenses } from '../src/codeLens.ts'
 globalThis.window = { setTimeout, clearTimeout }
 
 const FAST = { openMs: 1, changeMs: 1, focusMs: 1 }
+const DOC = 'class Demo {\n  void run() {}\n}\n'
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-function fakeView() {
-  const dispatched = []
-  return { dispatched, dispatch: spec => { dispatched.push(spec) } }
+/**
+ * 真形状的假 view：`state` 是**真的 `EditorState`**（控制器读的那份文档修订号就是 `state.doc` 这个
+ * 不可变 `Text` 对象的身份，见 `src/semanticHighlighting.ts:339-354`），`dispatch` 把事务真的作用到
+ * 状态上、同时记进 `dispatched`（判据数的是"控制器往编辑器派了几次结果"）。
+ */
+function fakeView(doc = DOC) {
+  const view = { dispatched: [], state: EditorState.create({ doc }) }
+  view.dispatch = spec => { view.state = view.state.update(spec).state; view.dispatched.push(spec) }
+  return view
+}
+
+/** 起一条真通道：假 view + 控制器，并把控制器的扩展装进那个 state（`setCodeLens` 的 StateField 才认这条 effect）。 */
+function viewOf(deps) {
+  const view = fakeView()
+  const controller = createCodeLens({ enabled: () => true, view: () => view, onCommand: () => {}, policy: FAST, ...deps })
+  view.state = EditorState.create({ doc: DOC, extensions: [controller.extension] })
+  return { view, controller }
 }
 
 /** 起一次刷新，把落进编辑器的那份 lens 列表取出来。 */
 async function renderLenses({ query, local }) {
-  const view = fakeView()
-  const c = createCodeLens({ query, enabled: () => true, view: () => view, onCommand: () => {}, policy: FAST, ...(local ? { local } : {}) })
-  c.schedule('open')
+  const { view, controller } = viewOf({ query, ...(local ? { local } : {}) })
+  controller.schedule('open')
   await sleep(30)
   const last = view.dispatched[view.dispatched.length - 1]
   assert.ok(last, '结果要 dispatch 进编辑器')
@@ -134,7 +150,6 @@ function lensesOf(view) {
 }
 
 test('宿主只交一个通道对象：渲染层自己读 entries，并把「抓完补刷」挂上', async () => {
-  const view = fakeView()
   const notifiers = []
   const channel = {
     // 第一拍：还没抓到东西（旧值先用 = 空）；抓完那一拍由宿主侧的补刷回调驱动第二次落盘。
@@ -146,13 +161,13 @@ test('宿主只交一个通道对象：渲染层自己读 entries，并把「抓
     ready: false,
   }
   let queries = 0
-  const c = createCodeLens({
+  const { view, controller } = viewOf({
     query: async () => { ++queries; return { available: false } },
-    enabled: () => true, view: () => view, onCommand: () => {}, policy: FAST, localChannel: channel,
+    localChannel: channel,
   })
   assert.equal(notifiers.length, 1, 'createCodeLens 要把补刷回调挂到通道上')
   assert.equal(typeof notifiers[0], 'function')
-  c.schedule('open')
+  controller.schedule('open')
   await sleep(30)
   assert.deepEqual(lensesOf(view), [], '通道还没抓到东西时不画（也不放假条目）')
   channel.ready = true
@@ -160,19 +175,17 @@ test('宿主只交一个通道对象：渲染层自己读 entries，并把「抓
   await sleep(30)
   assert.equal(queries, 2, '补刷这一拍真的重问了')
   assert.deepEqual(lensesOf(view).map(lens => [lens.line, lens.item.title]), [[6, '3 个用法']])
-  c.dispose()
+  controller.dispose()
 })
 
 test('通道 entries() 抛错时退化成「没有本地通道」，服务端 lens 照旧', async () => {
-  const view = fakeView()
-  const c = createCodeLens({
+  const { view, controller } = viewOf({
     query: async () => ({ available: true, items: [serverLens(2, '仅服务端')] }),
-    enabled: () => true, view: () => view, onCommand: () => {}, policy: FAST,
     localChannel: { entries: () => { throw new Error('documentSymbol 挂了') }, attach: () => {}, refresh: async () => [], reset: () => {}, pending: () => null },
   })
-  c.schedule('open')
+  controller.schedule('open')
   await sleep(30)
   assert.deepEqual(lensesOf(view).map(lens => lens.item.title), ['仅服务端'])
-  c.dispose()
+  controller.dispose()
 })
 

@@ -44,10 +44,10 @@ onBeforeUnmount(() => {
       </div>
       <div class="palette-results">
         <button v-for="entry in paths" :key="entry.id" @click="emit('pick', { path: entry.path })">
-          <FolderOpen :size="iconSize.toolbar" :class="{ missing: !entry.exists }" />
+          <FolderOpen aria-hidden="true" :size="iconSize.toolbar" :class="{ missing: !entry.exists }" />
           <span class="special-main"><strong>{{ entry.label }}</strong><span class="special-path">{{ entry.path }}</span></span>
           <span v-if="!entry.exists" class="special-flag">不存在</span>
-          <ChevronRight :size="iconSize.control" />
+          <ChevronRight aria-hidden="true" :size="iconSize.control" />
         </button>
         <p v-if="!paths.length" class="palette-empty">没有可显示的目录。</p>
       </div>

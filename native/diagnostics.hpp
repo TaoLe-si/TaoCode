@@ -100,5 +100,40 @@ Json troubleshooting(const std::filesystem::path& profile, const std::filesystem
  */
 Json app_info(const std::filesystem::path& profile, const std::string& browser_version, const std::string& version);
 
+/**
+ * **低内存检查**（IDEA `LowMemoryNotifier` / `EditMemorySettingsDialog` 的宿主侧对应物）。
+ *
+ * 上游那个是 JVM 堆的：`LowMemoryNotifier` 在 `MemoryUsage` 超过 `-Xmx` 的某个比例时弹通知，
+ * 用户可以调大堆上限。本仓没有可调的 JVM 堆（宿主是 C++ + WebView2），等价物是
+ * **进程工作集 + 系统可用物理内存**：两者都偏低时提示用户（内存芯片的 `app.memory` 只报数字，
+ * 这条报"要不要当回事"）。
+ *
+ * 判据（阈值都是常量，可被 `app.lowMemory` 的参数覆盖）：
+ *   · `low` = 系统可用物理内存 < `kLowMemoryAvailableMb`（默认 512 MiB）
+ *             或 进程工作集 > `kLowMemoryWorkingSetMb`（默认 2048 MiB）；
+ *   · 返回 `{low, availableMb, totalMb, workingSetMb, loadPercent, thresholdMb}`，
+ *     `loadPercent` 是系统物理内存占用百分比（上游 `MemoryUsage` 的等价面）。
+ */
+Json low_memory(std::uint64_t available_threshold_mb = 512, std::uint64_t working_set_threshold_mb = 2048);
+
+/** 低内存阈值常量（`low_memory()` 的默认值，供 UI/判据引用同一份数字）。 */
+inline constexpr std::uint64_t kLowMemoryAvailableMb = 512;
+inline constexpr std::uint64_t kLowMemoryWorkingSetMb = 2048;
+
+/**
+ * **日志级别配置**（IDEA `LogLevelConfigurationManager` / `LogCategory` 的对应物）。
+ *
+ * 上游可以给每个 category 单独设级别（DEBUG/INFO/WARN/ERROR），并写进
+ * `<config>/options/idea.log.level`。本仓的 `event()` 收一个级别字符串，但**没有过滤**：
+ * 这次补上"读/写一个全局最低级别 + `event()` 按它过滤"这一层（category 级留作后续）。
+ *
+ * 级别表就是四个名字（大小写不敏感）：`DEBUG` < `INFO` < `WARN` < `ERROR`；
+ * 比最低级别更低的那些 `event()` 不落盘（`DEBUG` 用于打开诊断开关后的细节日志）。
+ * 设置持久化在 `<profile>/log-level.txt`（一行级别名），读不到就用默认 `INFO`。
+ */
+std::string log_level(const std::filesystem::path& profile);
+/** 写最低日志级别；非法级别名返回 false 且不落盘（不把设置写成一个认不出的值）。 */
+bool set_log_level(const std::filesystem::path& profile, const std::string& level);
+
 }  // namespace diagnostics
 }  // namespace taocode

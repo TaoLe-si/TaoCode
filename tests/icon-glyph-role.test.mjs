@@ -70,6 +70,21 @@ function lucideImportsOf(file) {
   return names
 }
 
+/** 本仓自己的矢量图标（`components/icons/` 的 IDEA expui 副本）的组件名。
+ *  与 lucide 那条同理：它们是真组件、真 SVG，只是来源不同（见 src/components/icons/index.ts
+ *  的通道划分）—— 门禁要认它们，否则 `ToolStripe.vue` 的「更多」按钮会被误报成字形。 */
+function ideaImportsOf(file) {
+  const src = readFileSync(file, 'utf8')
+  const names = new Set()
+  for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*icons\/[^'"]*['"]/g)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/)[0].trim()
+      if (name && /^[A-Z]/.test(name)) names.add(name)
+    }
+  }
+  return names
+}
+
 /** `:size="iconSize.x"` 里的 x（静态属性与指令都要认；这里只取字面量那一支）。 */
 function sizeRoleOf(node) {
   for (const p of node.props ?? []) {
@@ -114,6 +129,7 @@ test('纯图标按钮必须渲染矢量图标，不能只渲染一个字符', ()
     if (!tpl) continue
     const offset = d.template.loc.start.line - 1
     const lucide = lucideImportsOf(file)
+    const idea = ideaImportsOf(file)
     let ast
     try { ast = parseDom(tpl) } catch { continue }
     walk(ast, node => {
@@ -126,7 +142,7 @@ test('纯图标按钮必须渲染矢量图标，不能只渲染一个字符', ()
         else if (n.type === NodeTypes.INTERPOLATION) text += n.content.content
         else if (n.type === NodeTypes.ELEMENT) {
           if (n.tag === 'svg' || n.tag === 'component') hasVector = true
-          else if (lucide.has(n.tag)) hasVector = true
+          else if (lucide.has(n.tag) || idea.has(n.tag)) hasVector = true
         }
       })
       if (hasRealWord(text)) return    // 有真文字（`选择任务…`、`×3`、`Aa`）：那是文字，不是图标

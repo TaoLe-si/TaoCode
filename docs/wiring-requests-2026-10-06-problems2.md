@@ -182,3 +182,15 @@ status3 在问题视图域**闭环掉的一条**（原来挂在 status2 那份�
 `src/components/ProblemsPanel.vue` 的导出文本「详情」复选框已落地
 （state `:516-519`、调用点 `:546`、模板 `:603`），判据 `tests/problems-export-text-details.test.mjs`（6 条，含反向验证）。
 ⇒ 面板这一侧不再需要为 `src/errorTree.ts` 的 `details` 分支补宿主。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1** —— 目标 `src/lspHighlightingCache.ts` / `src/lspNavigation.ts`（本 lane 可改面）+ `src/components/CodeEditor.vue`（禁改）。因 CodeEditor 那一处是禁改文件，登记为待办给 CodeEditor owner。
+- **W2** —— 请求原文自述「本轮自己闭环，不需要接线」。
+
+结论：零接线（W1 卡 CodeEditor，W2 自述闭环）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（W1 卡 CodeEditor，W2 自述闭环）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

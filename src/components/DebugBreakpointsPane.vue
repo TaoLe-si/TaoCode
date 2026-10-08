@@ -35,6 +35,9 @@ import { breakpointEditModel, breakpointEditPatch, type BreakpointEditModel } fr
 import { requestBreakpointsDialog } from '../dbgBreakpointsDialogHost'
 import DebugBreakpointEditDialog from './DebugBreakpointEditDialog.vue'
 import { iconSize } from '../uiIcons'
+// 断点命中高亮：`stopped.hitBreakpointIds` 由 src/dapEventRelay.ts 的第二监听者解读
+// （bridge 只留了停机原因，id 列表在原文里）。这里把命中的「文件:行」映射到芯片上。
+import { dapEventRelay } from '../dapEventRelay'
 
 const props = defineProps<{
   activePath: string
@@ -106,6 +109,9 @@ const breakChips = computed(() => activeBreaks.value.map(point => {
     hitCondition: fieldOf(ref, point, 'hitCondition'),
     log: fieldOf(ref, point, 'logMessage'),
     dependency: dependencies.value[ref] ?? '',
+    // 命中 = 适配器这次停报的 hitBreakpointIds 里有一条落在本芯片这一行（id → 行的映射
+    // 由 breakpoint 事件累积，见 src/dapEventRelay.ts）。
+    hit: dapEventRelay.hitLocations.some(place => place.path === props.activePath && place.line === point.line),
   }
 }))
 const refOf = (path: string, line: number) => breakpointRef(path, line)
@@ -333,7 +339,7 @@ defineExpose({ applyStopRules, resendRemembered })
     <div class="debug-section-title">
       断点 · {{ activePath ? activePath.split('/').pop() : '（无当前文件）' }}
       <!-- 上游 `MuteBreakpointsAction` / `RemoveAllBreakpointsAction`：静音不删断点、全清是真删。 -->
-      <button class="chip-x debug-break-action" :class="{ active: muted }" :title="muted ? '取消断点静音' : '静音所有断点（不断点，只是让调试器忽略）'" :aria-label="muted ? '取消断点静音' : '静音所有断点'" @click="toggleMute">
+      <button class="chip-x debug-break-action" :class="{ active: muted }" :aria-pressed="muted" :title="muted ? '取消断点静音' : '静音所有断点（不断点，只是让调试器忽略）'" :aria-label="muted ? '取消断点静音' : '静音所有断点'" @click="toggleMute">
         <Volume2 v-if="muted" :size="iconSize.chip" /><VolumeX v-else :size="iconSize.chip" />
       </button>
       <button class="chip-x debug-break-action" :disabled="!dapBreakpoints.size" title="移除所有断点" aria-label="移除所有断点" @click="removeAllBreakpoints"><Trash2 :size="iconSize.chip" /></button>
@@ -346,8 +352,8 @@ defineExpose({ applyStopRules, resendRemembered })
       <!-- 临时断点（`ToggleTemporaryLineBreakpointAction`）：命中一次自动删。 -->
       <label class="debug-exception" title="临时断点：命中一次后自动移除"><input v-model="newBreakTemporary" type="checkbox" />临时</label>
       <span v-if="!activeBreaks.length" class="debug-empty-inline">无</span>
-      <span v-for="chip in breakChips" :key="chip.point.line" class="debug-break-chip" :class="{ unverified: chip.point.verified === false, muted, temporary: chip.temporary }"
-            :title="chip.point.verified === false ? `第 ${chip.point.line} 行：调试器未验证（可能被移到别的行）` : undefined">
+      <span v-for="chip in breakChips" :key="chip.point.line" class="debug-break-chip" :class="{ unverified: chip.point.verified === false, muted, temporary: chip.temporary, hit: chip.hit }"
+            :title="chip.hit ? `第 ${chip.point.line} 行断点命中（调试器停在这里）` : chip.point.verified === false ? `第 ${chip.point.line} 行：调试器未验证（可能被移到别的行）` : undefined">
         {{ chip.point.line }}<span v-if="chip.markers.condition" class="debug-break-cond" :title="`条件：${chip.condition}`">?</span><span v-if="chip.markers.hit" class="debug-break-cond" :title="`命中次数：${chip.hitCondition}`">#</span><span v-if="chip.markers.log" class="debug-break-cond" :title="`日志：${chip.log}`">L</span>
         <button class="chip-x" title="移除此断点" :aria-label="`移除断点 ${chip.point.line}`" @click="removeBreakpoint(chip.point.line)"><X :size="iconSize.chip" /></button>
         <input class="debug-break-condition" type="text" :value="chip.condition" :aria-label="`第 ${chip.point.line} 行断点条件`" placeholder="条件" spellcheck="false" @keydown.enter.prevent="setBreakpointFields(chip.point.line, { condition: ($event.target as HTMLInputElement).value })" @change="setBreakpointFields(chip.point.line, { condition: ($event.target as HTMLInputElement).value })" />
@@ -375,12 +381,14 @@ defineExpose({ applyStopRules, resendRemembered })
 .debug-input-narrow { flex: 0 0 60px; }
 .debug-btn { display: inline-flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); color: var(--text); font-size: 11px; }
 .debug-btn:disabled { color: var(--muted); opacity: .5; }
-.debug-exception { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text); }
+.debug-exception { display: inline-flex; align-items: center; gap: var(--space-1); font-size: 11px; color: var(--text); }
 .debug-empty-inline { color: var(--muted); font-size: 11px; }
 .debug-break-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px var(--space-1) 1px var(--space-2); border-radius: var(--radius-pill); background: var(--elevated); border: 1px solid var(--line-strong); font: 11px var(--font-mono); }
 .debug-break-chip.unverified { border-style: dashed; color: var(--muted); }
 .debug-break-chip.muted { opacity: .6; border-style: dotted; }
 .debug-break-chip.temporary { border-style: dashed; }
+/* 命中的那一条：实心强调色（上游停在断点上时断点图标换成"命中"态）。 */
+.debug-break-chip.hit { border-color: var(--accent); background: var(--selected); color: var(--bright); }
 .debug-break-cond { color: var(--accent); }
 .chip-x { display: inline-flex; border: 0; background: transparent; color: var(--muted); padding: 1px; border-radius: var(--radius-xs); }
 .chip-x:hover { color: var(--error); background: var(--hover); }

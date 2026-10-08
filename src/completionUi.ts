@@ -1,11 +1,19 @@
-import { acceptCompletion, autocompletion, closeCompletion, completionStatus, currentCompletions, startCompletion, type Completion, type CompletionSource } from '@codemirror/autocomplete'
+import { acceptCompletion, autocompletion, closeCompletion, completionStatus, currentCompletions, pickedCompletion, startCompletion, type Completion, type CompletionSource } from '@codemirror/autocomplete'
 import { Prec, EditorSelection, type EditorState } from '@codemirror/state'
-import { EditorView, ViewPlugin, getTooltip, keymap, repositionTooltips, showTooltip, tooltips, type TooltipView } from '@codemirror/view'
+import { EditorView, ViewPlugin, getTooltip, keymap, repositionTooltips, showTooltip, tooltips, type TooltipView, type ViewUpdate } from '@codemirror/view'
 import { completionIcon } from './completionIcons.ts'
 import { completionPresentation, type PresentedCompletion } from './completionPresentation.ts'
 import { beginCompletion, completionModeForEvent, endCompletion, type CompletionMode } from './completionModes.ts'
 import { hippieStep, type HippieState } from './cyclicWordCompletion.ts'
 import { otherOpenEditorTexts } from './completionOpenEditors.ts'
+// 弹层侧的四条 EP（声明与出处见 `src/completionExtensionPoints.ts` 的「第二批」段）：
+//   · `com.intellij.lookup.charFilter` → 下面的 `lookupCharFilter`（输入到来时逐个问）；
+//   · `com.intellij.lookup.actionProvider` → `handleLookupActionKey`（Alt+Enter 的上下文动作）；
+//   · `com.intellij.lookup.usageDetails` → `recordLookupUsage`（一轮结束时的用量记录）。
+import {
+  charFilterDecision, lookupActionProviders, lookupActionsFor, lookupCharFilters, lookupUsageDescriptors,
+  lookupUsageRecord, type LookupActionContext,
+} from './completionExtensionPoints.ts'
 
 // 三条补全键位（`platform/platform-resources/src/keymaps/$default.xml`）：
 //   · `CodeCompletion` = Ctrl+Space —— `:732-734`（`CodeCompletionAction.java:12-17`，BASIC）；
@@ -75,6 +83,88 @@ export function startBasicCompletion(view: EditorView): boolean {
   return startCompletionAs(view, 'basic')
 }
 
+/**
+ * 弹层侧三条 EP 共用的上下文（`Lookup` + `LookupElement` 的可移植替代，形状见
+ * `src/completionExtensionPoints.ts` 的 `LookupActionContext`）。
+ * **如实的两处缺**：① 路径与语言在这一层拿不到（弹层是编辑器侧的 CodeMirror 扩展，宿主的
+ * 文件路径/语言注入点在禁改的 `src/components/CodeEditor.vue` 里）⇒ 两条 EP 的语言收窄不生效
+ * （`completionAcceptsLanguage` 的「未知不收窄」），其余字段齐；② 前缀按光标前的标识符算
+ * （CodeMirror 只把 `from` 交给 `inputHandler`，不暴露 `prefixLength`），候选项取 `currentCompletions`
+ * 的第一条 —— 上游那一格是「当前选中项」，CM 的公开 API 不暴露选中索引，取首条是最近似的那一档。
+ */
+export function lookupContext(view: EditorView, outcome: LookupActionContext['outcome']): LookupActionContext {
+  const head = view.state.selection.main.head
+  const line = view.state.doc.lineAt(head)
+  const word = /[\p{L}\p{N}_$]+$/u.exec(view.state.sliceDoc(line.from, head))?.[0] ?? ''
+  const current = currentCompletions(view.state)[0]
+  return {
+    path: '', language: '',
+    prefix: word,
+    lookupString: current ? String(current.displayLabel ?? current.label) : '',
+    itemKind: current?.type,
+    outcome,
+  }
+}
+
+/**
+ * `com.intellij.lookup.charFilter` 的**唯一消费点**：输入到来时逐个问登记表
+ * （上游 `CharFilter.acceptChar(c, prefixLength, lookup)`，`CharFilter.java:69`）。
+ * 没有贡献者（`lookupCharFilters` 空）或没人认这个字符（返回 null）时**返回 false**，
+ * CodeMirror 的原行为照旧 —— 弹层开着时打字仍然照常过滤。
+ * `HIDE_LOOKUP` = 取消这一轮、字符照插；`SELECT_ITEM_AND_FINISH_LOOKUP` = 接受当前项、吃掉这一键。
+ */
+const lookupCharFilter = Prec.highest(EditorView.inputHandler.of((view, _from, _to, text) => {
+  if (!text || text.length !== 1) return false
+  if (!completionRoundActive(view)) return false
+  if (lookupCharFilters('').length === 0) return false
+  const context = lookupContext(view, 'replaced')
+  const decision = charFilterDecision(text, context.prefix.length, context)
+  if (decision === 'HIDE_LOOKUP') { closeCompletion(view); return false }
+  if (decision === 'SELECT_ITEM_AND_FINISH_LOOKUP') return acceptCompletion(view)
+  return false
+}))
+
+/**
+ * `com.intellij.lookup.actionProvider` 的**唯一消费点**：弹层里按 Alt+Enter 时收集上下文动作
+ * （上游 `LookupActionProvider.fillActions`，`LookupActionProvider.java:36`）。
+ * 有动作就吃掉这一键并跑**第一条** —— 上游是弹一个动作菜单，本仓的自绘弹层里没有二级菜单位，
+ * 如实收成「第一条即执行」（登记在报告里）。没有贡献者/没有动作时返回 false，Alt+Enter 原行为照旧。
+ */
+export function handleLookupActionKey(event: KeyboardEvent, view: EditorView): boolean {
+  if (event.key !== 'Enter' || !event.altKey || event.ctrlKey || event.metaKey) return false
+  if (!completionRoundActive(view)) return false
+  if (lookupActionProviders('').length === 0) return false
+  const context = lookupContext(view, 'accepted')
+  const actions = lookupActionsFor(context)
+  if (!actions.length) return false
+  event.preventDefault()
+  try { actions[0]!.run(context) } catch { /* 坏动作不外泄到键位层。 */ }
+  return true
+}
+
+/** 一轮补全结束时把用量交给宿主（缺省空操作：本仓没有远端统计通道，见 `recordLookupUsage`）。 */
+let lookupUsageSink: (records: { key: string; data: [string, unknown][] }[], context: LookupActionContext) => void = () => {}
+
+/** 宿主接走用量记录（`com.intellij.lookup.usageDetails` 的出口；返回取消订阅）。 */
+export function setLookupUsageSink(
+  sink: (records: { key: string; data: [string, unknown][] }[], context: LookupActionContext) => void,
+): () => void {
+  const previous = lookupUsageSink
+  lookupUsageSink = sink
+  return () => { lookupUsageSink = previous }
+}
+
+/**
+ * 一轮补全结束时收集用量（上游 `LookupUsageTracker` 在 `completion.finished` 上收这一批，
+ * `LookupUsageDescriptor.getExtensionKey` + `getAdditionalUsageData`）。
+ * **没有描述符贡献者时一条都不构造** —— 零开销、行为不变。
+ */
+function recordLookupUsage(view: EditorView, outcome: 'accepted' | 'cancelled'): void {
+  if (lookupUsageDescriptors().length === 0) return
+  const context = lookupContext(view, outcome)
+  try { lookupUsageSink(lookupUsageRecord(context), context) } catch { /* 坏接收器不外泄。 */ }
+}
+
 /** Ctrl+Space / Ctrl+Shift+Space / Ctrl+Alt+Space 三条都从这里落（判定表 `completionModes.ts:57-65`）。 */
 export function handleCompletionModeKey(event: KeyboardEvent, view: EditorView): boolean {
   const mode = completionModeForEvent(event)
@@ -84,10 +174,13 @@ export function handleCompletionModeKey(event: KeyboardEvent, view: EditorView):
 export const basicCompletionKeys = [
   // 这里是**唯一**的三条补全键位入口：以前只挂了 Ctrl+Space 一条，
   // 于是 Smart / 类名两档在模型里齐了、在界面上按不出来。
+  Prec.highest(EditorView.domEventHandlers({ keydown: handleLookupActionKey })),
   Prec.highest(EditorView.domEventHandlers({ keydown: handleCompletionModeKey })),
   // EditorChooseLookupItemReplace is Tab ($default.xml:111-113). Without this,
   // CodeEditor's indentation consumes Tab even when a lookup is open.
   Prec.high(keymap.of([{ key: 'Tab', run: acceptCompletion }])),
+  // `com.intellij.lookup.charFilter`：输入到来时先问一遍登记表（见上面那个 inputHandler）。
+  lookupCharFilter,
 ]
 
 // 循环词补全（上游 `HippieCompletionAction`：Alt+/ 向前、Alt+Shift+/ 向后，`$default.xml:735-739`）。
@@ -279,8 +372,19 @@ const completionLayout = ViewPlugin.fromClass(class {
   // 显式字段，不写参数属性（`constructor(readonly view: …)` 是类型扩展语法，Node 22 直跑
   // `.ts` 的 strip-only 擦除不支持它，会让 import 到本文件的用例**整个文件**加载失败）。
   private readonly view: EditorView
-  constructor(view: EditorView) { this.view = view; this.schedule() }
-  update() {
+  /** 上一拍弹层开着吗 —— 「这一轮结束了」那一拍要拿它判（见 `update`）。 */
+  private wasOpen: boolean
+  constructor(view: EditorView) { this.view = view; this.wasOpen = completionRoundActive(view); this.schedule() }
+  update(update: ViewUpdate) {
+    // `com.intellij.lookup.usageDetails`：弹层从「开着」落到「关了」的那一拍收一次用量
+    // （上游 `LookupUsageTracker` 在 `completion.finished` 上收）。接受的判据是事务上的
+    // `pickedCompletion` 标注（CM 只在真正插入了某个候选时打它）。
+    const open = completionRoundActive(update.view) || reopeningViews.has(update.view)
+    if (this.wasOpen && !open) {
+      const accepted = update.transactions.some(transaction => transaction.annotation(pickedCompletion) != null)
+      recordLookupUsage(update.view, accepted ? 'accepted' : 'cancelled')
+    }
+    this.wasOpen = open
     // 弹层一关就把这一轮的模式与调用次数作废（上游那份状态随 `CompletionPhase` 一起结束，
     // `CodeCompletionHandlerBase.java:210-213`）；打字收层、Esc、接受条目、切焦点都走到这里。
     endCompletionIfRoundOver(this.view)

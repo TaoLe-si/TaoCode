@@ -78,3 +78,15 @@
 3. `tests/verdict-generated.test.mjs:1-4` 头注释自述 3 个域、`:3` 又写「2243 + 755 类」，与 `:18` 的 5 域不符（数字 1608+635=2243 对得上 execution+xdebugger，`daemon 659`、`platform_rest 20574` 没在注释里）。
 4. `docs/inventory/` 里 `*_verdict_table.md`（生成，头部写「勿手改」）与 `verdict-*.md`（手写）同时存在，目录里没有一份「哪个域走哪条路」的说明文件；
    `verdict_table.py:815-817` 生成的那句说明只写在**生成物**里 ⇒ 手写侧的维护规则没有任何地方成文。建议在 `docs/` 根补一份 inventory 维护说明（我未创建，避免与在跑的 verdict 车道撞车）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+本份 5 组全是**测试 / 规约 / inventory 元审计**，没有一条 UI 挂载点，且目标文件全部不在本 lane 名下：
+
+- **R1**（`tests/ui-motion.test.mjs:226/:261` 注释坐标）—— `tests/**` 不属本 lane。跳过。
+- **R2**（同文件 `:51/:262/:269` 门控收紧）—— 同上，跳过。
+- **R3**（`docs/batch-2026-10-06-main.md` 红名单）—— 别人的 batch 报告，跳过。
+- **R4**（`.tools/agent-rules.md` / `AGENTS.md`）—— 规约本体，跳过。
+- **R5**（`docs/inventory/*`）—— 保留文件（lane 明确禁改 `docs/inventory/**`），跳过。
+
+结论：**零接线**，未改任何文件。

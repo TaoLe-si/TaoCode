@@ -261,10 +261,47 @@ public:
     void step_out(long thread_id, Reply on_reply);
     // Reply result: {frames:[{id, name, line, column, path}], totalFrames}.
     void stack_trace(long thread_id, Reply on_reply);
-    // Reply result: {scopes:[{name, reference, variablesReference, expensive}]}.
+    // DAP `stackTrace` 的**分页**形式（规范 "Stack Trace Request" 的 `startFrame`/`levels`）。
+    // 规范里两个字段都可选，所以 <= 0 时**不发该键**（省略 = 从第 0 帧起 / 返回全部）——
+    // 发 0 会被适配器当成"第 0 帧"这个具体值，与"不指定"是两回事。
+    // Reply result 与上面同形（totalFrames 仍是适配器报的总数，不是本页的条数）。
+    void stack_trace(long thread_id, long start_frame, long levels, Reply on_reply);
+    // Reply result: {scopes:[{name, reference, variablesReference, expensive, namedVariables?, indexedVariables?}]}.
     void scopes(long frame_id, Reply on_reply);
-    // Reply result: {variables:[{name, value, type?, reference, named}]}.
+    // Reply result: {variables:[{name, value, type?, reference, named, namedVariables?, indexedVariables?}]}.
     void variables(long variables_reference, Reply on_reply);
+    // DAP `variables` 的**分页**形式（规范 "Variables Request" 的 `start`/`count`）：
+    // 大容器（数组/集合）一次只取一页，`start`/`count` <= 0 时**不发该键**。
+    // Reply result 与上面同形。
+    void variables(long variables_reference, long start, long count, Reply on_reply);
+    // DAP `evaluate`（规范 "Evaluate Request"）：求值表达式 —— IDEA 的 Evaluate Expression /
+    // hover 检查。`context` 取规范里的 `watch`/`repl`/`hover`/`variables`/`clipboard`；
+    // `frame_id` <= 0 时**不发该键**（省略 = 全局上下文）。走整形，字段与 `variables` 一条
+    // 保持一致（`reference`/`named`/`namedVariables`/`indexedVariables`），并保留前端在用的
+    // `variablesReference` 键，这样 UI 能用同一套渲染。
+    void evaluate(const std::string& expression, const std::string& context, long frame_id, Reply on_reply);
+    // DAP `dataBreakpoints`（规范 "Data Breakpoints Request"）：列出适配器支持的数据断点
+    // （变量/内存位置发生变化时停住）。IDEA 的对应物是 `JavaFieldBreakpointType` 的字段观察点
+    // （`java/debugger/impl/src/com/intellij/debugger/ui/breakpoints/JavaFieldBreakpointType.java`）。
+    // 能力位 `supportsDataBreakpoints`（**规范默认 false**），未声明回 `DAP_UNSUPPORTED`。
+    // Reply result: {available, breakpoints:[{id?, dataId, accessType?, label, description?}]}，
+    // **空数组是有意义的答案**（这个会话没有可观察的数据位置）。
+    void data_breakpoints(Reply on_reply);
+    // DAP `setDataBreakpoints`（能力位 `supportsDataBreakpoints`）：装/清数据断点。
+    // `requested` 是 [{dataId, accessType?, condition?, hitCondition?}]；dataId 空的条目丢弃
+    // （适配器认不出）。Reply result: {breakpoints:[{verified, id?, message?, dataId?, ...}]}。
+    void set_data_breakpoints(const Json& requested, Reply on_reply);
+    // DAP `setFunctionBreakpoints`（规范 "Set Function Breakpoints Request"）：按**函数名**停住 ——
+    // IDEA 的 `JavaMethodBreakpointType`（方法断点）。能力位 `supportsFunctionBreakpoints`
+    // （**规范默认 false**），未声明回 `DAP_UNSUPPORTED`。
+    // `requested` 是 [{name, condition?, hitCondition?}]；name 空的条目丢弃。
+    // Reply result: {breakpoints:[{verified, id?, line?, message?, name?}]}。
+    void set_function_breakpoints(const Json& requested, Reply on_reply);
+    // DAP `source`（规范 "Source Request"，能力位 `supportsSourceRequest`）：按
+    // `sourceReference` 取源内容 —— 适配器动态生成的源（没有真实文件路径）只能这样取，
+    // 是 `file.read` 在调试侧的等价物。能力位未声明回 `DAP_UNSUPPORTED`。
+    // Reply result: {available, content?, mimeType?}。
+    void source(long source_reference, const std::string& path, Reply on_reply);
     // DAP `setVariable`（规范 "Set Variable Request"）：改一个变量的值。
     void set_variable(long variables_reference, const std::string& name, const std::string& value, Reply on_reply);
     // DAP `setExpression`（规范 "Set Expression Request"）：给一个表达式赋值 —— IDEA 的
@@ -309,6 +346,11 @@ public:
     // `supportsReadMemoryRequest` / `supportsDisassembleRequest`（**默认 false**）。
     bool supports_read_memory() const;
     bool supports_disassemble() const;
+    // `supportsDataBreakpoints` / `supportsFunctionBreakpoints` / `supportsSourceRequest`
+    // （**三个都默认 false**）：数据断点 / 方法（函数）断点 / 按 sourceReference 取源内容。
+    bool supports_data_breakpoints() const;
+    bool supports_function_breakpoints() const;
+    bool supports_source() const;
     // DAP `terminate`（IDEA 的「停止」）：适配器支持就发规范请求，否则退化成
     // `disconnect{terminateDebuggee: true}` —— 两条路都是"把目标进程结束掉"。
     // 无论哪条路，调用方仍应在回调里 `shutdown()` 收摊。

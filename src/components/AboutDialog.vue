@@ -68,7 +68,6 @@ onBeforeUnmount(() => { if (closeTimer !== undefined) window.clearTimeout(closeT
           <dd :class="{ 'about-path': row.label === PATH_LABEL }">{{ row.value }}</dd>
         </template>
       </dl>
-      <p class="about-foot">宿主为 C++20 + WebView2，界面为 Vue 3；语言智能与调试分别走 LSP 与 DAP。</p>
       <div class="dialog-actions">
         <button class="primary-button about-copy" type="button" :title="ABOUT_COPY_DESCRIPTION" :aria-label="ABOUT_COPY_DESCRIPTION" @click="copyAndClose">{{ copyLabel }}</button>
       </div>
@@ -83,6 +82,5 @@ onBeforeUnmount(() => { if (closeTimer !== undefined) window.clearTimeout(closeT
 .about-list dt { color: var(--muted); }
 .about-list dd { margin: 0; color: var(--text); }
 .about-path { word-break: break-all; }
-.about-foot { margin: 0; padding: 0 var(--space-3); color: var(--muted); font-size: 12px; }
 .about-copy { margin-top: 0; }
 </style>

@@ -70,10 +70,15 @@ export function createProgressPanel(ctx: ProgressPanelContext) {
         percent: null,
       })
     }
-    // 后台任务队列的**排队深度**（`BackgroundTaskQueue` 在 `src/backgroundTasks.ts`；
-    // 正在跑的那条由各功能自己的进度行承担 —— 队列这里只在有人排队时补一行，不然同一个操作会出现两行）。
+    // 后台任务队列的**那一行**（`BackgroundTaskQueue` 在 `src/backgroundTasks.ts`；
+    // 正在跑的那条由各功能自己的进度行承担 —— 队列这里只在有人排队 / 被挂起 / 正在取消时补一行，
+    // 不然同一个操作会出现两行）。取消按钮跟着**正在跑那条任务自己的**可取消档：
+    // 上游同一判据是 `InfoAndProgressPanel.kt:753`（`cancelButton.setPainting(task.isCancellable())`）
+    // 与 `:876`（`info.isCancellable() && !isStopping`），点下去打的是这条任务的 `cancel()`
+    // （`:964` `original!!.cancel()`）—— 在本仓就是 `cancelCurrentAndAwait()` 那一条路（见下面的 switch）。
+    // 这里原来写死 `cancellable: false`：队列的 `'background'` 取消分支因此没有任何发出点。
     const queueRow = backgroundTaskQueue.queueRow.value
-    if (queueRow) tasks.push({ title: queueRow.title, detail: queueRow.detail, cancellable: false, percent: queueRow.percent })
+    if (queueRow) tasks.push({ title: queueRow.title, detail: queueRow.detail, cancellable: queueRow.cancellable ? 'background' : false, percent: queueRow.percent })
     // 语言服务的 `$/progress`：服务器给了百分比就是确定式的（带条），没给就跟着不确定式。
     for (const task of ctx.lspProgress()) {
       const elapsed = elapsedLabel(task.since, now.value)

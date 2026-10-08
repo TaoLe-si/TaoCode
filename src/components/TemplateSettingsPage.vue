@@ -103,8 +103,8 @@ const slotRows = computed(() => {
   }
   return rows
 })
-// 看着像宏调用、宏表里却没这个名字：那一格不会求值，按字面文本插入（宏清单只渲染宏表里那 21 条，
-// 上游注册了但本仓接不上的 12 条不在这里出现 —— 规约 §3「没有消费链路的宏不渲染」）。
+// 看着像宏调用、宏表里却没这个名字：那一格不会求值，按字面文本插入（宏清单只渲染宏表里那 25 条，
+// 上游注册了但本仓接不上的 8 条不在这里出现 —— 规约 §3「没有消费链路的宏不渲染」）。
 const unknownMacro = computed(() => {
   for (const match of slotTokens(draft.value.body)) {
     const found = unknownMacroCall(match[2] ?? '')
@@ -186,10 +186,10 @@ function toggleLanguage(language: string) {
   <div class="lt-page">
     <div class="lt-tabs" role="tablist" aria-label="模板类型">
       <button class="lt-tab" :class="{ 'lt-tab-on': tab === 'live' }" role="tab" :aria-selected="tab === 'live'" @click="tab = 'live'">
-        <Braces :size="iconSize.menu" />实时模板
+        <Braces aria-hidden="true" :size="iconSize.menu" />实时模板
       </button>
       <button class="lt-tab" :class="{ 'lt-tab-on': tab === 'file' }" role="tab" :aria-selected="tab === 'file'" @click="tab = 'file'">
-        <FileText :size="iconSize.menu" />文件模板
+        <FileText aria-hidden="true" :size="iconSize.menu" />文件模板
       </button>
     </div>
     <FileTemplatesSettingsPage
@@ -204,7 +204,7 @@ function toggleLanguage(language: string) {
       <select v-model="scope" class="lt-scope" aria-label="模板语言范围">
         <option value="all">所有语言</option><option v-for="name in ['java', 'cpp', 'typescript', 'other']" :key="name" :value="name">{{ name }}</option>
       </select>
-      <button class="subtle-button" :disabled="busy || settings.customs.length >= 100" @click="startCreate"><Plus :size="iconSize.menu" />新建模板</button>
+      <button class="subtle-button" :disabled="busy || settings.customs.length >= 100" @click="startCreate"><Plus aria-hidden="true" :size="iconSize.menu" />新建模板</button>
     </div>
     <div class="lt-list" role="list" aria-label="实时模板列表">
       <div v-for="row in shown" :key="row.pattern" class="lt-row" :class="{ 'lt-off': row.disabled }" role="listitem">
@@ -257,7 +257,7 @@ function toggleLanguage(language: string) {
            取 getPresentableName() → 去重排序（EditVariableDialog.java:103-111，
            查表是 MacroFactory.getMacros()，MacroFactory.java:21-24）。
            下拉文案就是上游 getPresentableName() 的原文（CodeInsightBundle.properties:178-185 与各宏构造器）。
-           上游注册了但本仓接不上的 12 条不渲染（见 src/templateMacros.ts 的 DEFERRED_TEMPLATE_MACROS）。 -->
+           上游注册了但本仓接不上的 8 条不渲染（见 src/templateMacros.ts 的 DEFERRED_TEMPLATE_MACROS）。 -->
       <div class="lt-macros" role="group" aria-label="可用模板宏">
         <code v-for="macro in macros" :key="macro.name" class="lt-macro">{{ macro.presentableName }}</code>
       </div>
@@ -285,7 +285,7 @@ function toggleLanguage(language: string) {
 .lt-row:last-child { border-bottom: 0; }
 .lt-row:hover { background: var(--hover); }
 .lt-check { display: flex; align-items: center; }
-.lt-check input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.lt-check input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); margin: 0; accent-color: var(--accent); }
 .lt-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); padding: var(--space-1) var(--space-1); border: 0; background: transparent; color: var(--text); text-align: left; cursor: default; }
 .lt-main[disabled] { opacity: 1; }
 .lt-builtin { cursor: default; }
@@ -309,7 +309,7 @@ function toggleLanguage(language: string) {
 .lt-langs { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); color: var(--secondary); font-size: 11px; }
 .lt-langs > span { color: var(--muted); }
 .lt-lang { display: flex; align-items: center; gap: var(--space-1); }
-.lt-lang input { width: 12px; height: 12px; margin: 0; accent-color: var(--accent); }
+.lt-lang input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); margin: 0; accent-color: var(--accent); }
 .lt-langs em { color: var(--muted); font-style: normal; font-size: 10px; }
 .lt-editor textarea { width: 100%; min-width: 0; padding: var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font: 12px/1.6 var(--font-mono); resize: vertical; }
 .lt-actions { display: flex; gap: var(--space-2); }

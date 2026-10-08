@@ -33,6 +33,13 @@ import { serverHintFor } from './lsSessionHost.ts'
 import { documentSymbolEntries, mergeWorkspaceSymbols } from './lspSymbolBridge.ts'
 import { buildQuickDocLayout, currentExternalUrl, type QuickDocLayout } from './quickDocLayout.ts'
 import { createDocumentationHistory, type DocumentationHistory } from './quickDocHistory.ts'
+// 扩展点 `DocumentationTargetProvider` / `DocumentationProvider`（`src/documentationExtensionPoints.ts`）：
+// 语言服务给不出内容时问一遍登记表（第三方按 id 挂的文档提供方在这里被真实消费）。
+import { documentationFor } from './documentationExtensionPoints.ts'
+// 文档目标一族的其余四条 EP（`src/documentationTargetExtensionPoints.ts`）：这里的 `showSymbolDoc`
+// 是 `symbolTargetProvider` 与 `linkHandler` 的真实消费点（见各自调用处的注释）。
+import { documentationTargetForSymbol, resolveDocumentationLinkTarget } from './documentationTargetExtensionPoints.ts'
+import { languageOfPath } from './cvLocalVision.ts'
 import type { Tab } from './editorTab.ts'
 
 /** 单张图片的读取上限（与 `src/components/MarkdownPreview.vue:27` 的 `MAX_BYTES` 同值）。 */
@@ -61,7 +68,7 @@ export interface QuickDocHostDeps {
   isDesktop: boolean
   active: { readonly value: Tab | undefined }
   lspReady: { readonly value: boolean }
-  editorFor: (path: string) => { getCursor(): { line: number; ch: number }; getCursorCoords(): { left: number; bottom: number } | null } | undefined
+  editorFor: (path: string) => { text(): string; getCursor(): { line: number; ch: number }; getCursorCoords(): { left: number; bottom: number } | null } | undefined
   request: typeof request
   /** 打开代码菜单时顺手关掉它（上游 `AbstractPopup` 独占一层）。 */
   menu: { value: unknown }
@@ -142,7 +149,22 @@ export function createQuickDocHost(deps: QuickDocHostDeps) {
     if (hint) { notify(hint, true); return }
     try {
       const contents = await fetchHover(tab.path, line, character)
-      if (contents === null) { notify('此处没有文档。', true); return }
+      if (contents === null) {
+        // 语言服务给不出内容 ⇒ 问扩展点 `DocumentationTargetProvider` / `DocumentationProvider`
+        // （`src/documentationExtensionPoints.ts`）；第三方按 id 挂的提供方在这里被真实消费。
+        const docLanguage = tab.path.includes('.') ? tab.path.slice(tab.path.lastIndexOf('.') + 1).toLowerCase() : ''
+        const contributed = documentationFor({
+          path: tab.path, language: docLanguage, text: editorFor(tab.path)?.text() ?? '', line, character,
+        })
+        if (contributed !== null) {
+          const coords = quickDoc.value ? null : editorFor(tab.path)?.getCursorCoords()
+          const x = coords?.left ?? quickDoc.value?.x ?? 200
+          const y = coords?.bottom ?? quickDoc.value?.y ?? 200
+          present(contributed, x, y, origin, remember, tab.path)
+          return
+        }
+        notify('此处没有文档。', true); return
+      }
       // 弹层已经开着 → 沿用它的锚点（同一块面板换内容，不跟着光标跳）；第一次打开才贴光标。
       const coords = quickDoc.value ? null : editorFor(tab.path)?.getCursorCoords()
       const x = coords?.left ?? quickDoc.value?.x ?? 200
@@ -187,6 +209,23 @@ export function createQuickDocHost(deps: QuickDocHostDeps) {
       },
     }
     let target: DocSymbolTarget | null
+    // `com.intellij.platform.backend.documentation.symbolTargetProvider`：第三方按 id 挂的提供方**先**
+    // 有权认领这个符号（上游 `DefaultTargetSymbolDocumentationTargetProvider.kt:35-38` 的那个循环）。
+    // 认领了就直接拿它的文档目标（`computeDocumentation()` 非空即用），解不出才落到下面那条 LSP 解析。
+    // bundled 提供方恒返回 null ⇒ 既有链路行为逐字不变。
+    const claimed = documentationTargetForSymbol({
+      path: tab.path, language: languageOfPath(tab.path),
+      text: '', line: tab.line, character: tab.column, symbol: link.target, originPath: tab.path,
+    })
+    if (claimed) {
+      let text: string | null = null
+      try { text = claimed.computeDocumentation() } catch { text = null }
+      if (text) {
+        const at = { x: quickDoc.value?.x ?? 200, y: quickDoc.value?.y ?? 200 }
+        present(text, at.x, at.y, `符号「${link.target}」（${claimed.path}:${String(claimed.line + 1)}）`, true, claimed.path)
+        return
+      }
+    }
     try { target = await resolveDocSymbolTarget(link.target, tab.path, queries) }
     catch (error) { notify(errorMessage(error), true); return }
     if (!target) { notify(`解析不出符号「${link.target}」：语言服务没有这个名字的声明位置。`, true); return }
@@ -276,15 +315,39 @@ export function createQuickDocHost(deps: QuickDocHostDeps) {
    */
   function followInternalDocLink(link: DocLink) {
     if (link.kind !== 'internal' || !link.target) return
-    if (isSymbolDocReference(link)) { void showSymbolDoc(link); return }
-    const root = workspaceRoot()?.replace(/\\/g, '/').replace(/\/+$/, '')
-    let path = link.target.replace(/\\/g, '/')
-    if (root && (/^[A-Za-z]:/.test(path) || path.startsWith('/'))) {
-      if (path.toLowerCase().startsWith(`${root.toLowerCase()}/`)) path = path.slice(root.length + 1)
-      else { notify(`该链接指向工作区外的文件：${link.target}`, true); return }
+    // ① `com.intellij.platform.backend.documentation.linkHandler`：第三方按 id 挂的处理器**先**有权把
+    // 这条 url 解成另一个 target（上游 `DocumentationLinkHandler.resolveLink`，文档浏览器点链接时先问这一族）。
+    // bundled 处理器恒返回 null ⇒ 下面两条既有通道（符号引用 / 带路径链接）行为逐字不变。
+    const viaHandler = resolveDocumentationLinkTarget({
+      url: link.target,
+      path: quickDoc.value?.docPath ?? active.value?.path ?? '',
+      line: link.line ?? 0, character: 0,
+      language: '',
+    })
+    if (viaHandler) {
+      const target = workspaceRelative(viaHandler.path)
+      if (!target) return
+      void revealLocation({ path: target, line: Math.max(0, viaHandler.line) })
+      return
     }
+    // ② 符号引用（`{@link Foo#bar}`，不带路径分隔符）→ 上游那条「符号 → 文档」链。
+    if (isSymbolDocReference(link)) { void showSymbolDoc(link); return }
+    // ③ 带路径的 `file:` / 相对路径链接 → 跳到那个文件的对应行。
+    const path = workspaceRelative(link.target)
+    if (!path) return
     // `filePathFromUri` 解出来的行号是 1 基，`revealLocation` 用 0 基。
     void revealLocation({ path, line: Math.max(0, (link.line ?? 0) - 1) })
+  }
+
+  /** 把链接里的路径收成工作区相对路径；在工作区外返回 null（并如实说明）。 */
+  function workspaceRelative(raw: string): string | null {
+    const root = workspaceRoot()?.replace(/\\/g, '/').replace(/\/+$/, '')
+    let path = raw.replace(/\\/g, '/')
+    if (root && (/^[A-Za-z]:/.test(path) || path.startsWith('/'))) {
+      if (path.toLowerCase().startsWith(`${root.toLowerCase()}/`)) path = path.slice(root.length + 1)
+      else { notify(`该链接指向工作区外的文件：${raw}`, true); return null }
+    }
+    return path
   }
 
   /**

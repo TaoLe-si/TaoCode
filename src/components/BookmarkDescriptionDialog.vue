@@ -24,10 +24,9 @@ watch(() => props.target, target => { value.value = target.current }, { immediat
       <h2>书签描述</h2>
       <p class="rename-target">{{ target.path }}<template v-if="target.line !== undefined"> · 第 {{ target.line }} 行</template></p>
       <input v-model="value" class="rename-input" aria-label="书签描述" placeholder="输入简短的书签描述" spellcheck="false" @keydown.enter.prevent="emit('save', value)" />
-      <p class="rename-note">清空后这条书签回到「没有自定义描述」：行书签仍显示那一行的原文。</p>
       <div class="dialog-actions">
-        <button class="subtle-button" @click="emit('close')">取消</button>
         <button class="primary-button" @click="emit('save', value)">确定</button>
+        <button class="subtle-button" @click="emit('close')">取消</button>
       </div>
     </section>
   </div>

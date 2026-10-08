@@ -549,8 +549,29 @@ Version take_version(const fs::path& root, const fs::path& directory, const std:
 
 }  // namespace
 
-History::History(std::filesystem::path store_root, std::size_t max_versions_per_file)
-    : store_root_(std::move(store_root)), max_versions_(clamp_max_versions(max_versions_per_file)) {
+// 上游 PersistentChangeListStorage.kt:308-329 findFirstObsoleteBlock 的口径，逐句照搬（含单位）。
+// 声明处有每一行对应的上游行号。
+std::size_t first_obsolete_index(const std::vector<long long>& time_millis,
+                                 long long period_millis, long long interval_millis) {
+    long long prev_timestamp = 0;  // :309
+    long long length = 0;          // :310
+    for (std::size_t index = 0; index < time_millis.size(); ++index) {  // :312-313 从最新往回走
+        const long long t = time_millis[index];
+        if (prev_timestamp == 0) prev_timestamp = t;  // :315 最新一条以自身为基准，delta 记 0
+        const long long delta = prev_timestamp - t;   // :317
+        prev_timestamp = t;                            // :318
+        length += delta < interval_millis ? delta : 1;  // :321 ≥12h 只累加 1（字面量，单位仍是毫秒）
+        if (length >= period_millis) return index;      // :323 首次达标的那条起全过期
+    }
+    return time_millis.size();  // :328 return 0 —— 没有任何一条过期
+}
+
+History::History(std::filesystem::path store_root, std::size_t max_versions_per_file,
+                 long long days_to_keep)
+    : store_root_(std::move(store_root)), max_versions_(clamp_max_versions(max_versions_per_file)),
+      days_to_keep_(days_to_keep > 0 ? days_to_keep : default_days_to_keep) {
+    // 缺键/传 0 一律回落到上游默认 5，与 ChangeListImpl.kt:127-136 的 catch 兜底同一口径；
+    // 绝不因为「键不在」就判整份设置损坏。
     if (store_root_.empty() || !store_root_.is_absolute() ||
         store_root_.native().find(L'\0') != std::wstring::npos)
         throw WorkspaceError("INVALID_PATH", "本地历史存储根目录必须是绝对路径。");
@@ -584,6 +605,19 @@ void History::record(const std::string& rel_path, const std::string& content, co
         drop_orphans(directory, store_root_, versions);
         auto trim = [&] {
             bool changed = false;
+            // 过期两档，谁先到谁起作用：先按「已存活的活动时长」（上游 findFirstObsoleteBlock 的口径，
+            // period = daysToKeep 天换算毫秒，同 ChangeListImpl.kt:118），再按每个文件的条数封顶。
+            // 之前这里只有条数一票到底，时间那一半完全没人做。
+            std::vector<long long> stamps;
+            stamps.reserve(versions.size());
+            for (const auto& version : versions) stamps.push_back(version.millis);
+            const auto obsolete = first_obsolete_index(
+                stamps, days_to_keep_ * 24LL * 60LL * 60LL * 1000LL, activity_interval_millis);
+            while (versions.size() > obsolete) {  // 达标的那条连同更旧的：deleteRecordsUpTo(:300)
+                erase_snapshot(directory, versions.back());
+                versions.pop_back();
+                changed = true;
+            }
             while (versions.size() > max_versions_) {  // 丢弃最旧的快照，维持每个文件的上限
                 erase_snapshot(directory, versions.back());
                 versions.pop_back();
@@ -682,219 +716,5 @@ std::string unified_diff(std::string_view before, std::string_view after) {
     return render_hunks(build_script(split_lines(before), split_lines(after)));
 }
 
-// ---- 并排差异 ---------------------------------------------------------------------
-
-namespace {
-
-constexpr std::size_t max_side_rows = 20000;   // 行数上限，超出即截断而不是无限分配
-
-// 词法切分：字母数字下划线 / 空白 / 其它单字符，各自成一个 token，并记录字节偏移。
-std::vector<std::pair<std::size_t, std::string_view>> tokenize(std::string_view line) {
-    std::vector<std::pair<std::size_t, std::string_view>> tokens;
-    std::size_t index = 0;
-    while (index < line.size()) {
-        const unsigned char ch = static_cast<unsigned char>(line[index]);
-        const bool word = std::isalnum(ch) || ch == '_';
-        const bool space = ch == ' ' || ch == '\t';
-        std::size_t end = index + 1;
-        if (word || space) {
-            while (end < line.size()) {
-                const unsigned char next = static_cast<unsigned char>(line[end]);
-                const bool next_word = std::isalnum(next) || next == '_';
-                const bool next_space = next == ' ' || next == '\t';
-                if (word ? !next_word : !next_space) break;
-                ++end;
-            }
-        }
-        tokens.emplace_back(index, line.substr(index, end - index));
-        index = end;
-    }
-    return tokens;
-}
-
-// 两行之间的词级差异：把不同的 token 段合并成 [起点, 长度] 区间，左右各一份。
-void word_marks(std::string_view left, std::string_view right, Json& left_out, Json& right_out) {
-    const auto a = tokenize(left);
-    const auto b = tokenize(right);
-    const std::size_t n = a.size();
-    const std::size_t m = b.size();
-    if (n == 0 && m == 0) return;
-    const bool feasible = n == 0 || m == 0 || n + 1 <= diff_cell_budget / (m + 1);
-    std::vector<std::uint8_t> direction;
-    if (feasible) {
-        direction.assign((n + 1) * (m + 1), 0);
-        std::vector<std::uint32_t> next(m + 1, 0);
-        std::vector<std::uint32_t> current(m + 1, 0);
-        for (std::size_t i = n; i-- > 0;) {
-            for (std::size_t j = m; j-- > 0;) {
-                std::uint8_t move = 0;
-                std::uint32_t length = 0;
-                if (a[i].second == b[j].second) { move = 1; length = next[j + 1] + 1; }
-                else if (next[j] >= current[j + 1]) { move = 2; length = next[j]; }
-                else { move = 3; length = current[j + 1]; }
-                direction[i * (m + 1) + j] = move;
-                current[j] = length;
-            }
-            next.swap(current);
-        }
-    }
-    // 收集差异 token 的下标段，再换算成字节区间。
-    std::vector<std::pair<std::size_t, std::size_t>> a_runs, b_runs;   // [first, last)
-    std::size_t i = 0;
-    std::size_t j = 0;
-    auto flush = [](std::vector<std::pair<std::size_t, std::size_t>>& runs, std::size_t& begin, std::size_t& end) {
-        if (begin == std::string_view::npos) return;
-        runs.emplace_back(begin, end);
-        begin = std::string_view::npos;
-    };
-    std::size_t a_begin = std::string_view::npos, a_end = 0;
-    std::size_t b_begin = std::string_view::npos, b_end = 0;
-    while (i < n && j < m) {
-        const auto move = feasible ? direction[i * (m + 1) + j] : std::uint8_t{0};
-        if (move == 1) {
-            flush(a_runs, a_begin, a_end);
-            flush(b_runs, b_begin, b_end);
-            ++i; ++j;
-        } else if (move == 2) {
-            if (a_begin == std::string_view::npos) a_begin = i;
-            a_end = i + 1;
-            ++i;
-        } else {
-            if (b_begin == std::string_view::npos) b_begin = j;
-            b_end = j + 1;
-            ++j;
-        }
-    }
-    if (i < n) { if (a_begin == std::string_view::npos) a_begin = i; a_end = n; }
-    if (j < m) { if (b_begin == std::string_view::npos) b_begin = j; b_end = m; }
-    flush(a_runs, a_begin, a_end);
-    flush(b_runs, b_begin, b_end);
-    auto emit = [&](const std::vector<std::pair<std::size_t, std::size_t>>& runs,
-                    const std::vector<std::pair<std::size_t, std::string_view>>& tokens,
-                    std::string_view text, Json& out) {
-        auto blank = [](std::string_view token) {
-            return !token.empty() && (token.front() == ' ' || token.front() == '\t');
-        };
-        for (const auto& [first, last] : runs) {
-            if (first >= tokens.size() || last > tokens.size() || last <= first) continue;
-            // 只含空白的首/尾 token 从标记里去掉，"hello"→"hello world" 只圈住新增的
-            // 词；整段都是空白（纯缩进改动）时保持原样，否则用户看不到改动。
-            std::size_t begin = first, stop = last;
-            while (begin + 1 < stop && blank(tokens[begin].second)) ++begin;
-            while (stop - 1 > begin && blank(tokens[stop - 1].second)) --stop;
-            const auto start = tokens[begin].first;
-            const auto end = tokens[stop - 1].first + tokens[stop - 1].second.size();
-            if (end > text.size()) continue;
-            out.push_back(Json::array({start, end - start}));
-        }
-    };
-    emit(a_runs, a, left, left_out);
-    emit(b_runs, b, right, right_out);
-}
-
-Json side(std::size_t line_1based, std::string_view text) {
-    return Json{{"no", line_1based}, {"text", std::string(text)}};
-}
-
-}  // namespace
-
-Json side_rows(const std::vector<Row>& script) {
-    Json rows = Json::array();
-    bool truncated = false;
-    std::size_t index = 0;
-    while (index < script.size()) {
-        if (rows.size() >= max_side_rows) { truncated = true; break; }
-        if (script[index].kind == ' ') {
-            const auto& row = script[index];
-            rows.push_back(Json{{"kind", "equal"},
-                                {"left", side(row.a + 1, row.text)},
-                                {"right", side(row.b + 1, row.text)}});
-            ++index;
-            continue;
-        }
-        // 一段连续的增删：按顺序配对成 change 行，多出来的仍是纯删/纯增。
-        std::size_t scan = index;
-        // 只在同一块内配对：跨块的删除与新增毫无关系，配到一起会同时给出
-        // 错误的行号和错误的对照。
-        while (scan < script.size() && script[scan].kind != ' ' && script[scan].hunk == script[index].hunk) ++scan;
-        std::vector<const Row*> dels, adds;
-        for (std::size_t k = index; k < scan; ++k)
-            (script[k].kind == '-' ? dels : adds).push_back(&script[k]);
-        const std::size_t pairs = std::min(dels.size(), adds.size());
-        for (std::size_t k = 0; k < pairs; ++k) {
-            if (rows.size() >= max_side_rows) { truncated = true; break; }
-            Json left_marks = Json::array(), right_marks = Json::array();
-            word_marks(dels[k]->text, adds[k]->text, left_marks, right_marks);
-            Json row{{"kind", "change"},
-                     {"left", side(dels[k]->a + 1, dels[k]->text)},
-                     {"right", side(adds[k]->b + 1, adds[k]->text)}};
-            if (!left_marks.empty()) row["leftMarks"] = std::move(left_marks);
-            if (!right_marks.empty()) row["rightMarks"] = std::move(right_marks);
-            rows.push_back(std::move(row));
-        }
-        for (std::size_t k = pairs; k < dels.size(); ++k) {
-            if (rows.size() >= max_side_rows) { truncated = true; break; }
-            rows.push_back(Json{{"kind", "delete"}, {"left", side(dels[k]->a + 1, dels[k]->text)}});
-        }
-        for (std::size_t k = pairs; k < adds.size(); ++k) {
-            if (rows.size() >= max_side_rows) { truncated = true; break; }
-            rows.push_back(Json{{"kind", "insert"}, {"right", side(adds[k]->b + 1, adds[k]->text)}});
-        }
-        index = scan;
-    }
-    return Json{{"rows", std::move(rows)}, {"truncated", truncated}};
-}
-
-Json diff_sides(std::string_view before, std::string_view after) {
-    return side_rows(build_script(split_lines(before), split_lines(after)));
-}
-
-// 把 git diff 的 unified 文本还原成同样的行脚本，这样并排视图不需要再去读工作区
-// 文件（也就不用重复处理长路径与前缀）。只支持 git 自己产出的 -U3 文本。
-Json diff_sides_from_unified(const std::string& input) {
-    // A string_view over the caller's buffer: using std::string::substr here would
-    // create a temporary per line and leave the view dangling.
-    const std::string_view text{input};
-    std::vector<Row> script;
-    std::size_t a_line = 0;
-    std::size_t b_line = 0;
-    std::size_t hunk = 0;
-    std::size_t start = 0;
-    while (start < text.size()) {
-        auto end = text.find('\n', start);
-        if (end == std::string_view::npos) end = text.size();
-        std::string_view line = trim_cr(text.substr(start, end - start));
-        start = end + 1;
-        if (line.starts_with("@@ -")) {
-            // "@@ -a,c +b,d @@"：a/b 是 1 起的行号，而脚本里的游标是 0 起，所以减一；
-            // 纯增/纯删的起始号是 0，此时游标就是 0。
-            const auto plus = line.find(" +");
-            const auto read = [](std::string_view part, std::size_t offset) {
-                std::size_t index = offset;
-                while (index < part.size() && std::isdigit(static_cast<unsigned char>(part[index]))) ++index;
-                return index == offset ? std::size_t{0} : std::stoul(std::string(part.substr(offset, index - offset)));
-            };
-            const auto zero = [](std::size_t one_based) { return one_based == 0 ? std::size_t{0} : one_based - 1; };
-            a_line = zero(read(line, 4));
-            b_line = plus == std::string_view::npos ? 0 : zero(read(line, plus + 2));
-            ++hunk;
-            continue;
-        }
-        // 文件头（diff --git / --- / +++ / index / 模式行）与 "\ No newline" 标记
-        // 都不是内容；前者不含前导空格，后者以 '\' 开头且必须跳过。
-        if (line.empty() || line.front() == '\\' || line.starts_with("diff --git ") ||
-            line.starts_with("index ") || line.starts_with("--- ") || line.starts_with("+++ ") ||
-            line.starts_with("new file") || line.starts_with("deleted file") ||
-            line.starts_with("similarity ") || line.starts_with("rename ") ||
-            line.starts_with("Binary files ") || line.starts_with("old mode") || line.starts_with("new mode"))
-            continue;
-        const char marker = line.front();
-        const std::string_view body = (marker == ' ' || marker == '+' || marker == '-') ? line.substr(1) : line;
-        if (marker == '+') script.push_back({'+', body, a_line, b_line++, hunk});
-        else if (marker == '-') script.push_back({'-', body, a_line++, b_line, hunk});
-        else if (marker == ' ') script.push_back({' ', body, a_line++, b_line++, hunk});
-    }
-    return side_rows(script);
-}
 
 }  // namespace taocode::history

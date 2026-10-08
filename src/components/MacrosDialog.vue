@@ -71,9 +71,9 @@ function commitRename() {
         <div class="macros-detail">
           <template v-if="current">
             <div class="macros-actions">
-              <button class="subtle-button" :disabled="playing" @click="emit('play', { name: current.name })"><Play :size="iconSize.menu" />回放</button>
+              <button class="subtle-button" :disabled="playing" @click="emit('play', { name: current.name })"><Play aria-hidden="true" :size="iconSize.menu" />回放</button>
               <button class="subtle-button" @click="startRename()">重命名…</button>
-              <button class="subtle-button" @click="emit('remove', { name: current.name })"><Trash2 :size="iconSize.menu" />删除宏</button>
+              <button class="subtle-button" @click="emit('remove', { name: current.name })"><Trash2 aria-hidden="true" :size="iconSize.menu" />删除宏</button>
             </div>
             <div v-if="renaming" class="macros-rename">
               <input v-model="draft" type="text" aria-label="新的宏名" @keydown.enter.prevent="commitRename()" @keydown.esc.prevent="renaming = false" />
@@ -111,7 +111,7 @@ function commitRename() {
 .macros-actions { display: flex; gap: var(--space-2); }
 .macros-rename { display: flex; gap: var(--space-2); }
 .macros-rename > input { flex: 1; min-width: 0; }
-.macros-step-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 2px; color: var(--text); }
+.macros-step-list { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: 2px; color: var(--text); }
 .macros-step-list > li { display: flex; align-items: center; gap: var(--space-2); }
 .macros-step-kind { color: var(--muted); font-size: 12px; flex-shrink: 0; }
 .macros-step-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

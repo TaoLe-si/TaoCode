@@ -307,6 +307,9 @@ function ignoreRemove() {
 function ignoreApply() {
   if (props.busy) return
   const changed = applyIgnoredPatterns(ignoreList.value)
+  // 回读**生效后**的清单：被遮蔽闸挡掉的那条（`*.pyc` 在场时加 `build.pyc`）在上游连清单都进不去，
+  // 不该继续显示在表里 —— 与面板 `reset()` 从 `getIgnoredFilesList()` 回读同一口径。
+  ignoreList.value = ignoredPatterns()
   ignoreApplied.value = [...ignoreList.value]
   ignoreNote.value = changed ? '已应用：忽略清单当场生效（文件选择、按名字判定的那几处）。' : '清单没有变化，不需要重新应用。'
 }
@@ -386,11 +389,7 @@ const probeLanguage = computed(() => {
 
 <template>
   <div class="ft-panel">
-    <p class="section-description">
-      对应 IDEA Settings › Editor › File Types（<code>FileTypeConfigurable</code>）：这里决定的关联同时用于编辑器语法高亮、
-      语言服务器选择与文件树图标。没被关联的扩展名按内容与其他规则识别。
-    </p>
-    <p v-if="!associations" class="section-description">尚未打开项目。文件类型关联随项目保存，请先打开一个项目。</p>
+    <p v-if="!associations" class="section-description">尚未打开项目。</p>
     <template v-else>
       <div class="ft-table" role="table" aria-label="文件类型关联">
         <div class="ft-head" role="row"><span role="columnheader">扩展名</span><span role="columnheader">语言</span><span role="columnheader" class="ft-center">删除</span></div>
@@ -404,20 +403,14 @@ const probeLanguage = computed(() => {
         <p v-if="!rows.length" class="ft-empty">没有关联，全部按扩展名与内容自动识别。</p>
       </div>
       <div class="ft-actions">
-        <button type="button" class="subtle-button" :disabled="busy" @click="add"><Plus :size="iconSize.menu" /> 添加关联</button>
+        <button type="button" class="subtle-button" :disabled="busy" @click="add"><Plus aria-hidden="true" :size="iconSize.menu" /> 添加关联</button>
         <button type="button" class="primary-button" :disabled="busy || !dirty" @click="save">保存关联</button>
         <button type="button" class="subtle-button" :disabled="busy || !dirty" @click="fillFrom(props.associations)">还原</button>
         <span class="ft-note">{{ note || (dirty ? '有未保存的改动' : '已与项目同步') }}</span>
       </div>
       <p v-if="duplicates.length" class="ft-error" role="alert">扩展名重复：{{ duplicates.join('、') }}</p>
-      <p class="field-hint">也可以在文件树或标签页上右键「关联文件类型…」为当前文件的扩展名一键设置，两处写的是同一份数据。</p>
 
       <h4 class="ft-title">已注册的类型与它们的模式</h4>
-      <p class="field-hint">
-        这一张是运行时注册表（上游 <code>FileTypeManager</code> 的等价物）：<code>src/fileTypeDetection.ts</code> 认类型用的就是它。
-        模式改动只在**本次会话**内生效、不落项目设置 —— 本仓的落盘表只有「扩展名 → 语言」两栏，装不下模式行
-        （要持久需要给宿主设置结构加一段，见报告里的接线请求）。
-      </p>
       <div class="ft-table" role="table" aria-label="已注册的文件类型">
         <div class="ft-head ft-head-type" role="row"><span role="columnheader">类型</span><span role="columnheader">文件名称模式</span><span role="columnheader">HashBang 模式</span></div>
         <div v-for="entry in typeRows" :key="entry.type.id" class="ft-type" role="row">
@@ -426,7 +419,10 @@ const probeLanguage = computed(() => {
             <span v-for="pattern in entry.matchers" :key="pattern" class="ft-pattern">
               {{ pattern }}
               <button type="button" class="ft-unlink" :disabled="busy" :title="`改成别的样子`" :aria-label="`编辑 ${pattern} 这条模式`" @click="editPattern(entry.type.id, pattern)"><Pencil :size="iconSize.dense" /></button>
-              <button type="button" class="ft-unlink" :disabled="busy" :title="`把 ${pattern} 从 ${entry.type.name} 摘掉`" :aria-label="`把 ${pattern} 从 ${entry.type.name} 摘掉`"><X :size="iconSize.dense" @click="removePattern(entry.type.id, pattern)" /></button>
+              <!-- `@click` 必须挂在 `<button>` 上：挂在 `<X>` 上时只有图标那 12px 命中，
+                   按钮自身的盒（`.ft-unlink` 的 padding 与盒模型）点了什么都不发生 ——
+                   与旁边那条「编辑」按钮的形状不一致。 -->
+              <button type="button" class="ft-unlink" :disabled="busy" :title="`把 ${pattern} 从 ${entry.type.name} 摘掉`" :aria-label="`把 ${pattern} 从 ${entry.type.name} 摘掉`" @click="removePattern(entry.type.id, pattern)"><X :size="iconSize.dense" /></button>
             </span>
             <span v-if="!entry.matchers.length" class="ft-empty-inline">没有认领任何模式</span>
             <label class="ft-add-pattern">
@@ -468,7 +464,6 @@ const probeLanguage = computed(() => {
       </div>
 
       <h4 class="ft-title">按文件覆盖类型（Override File Type）</h4>
-      <p class="field-hint">上游是文件右键菜单里那条动作；本仓的入口在问题面板与这里，覆盖值存 <code>overrideFileTypes</code> 那份文件集。</p>
       <div v-for="entry in overrideRows" :key="entry.path" class="ft-override">
         <span class="ft-override-path" :title="entry.path">{{ entry.path }}</span>
         <select :value="entry.value" :aria-label="`覆盖 ${entry.path} 成的类型`" :disabled="busy" @change="applyOverride(entry.path, ($event.target as HTMLSelectElement).value)">
@@ -502,14 +497,11 @@ const probeLanguage = computed(() => {
       </template>
 
       <h4 class="ft-title">忽略的文件与目录</h4>
-      <p class="field-hint">
-        {{ IGNORED_TEXT }} 上游这张表只有「文件名称模式」一档：模式里不许出现 <code>/</code> 或 <code>\</code>，
-        因为判定只按文件名（<code>IgnoredFileCache.java:80-82</code>），带路径的写法在校验期就被判非法。
-      </p>
+      <p class="field-hint">{{ IGNORED_TEXT }}</p>
       <div class="ft-actions">
-        <button type="button" class="subtle-button" :disabled="busy" @click="ignoreStartAdd"><Plus :size="iconSize.menu" /> 添加模式</button>
-        <button type="button" class="subtle-button" :disabled="busy || ignoreIndex < 0" @click="ignoreStartEdit(ignoreIndex)"><Pencil :size="iconSize.menu" /> 编辑选中</button>
-        <button type="button" class="subtle-button" :disabled="busy || ignoreIndex < 0" @click="ignoreRemove"><Trash2 :size="iconSize.menu" /> 删除选中</button>
+        <button type="button" class="subtle-button" :disabled="busy" @click="ignoreStartAdd"><Plus aria-hidden="true" :size="iconSize.menu" /> 添加模式</button>
+        <button type="button" class="subtle-button" :disabled="busy || ignoreIndex < 0" @click="ignoreStartEdit(ignoreIndex)"><Pencil aria-hidden="true" :size="iconSize.menu" /> 编辑选中</button>
+        <button type="button" class="subtle-button" :disabled="busy || ignoreIndex < 0" @click="ignoreRemove"><Trash2 aria-hidden="true" :size="iconSize.menu" /> 删除选中</button>
         <button type="button" class="primary-button" :disabled="busy || !ignoreDirty" @click="ignoreApply">应用</button>
         <button type="button" class="subtle-button" :disabled="busy" @click="ignoreReset">还原</button>
         <button type="button" class="subtle-button" :disabled="busy" @click="ignoreRestoreDefaults">恢复默认</button>

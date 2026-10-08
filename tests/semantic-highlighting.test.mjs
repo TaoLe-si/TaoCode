@@ -20,7 +20,7 @@ import { EditorState } from '@codemirror/state'
 
 const {
   SEMANTIC_MODIFIER_RENDER_KEYS, SEMANTIC_SNAPSHOT_LIMIT, SEMANTIC_TOKEN_RENDER_KEYS, SemanticHighlightingCache,
-  capabilityRenderDrift, highlightingFeatureIds, registerHighlightingFeature,
+  capabilityRenderDrift, highlightingFeatureIds, invalidatePulledResults, registerHighlightingFeature,
   semanticHighlightClasses, semanticHighlightingCache, semanticModifierRegistered, semanticRevisionOf,
   semanticTokenTypeRegistered,
 } = await import('../src/semanticHighlighting.ts')
@@ -232,4 +232,34 @@ test('接线：装饰层走的是注册表，不是裸 token 名', () => {
   assert.doesNotMatch(source, /semanticTokenClass\(/, '不许退回「拿到什么名字就发什么类名」')
   const module_ = readFileSync(join(root, 'src/semanticHighlighting.ts'), 'utf8')
   assert.match(module_, /lspFeatureRow\(/, 'capability 那道闸必须读能力表，不是自己另写一份')
+})
+
+// ——————————————————— 2026-10-06 hlregistry：注册表扇出要按 supportsPull 过滤
+
+test('注册表的作废扇出只给拉取族（上游 LspHighlightingCacheRegistry.kt:54-56），推的那一条跳过', () => {
+  // 上游那一条是 `allCaches.forEach { if (it.supportsPull) it.forceFullRepull(file) }`：
+  // 推族（`LspPublishDiagnosticsCache.kt:31` 的 `supportsPull = false`）的陈旧由服务端**重发**来收，
+  // 客户端替它作废没有意义。本仓原来无条件扇给表里每一条，本轮补上这一问。
+  const doc = {}
+  const base = invalidatePulledResults(doc)
+  assert.ok(base >= 1, '生产那份（semanticTokens）必须在表里并被作废到')
+
+  const touched = []
+  const probe = (id, supportsPull) => ({
+    featureId: id,
+    supportsPull,
+    invalidate: () => { touched.push(id) },
+    clearCache: () => { touched.push(`${id}:clear`) },
+  })
+  assert.equal(registerHighlightingFeature(probe('documentLink', false)), true, 'documentLink 在能力表里登记过')
+  assert.equal(invalidatePulledResults(doc), base, '推的那一条不参与 ⇒ 计数不变')
+  assert.deepEqual(touched, [], '推的那一条的 invalidate 一次都不该被调到')
+
+  assert.equal(registerHighlightingFeature(probe('foldingRange', true)), true)
+  assert.equal(invalidatePulledResults(doc), base + 1, '拉取族照常参与扇出')
+  assert.deepEqual(touched, ['foldingRange'])
+
+  // 没在能力表里登记过的特性仍然进不来（既有那条判据的形状不变，这里只补结构类型放宽后的对照）。
+  assert.equal(registerHighlightingFeature(probe('noSuchHighlightingFeature', true)), false)
+  assert.equal(highlightingFeatureIds().includes('noSuchHighlightingFeature'), false)
 })

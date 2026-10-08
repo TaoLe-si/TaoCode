@@ -12,14 +12,13 @@
 //   这一组挂在这个窗口上（`toolWindow.setAdditionalGearActions`），所以**窗口出现它就在** ——
 //   当前文件一条引用都没有时也在（本仓没有"空用法视图"这个形态，但组本身不随结果数消失）。
 //
-// 三条里只接了后两条，第三条（一键导航）需要结果列表的**选择模型**（单击选中 / 双击导航），
-// 本仓的引用行是单击即导航 —— 没有选择态就做不出那个开关，点了没反应的勾选项是假控件，
-// 逐条登记在 `docs/source-todo.md` §10。这里只给真能接住的行。
+// 三条按上游次序挂入同一弹出组；单击导航由引用面板的选择模型消费。
 import type { MenuRow } from './menus/types'
 import {
   USAGE_GROUP_BY_DIRECTORY_TITLE, USAGE_GROUP_BY_FILE_STRUCTURE_TITLE,
   USAGE_OPEN_IN_NEW_TAB_TITLE, USAGE_SORT_TITLE, USAGE_VIEW_OPTIONS_TITLE,
   referencesGroupByDirectory, referencesGroupByFileStructure, referencesInNewTab,
+  referencesNavigateOnSingleClick,
   referencesSortAlphabetically, usageSymbolsAvailable,
 } from './referenceContents.ts'
 
@@ -41,6 +40,13 @@ export function isUsageView(activeContent: string): boolean {
 export function usageViewGearRows(activeContent: string): Record<string, MenuRow> {
   if (!isUsageView(activeContent)) return {}
   const rows: MenuRow[] = [
+    {
+      id: 'usage.navigateOnSingleClick',
+      title: '单击导航',
+      keywords: 'navigate with single click autoscroll 一键导航',
+      checked: () => referencesNavigateOnSingleClick.value,
+      run: () => { referencesNavigateOnSingleClick.value = !referencesNavigateOnSingleClick.value },
+    },
     {
       id: 'usage.sortAlphabetically',
       title: USAGE_SORT_TITLE,
@@ -67,6 +73,9 @@ export function usageViewGearRows(activeContent: string): Record<string, MenuRow
     // 没有自己的工具条（那一格是个 div），而这一组本来就属于"挂着内容的那个窗口"，所以落点选齿轮，
     // 与上面那组同一个 `contentsScoped` 口径。给出的两档按**上游弹出组里的先后**排：
     // `UsageGroupingRuleProviderImpl.java:77-78` 先 `UsageGrouping.DirectoryStructure`
+    // （订正留痕：上一批把这里从 `:77-78` 改成了 `:76-77` —— 本轮自己 `grep -n "addIfNotNull(result"` 数过参考树：
+    // `:76` 是 `groupByPackageAction`、`:77` 才是 `groupByDirectoryStructureAction`、`:78` 是 `groupByFileStructureAction`，
+    // 所以「先目录结构再文件结构」那两行是 77-78，改回原写法。）
     // 再 `UsageGrouping.FileStructure`。
     //   · `GroupByDirectoryStructureAction`（`actions/GroupByDirectoryStructureAction.java:10-26`，
     //     状态 = `UsageViewSettings.kt:102-103` 的 `isGroupByDirectoryStructure`，默认 false（`:26`））；

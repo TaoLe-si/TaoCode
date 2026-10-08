@@ -52,5 +52,15 @@ test('接线：进度行可点、浮层渲染、取消按钮不触发切换', ()
   assert.match(source, /role="progressbar"/, '浮层里那条进度条')
   assert.match(source, /@click="checksPopupOpen = !checksPopupOpen"/, '点进度行切换浮层')
   assert.match(source, /@click\.stop="cancelCommitChecks"/, '取消按钮不能把浮层一起切换')
-  assert.match(source, /bottom: calc\(100% \+ 8px\)/, 'CSS 把浮层摆在行的上方（间距 8px）')
+  // CSS 把浮层摆在行的上方（间距 = 上游 scale(8)）。间距允许两种写法：直接 8px，或走令牌
+  // （`--space-2` = 8px，见 src/tokens.css）—— 两种都要**解出实际像素**等于 CHECKS_POPUP_GAP，
+  // 换成 16px 或把 bottom 翻成 top 都必须红。
+  const rule = read('src/components/SourceControl.vue').match(/\.sc-checks-popup \{[^}]*\}/)
+  assert.ok(rule, 'CSS 里要有 .sc-checks-popup 规则')
+  const above = rule[0].match(/bottom:\s*calc\(\s*100%\s*\+\s*(?:var\(\s*--([\w-]+)\s*\)|([\d.]+)px)\s*\)/)
+  assert.ok(above, '浮层要贴在行的上方：bottom: calc(100% + 间距)')
+  const pixels = above[2] !== undefined
+    ? Number(above[2])
+    : Number((read('src/tokens.css').match(new RegExp(`--${above[1]}:\\s*([\\d.]+)px`)) ?? [])[1])
+  assert.equal(pixels, CHECKS_POPUP_GAP, `浮层间距要等于 scale(8)，实为 ${pixels}px`)
 })

@@ -46,6 +46,14 @@ export interface PluginFileType {
 }
 export interface PluginInfo {
   id: string; name: string; version: string; description: string; path: string
+  /**
+   * `plugin.json` 的 `changeNotes` —— 上游清单的 `<change-notes>` 元素
+   * （`PluginXmlConst.kt:42` 的 `CHANGE_NOTES_ELEM`，读取面 `XmlReader.kt:193`，
+   * getter `platform/core-impl/src/com/intellij/ide/plugins/IdeaPluginDescriptorImpl.kt:195`）。
+   * 界面消费点是插件详情面板那段说明（上游 `PluginDetailsPageComponent.kt:1394`，空内容整块不可见）；
+   * 本仓同样：空 / 缺省 = 不渲染那一行。原生侧超过 1200 字符按「没写」处理（`native/plugins.cpp` 的 `text_or`）。
+   */
+  changeNotes?: string
   /** `plugin.json` 的 `category`（IDEA 的 `displayCategory`）；缺省归入 "Other Tools"。 */
   category?: string
   /**

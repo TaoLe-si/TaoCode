@@ -34,6 +34,7 @@
 //     消费点就在本仓我名下的 `src/quickDocHost.ts`（它 watch 当前标签页的 `line/column`，
 //     那两个字段由 `App.vue:2157` 的 `@cursor` 写），已经接上。
 import { reactive } from 'vue'
+import type { EditorSettings } from './settingsModel.ts'
 
 /** 两个开关的当前值（模块级单例：与上游的 `EditorSettingsExternalizable` 单例同一形态）。 */
 export interface DocHoverPolicy {
@@ -47,9 +48,19 @@ export interface DocHoverPolicy {
 export const DEFAULT_DOC_HOVER_POLICY: DocHoverPolicy = { showOnMouseMove: true, autoUpdate: true }
 
 /**
- * 设置里该登记的两把键（`src/settingsModel.ts` 的 `EditorSettings` 那一片）。
- * 登记与否不影响本模块：`docHoverPolicy` 自己就是运行时真值，设置项只是它的持久化外壳
- * （登记请求在 `docs/wiring-requests-2026-10-06-bucket3.md` 的 S1）。
+ * 设置里那两把键（`src/settingsModel.ts:504`/`:506` 的 `EditorSettings` 字段 +
+ * `native/settings_schema.cpp:419` 的出厂默认 + `src/previewSettings.ts:49` 的预览档，都已登记）。
+ * `docHoverPolicy` 自己是运行时真值，这两把只是它的持久化外壳：
+ *   · 读盘 → 运行时：**已经接上** —— `src/workspaceLifecycle.ts` 在 `refreshAppState()` 里调
+ *     `docHoverPolicyFromSettings(editorSettings.value)`（与 Code Vision 那四把键同一拍）；
+ *   · 运行时 → 盘：齿轮那一次改动要落盘还缺宿主一行 —— `src/components/QuickDocPopup.vue:73`
+ *     把 `docHoverPolicyPatch()` 以 `policy-change` 事件交出去，而 `src/App.vue:2428` 那一条
+ *     `<QuickDocPopup …>` 现在**没有** `@policy-change` 绑定 ⇒ 齿轮当场生效、重启回出厂。
+ *     接线请求 D-1（`docs/wiring-requests-2026-10-06-codevision2.md`：给那一行加一个属性，
+ *     **不新增行数**，App.vue 只剩几十行余量）。
+ * 订正留痕（2026-10-06 codevision2）：这里原写「登记与否不影响本模块 … 登记请求在
+ * `docs/wiring-requests-2026-10-06-bucket3.md` 的 S1」—— 登记（S1）其实早就落了，
+ * 缺的从来不是键，是读盘那一步的调用方。
  */
 export const DOC_HOVER_SETTING_KEYS: Record<keyof DocHoverPolicy, 'showQuickDocOnMouseHover' | 'autoUpdateDocumentation'> = {
   showOnMouseMove: 'showQuickDocOnMouseHover',
@@ -79,7 +90,15 @@ export function docHoverPolicyFromSettings(settings: Record<string, unknown> | n
 }
 
 /** 把运行时值写回设置补丁（调用方拿去 `saveSettingsPatch`）。 */
-export function docHoverPolicyPatch(): Partial<Record<string, boolean>> {
+/**
+ * 补丁的类型按**真键**收窄（不是 `Partial<Record<string, boolean>>`）：
+ * 宿主那一头是 `saveSettingsPatch(patch: Partial<EditorSettings>)`，索引签名里的 `boolean`
+ * 赋不进 `fontSize: number` 那些字段，vue-tsc 会报 TS2345；更重要的是宽类型让"补丁里出现
+ * 一个没登记过的键"这件事在编译期没人管。键名仍然只从 `DOC_HOVER_SETTING_KEYS` 取，两处不会漂。
+ */
+export type DocHoverSettingsPatch = Partial<Pick<EditorSettings, 'showQuickDocOnMouseHover' | 'autoUpdateDocumentation'>>
+
+export function docHoverPolicyPatch(): DocHoverSettingsPatch {
   return {
     [DOC_HOVER_SETTING_KEYS.showOnMouseMove]: docHoverPolicy.showOnMouseMove,
     [DOC_HOVER_SETTING_KEYS.autoUpdate]: docHoverPolicy.autoUpdate,
@@ -87,7 +106,7 @@ export function docHoverPolicyPatch(): Partial<Record<string, boolean>> {
 }
 
 /** 改一档并返回补丁（设置页与弹层齿轮共用这一个动作，避免两处各写一份）。 */
-export function toggleDocHoverPolicy(key: keyof DocHoverPolicy): Partial<Record<string, boolean>> {
+export function toggleDocHoverPolicy(key: keyof DocHoverPolicy): DocHoverSettingsPatch {
   docHoverPolicy[key] = !docHoverPolicy[key]
   return docHoverPolicyPatch()
 }

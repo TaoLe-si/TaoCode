@@ -39,16 +39,18 @@ test('提示逐适配器给真实形态，并点明本仓没有远程后端', ()
 })
 
 // —— 面板接线 ——
+// 启动/附加整块（配置展示 + 两个按钮 + 附加目标输入）已从 `DebugPanel.vue` 拆到
+// `DebugStartPane.vue`（面板贴着机检上限），所以接线锚点读的是拆分后的那个文件。
 
-const panel = readFileSync('src/components/DebugPanel.vue', 'utf8')
+const pane = readFileSync('src/components/DebugStartPane.vue', 'utf8')
 
 test('附加走解析后的 processId / pipeName，非法输入就地报错', () => {
-  assert.match(panel, /const problem = attachSelectorError\(selector\)/)
-  assert.match(panel, /parsed\.kind === 'pid' \? \{ processId: parsed\.processId \} : \{ pipeName: parsed\.pipeName \}/)
-  assert.match(panel, /configuration: \{ request: 'attach', \.\.\.configuration \}/)
+  assert.match(pane, /const problem = attachSelectorError\(selector\)/)
+  assert.match(pane, /parsed\.kind === 'pid' \? \{ processId: parsed\.processId \} : \{ pipeName: parsed\.pipeName \}/)
+  assert.match(pane, /configuration: \{ request: 'attach', \.\.\.configuration \}/)
 })
 
 test('界面渲染适配器相关的附加说明', () => {
-  assert.match(panel, /attachGuidance\(kind\.value\)/)
-  assert.match(panel, /\{\{ attachText \}\}/)
+  assert.match(pane, /attachGuidance\(kind\.value\)/)
+  assert.match(pane, /\{\{ attachText \}\}/)
 })

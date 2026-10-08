@@ -67,4 +67,8 @@ test('接线：复制排障信息把宿主文本与前端收集器拼起来', ()
     '没有把前端收集器的一段拼到宿主文本后面')
   assert.ok(source.includes("request<ProcessMemory>('app.memory')"), 'System 段没有内存数据来源')
   assert.ok(source.includes("request<PluginList>('plugin.list')"), 'Plugins 段没有插件数据来源')
+  // Project 段（`ProjectTroubleInfoCollector.java:11-18`）：宿主注入的 `projectContext` 必须真被喂进
+  // 快照 —— 2026-10-06 本 lane 发现它此前只是注入了 deps 字段却没人读，Project 段永远不出现。
+  assert.ok(source.includes('project: deps.projectContext?.() ?? null'),
+    'Project 段的数据源（deps.projectContext）没有喂进 collectTroubleshootingReport 的快照')
 })

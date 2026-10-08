@@ -43,3 +43,40 @@ export function setAutoLinkEnabled(store: ExternalProjectStore | null, workspace
     return false
   }
 }
+
+// ── 「跳过」这张未链接工程通知的记账 ────────────────────────────────────────────────
+// 上游本体：`platform/external-system-impl/src/com/intellij/openapi/externalSystem/autolink/
+// UnlinkedProjectNotificationAware.kt:33-38`（`@State(name = "UnlinkedProjectNotification",
+// storages = [Storage(StoragePathMacros.PRODUCT_WORKSPACE_FILE)])` = **项目级**持久 +
+// `disabledNotifications` 那个并发集合）、`:42-50`（集合里有这个系统 id 就**不再弹**）、
+// `:65`（「Skip」那个动作 = `createSimpleExpiring(textProvider.getUPNSkipActionText()) { disableNotification(projectId) }`）。
+// 本仓的等价物按工作区根存 localStorage（与 `autoLinkSettingsKey` 同一条先例：宿主 `file.write` 只写工作区内路径）。
+// **缺键 = 没跳过过**（默认值 false，不按字段数判损坏）。
+
+export function unlinkedNoticeSkipKey(workspaceRoot: string): string {
+  return `taocode.externalSystem.unlinkedNoticeSkipped.${normalize(workspaceRoot)}`
+}
+
+/** 用户在这个项目里点过「跳过」吗？没存过 = 没跳过过。脏值按「没跳过」处理，永不抛。 */
+export function isUnlinkedNoticeSkipped(store: ExternalProjectStore | null, workspaceRoot: string): boolean {
+  if (!store || !workspaceRoot) return false
+  try {
+    const raw = store.getItem(unlinkedNoticeSkipKey(workspaceRoot))
+    if (raw === null) return false
+    const parsed = JSON.parse(raw) as { skipped?: unknown }
+    return parsed?.skipped === true
+  } catch {
+    return false
+  }
+}
+
+/** 记下「跳过」；存储不可用返回 false（通知这次点不动，下次打开还会再弹 —— 不假装记住）。 */
+export function skipUnlinkedNotice(store: ExternalProjectStore | null, workspaceRoot: string): boolean {
+  if (!store || !workspaceRoot) return false
+  try {
+    store.setItem(unlinkedNoticeSkipKey(workspaceRoot), JSON.stringify({ skipped: true }))
+    return true
+  } catch {
+    return false
+  }
+}

@@ -11,6 +11,13 @@
 //     IntelliJ 扩展，本仓不做）、`:424-456`（doNotify：只有按钮被点才 complete(actionItem)，`:454` 才 `.notify(project)`）、
 //     `:464`/`:470`/`:476`（三个通知组 id）。
 //   · `platform/lsp/src/api/LspClientCapabilities.kt:246-249`（window 能力：showMessage/showDocument/workDoneProgress）。
+//   · 服务器**主动发起**的那六条**请求**（要客户端回包）—— 回包全在 `native/lsp.cpp` 的服务器请求分派里，
+//     判据是 `native/lsp_test.cpp` 的「服务器主动发起的六条请求逐条有回包」那几族；上游对应
+//     `LspServerNotificationsHandlerImpl.kt:119-123`（registerCapability，另存进
+//     `LspDynamicCapabilities.kt:117` 再 `:130-182` 让受影响的结果重取）、`:125-128`（unregisterCapability）、
+//     `:241-247`（workspaceFolders）、`:249-253`（configuration）、`:84-117`（applyEdit）、`:255`（createProgress）。
+//     本文件测的是其中**转出来给界面记账**的那三条（register/unregister/create）：
+//     记账、按注册作废缓存、停机清账，以及「一条都不弹」这一半。
 //
 // 这一族的**判据形状**是「没注册处理器 ⇒ 丢弃计数；注册了 ⇒ 进通知通道且严重级映射对」，
 // 因为本仓出过的原罪就是「声明了 capability 却没有处置」：消息被无声丢掉，界面上什么都看不见。
@@ -21,45 +28,62 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   LSP_SHOW_MESSAGE_GROUP, LSP_LOG_ERRORS_GROUP, LSP_LOG_INFO_TRACE_GROUP,
-  droppedLspServerMessages, expireLspMessageRequest, handleLspServerMessageEvent,
-  lspActionTitles, lspMessageDisplayIdOf, lspMessageGroupIdOf, lspMessageGroupForDisplayId,
+  LSP_DYNAMIC_REQUEST_METHODS, droppedLspServerMessages, expireLspMessageRequest, handleLspServerMessageEvent,
+  lspActionTitles, lspDynamicRegistrationCount, lspDynamicRegistrations, lspMessageDisplayIdOf,
+  lspMessageGroupIdOf, lspMessageGroupForDisplayId,
   lspMessageGroupRegistered, lspMessageRequestKey, lspPendingMessageRequests, lspServerMessageDrops,
   lspServerMessageHandlerMethods, registerDefaultLspServerMessageHandlers, registerLspServerMessageHandler,
   resetLspServerMessageDrops, resolveLspMessageRequestAnswer, setLspMessageActionsClickable,
   pendingLspMessageRequestCount, chooseLspMessageAction, lspMessageActionsClickable,
-  expireLspMessageRequestsOnStop,
+  expireLspMessageRequestsOnStop, lspRegistrationEntries, lspMessageRouteOf,
   lspServerMessages as queueFromNewModule,
 } from '../src/lspServerMessages.ts'
-import { handleLspProgressEvent, lspServerMessages } from '../src/lspProgress.ts'
+import { handleLspProgressEvent, lspProgressTasks, lspServerMessages } from '../src/lspProgress.ts'
 import { wireLspProgressNotices } from '../src/progressNotices.ts'
 import { clearLspLog, lspLogEntries } from '../src/lspServerLog.ts'
+import { registerLspCache } from '../src/lspPerFileCache.ts'
 import { nextTick } from 'vue'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
 
-/** 每条用例前后都把三个单例倒空，并确认内置处理器都在。 */
+/**
+ * 一条探针缓存：`clearAllLspCaches()` 有没有真的被某条处置叫到，只有挂一个能数次数的假缓存量得到
+ * （`lspCacheCount()` 数的是登记着几份，不是"被清了几次"）。
+ * `registeredCaches` 那张 Set 没有反登记口 ⇒ 探针活到进程结束，计数按"这一条用例之后涨了几次"来算。
+ */
+let cacheClears = 0
+registerLspCache({ clearCache: () => { cacheClears++ } })
+
+/** 每条用例前后都把几个单例倒空，并确认内置处理器都在。 */
 function resetSurface() {
   lspServerMessages.splice(0, lspServerMessages.length)
   clearLspLog()
   resetLspServerMessageDrops()
   for (const key of Object.keys(lspPendingMessageRequests)) delete lspPendingMessageRequests[key]
+  for (const id of Object.keys(lspDynamicRegistrations)) delete lspDynamicRegistrations[id]
   setLspMessageActionsClickable(false)
   registerDefaultLspServerMessageHandlers()
 }
 
-test('响应面默认认得这八条：三条消息 + 五条 refresh（与上游八个方法一一对应）', () => {
+/** 取「服务器请求」那一档（kind = `request`）的日志行。 */
+function requestLines() {
+  return lspLogEntries.value.filter(entry => entry.kind === 'request')
+}
+
+test('响应面默认认得这十一条：三条消息 + 五条 refresh + 三条服务器主动请求', () => {
   resetSurface()
   assert.deepEqual(
     lspServerMessageHandlerMethods().sort(),
     [
-      'window/logMessage', 'window/showMessage', 'window/showMessageRequest',
+      'client/registerCapability', 'client/unregisterCapability', 'window/logMessage',
+      'window/showMessage', 'window/showMessageRequest', 'window/workDoneProgress/create',
       'workspace/codeLens/refresh', 'workspace/diagnostic/refresh', 'workspace/inlineValue/refresh',
       'workspace/inlayHint/refresh', 'workspace/semanticTokens/refresh',
     ].sort(),
   )
   // 幂等：重复注册不会把表撑大（接线方可能不止调一次）。
-  assert.equal(registerDefaultLspServerMessageHandlers(), 8)
+  assert.equal(registerDefaultLspServerMessageHandlers(), 11)
 })
 
 test('没注册处理器 ⇒ 落进丢弃计数（可观察），注册之后同一条消息才进通知通道', () => {
@@ -215,8 +239,164 @@ test('关掉气球（expire）与服务器停机都把在途的问句按 null �
   resetSurface()
 })
 
-test('不带 method 的旧宿主事件保持改动之前的行为（一律按 showMessage 显示，不计丢弃）', () => {
+// ── 服务器**主动发起的请求**：回包在 native（判据在 `native/lsp_test.cpp`），这三条的内容转出来之后归本表记账 ──
+
+/** 一条注册事件（宿主转出来的形状就是这样的字段袋：`{language, severity, message, method}` + registrations/token）。 */
+function registrationEvent(language, registrations, method = 'client/registerCapability') {
+  return { language, severity: 3, message: '', method, [method === 'client/registerCapability' ? 'registrations' : 'unregisterations']: registrations }
+}
+
+test('client/registerCapability：登记 id→method、按注册的方法作废那一族缓存，但一条都不弹', () => {
   resetSurface()
+  const before = cacheClears
+  assert.equal(handleLspProgressEvent('lsp.message',
+    registrationEvent('java', [{ id: 'r1', method: 'textDocument/inlayHint', registerOptions: { x: 1 } },
+                               { id: 'r2', method: 'workspace/didChangeConfiguration' }])), true)
+  assert.deepEqual(Object.keys(lspDynamicRegistrations).sort(), ['r1', 'r2'], '两条都登记了')
+  assert.deepEqual([lspDynamicRegistrations.r1.method, lspDynamicRegistrations.r1.language],
+    ['textDocument/inlayHint', 'java'], '登记的是服务器给的那个方法与这台服务器')
+  assert.equal(lspDynamicRegistrationCount(), 2)
+  assert.equal(cacheClears > before, true, '注册了 inlayHint ⇒ 作废那一族缓存（上游 restartHighlightingIfNeeded :130-182 的同一判据）')
+  assert.deepEqual(lspServerMessages, [], 'record 这一档不弹任何通知（本仓没有「动态注册表」那个窗口，画它就是放假控件）')
+  assert.equal(droppedLspServerMessages(), 0, '有人接，不算丢弃')
+  const line = requestLines()[0]
+  assert.equal(line.level, 3, '登记这件事是信息，不是错误')
+  assert.match(line.text, /textDocument\/inlayHint#r1/, '日志里说得出注册了哪一项')
+  assert.match(line.text, /已作废 \d+ 份缓存/)
+  resetSurface()
+})
+
+test('注册里没有缓存相关的方法 ⇒ 不作废缓存；空批次也照样登记并留一行', () => {
+  resetSurface()
+  const before = cacheClears
+  handleLspProgressEvent('lsp.message', registrationEvent('java', [{ id: 'r3', method: 'textDocument/hover' }]))
+  assert.equal(cacheClears, before, 'hover 不在本仓那一族缓存的账上，清一次就是白白让结构视图重问一遍')
+  assert.equal(lspDynamicRegistrationCount('java'), 1)
+
+  // 键整个缺省 = 服务器发了一条空批次：合法的空（宿主那头的 `collect_registrations` 也按「0 条」回 null），
+  // 前端不许凭空登记任何一项。
+  handleLspProgressEvent('lsp.message', { language: 'java', severity: 3, message: '', method: 'client/registerCapability' })
+  assert.equal(lspDynamicRegistrationCount(), 1, '没有 registrations 就一条都不登记')
+  assert.match(requestLines()[requestLines().length - 1].text, /服务器没给可登记的条目/)
+  resetSurface()
+})
+
+test('形状不对的条目不登记（宁可少记，也不替服务器造一个它没给过的把手），日志如实写少了几条', () => {
+  resetSurface()
+  assert.deepEqual(lspRegistrationEntries([{ id: 'a', method: 'm' }, { id: 1, method: 'm' }, { method: 'm' }, null, 'x']),
+    [{ id: 'a', method: 'm' }], '只认 id 与 method 都是字符串的那些')
+  assert.deepEqual(lspRegistrationEntries(undefined), [], '整个缺省 = 空表')
+  assert.deepEqual(lspRegistrationEntries({ 0: { id: 'a', method: 'm' } }), [], '不是数组就不算批次')
+
+  handleLspProgressEvent('lsp.message', registrationEvent('java',
+    [{ id: 'ok', method: 'textDocument/hover' }, { method: 'textDocument/hover' }]))
+  assert.deepEqual(Object.keys(lspDynamicRegistrations), ['ok'], '缺 id 的那条没登记')
+  assert.match(requestLines()[0].text, /另有 1 条形状不对（缺 id 或 method），没登记/)
+  resetSurface()
+})
+
+test('重注册同一个 id 是覆盖（服务器的把手只有一个），注销摘得掉；摘不到的那条按警告留痕', () => {
+  resetSurface()
+  handleLspProgressEvent('lsp.message', registrationEvent('java', [{ id: 'r1', method: 'textDocument/hover' }]))
+  handleLspProgressEvent('lsp.message', registrationEvent('java', [{ id: 'r1', method: 'textDocument/codeLens' }]))
+  assert.equal(lspDynamicRegistrationCount(), 1, '同一个 id 再来一次不翻倍')
+  assert.equal(lspDynamicRegistrations.r1.method, 'textDocument/codeLens', '后到的那一条赢')
+
+  handleLspProgressEvent('lsp.message', registrationEvent('java', [{ id: 'r1', method: 'textDocument/codeLens' }], 'client/unregisterCapability'))
+  assert.deepEqual(Object.keys(lspDynamicRegistrations), [], '摘掉了')
+  assert.equal(requestLines()[requestLines().length - 1].level, 3, '正常注销是信息')
+
+  // 撤一个本端没有的 id：回包宿主那侧已经给了 null（协议要求"必须回"），这里只把这件事写下来。
+  handleLspProgressEvent('lsp.message', registrationEvent('java', [{ id: 'ghost', method: 'textDocument/hover' }], 'client/unregisterCapability'))
+  assert.equal(lspDynamicRegistrationCount(), 0)
+  const unknown = requestLines()[requestLines().length - 1]
+  assert.equal(unknown.level, 2, '「服务器撤了一条我们没登记过的」是要留意的事，不是信息级')
+  assert.match(unknown.text, /另有 1 项本端没有登记过/)
+  resetSurface()
+})
+
+test('window/workDoneProgress/create：只留一行日志，不造进度行也不弹（上游 :255 就一句 completedFuture(null)）', () => {
+  resetSurface()
+  for (const key of Object.keys(lspProgressTasks)) delete lspProgressTasks[key]
+  assert.equal(handleLspProgressEvent('lsp.message',
+    { language: 'java', severity: 3, message: '', method: 'window/workDoneProgress/create', token: 'import-1' }), true)
+  assert.deepEqual(lspServerMessages, [], '申请 token 不是给用户看的气球')
+  assert.deepEqual(Object.keys(lspProgressTasks), [], '进度行要等 $/progress 的 begin 才建，这里凭空造一条就是假控件')
+  assert.equal(requestLines()[0].level, 4, '这一行是 log 级（与 $/progress 的 begin 同档）')
+  assert.match(requestLines()[0].text, /token=import-1/)
+
+  // 整数 token 也要认（协议的 ProgressToken 是 string | number 的联合类型）。
+  handleLspProgressEvent('lsp.message',
+    { language: 'java', severity: 3, message: '', method: 'window/workDoneProgress/create', token: 42 })
+  assert.match(requestLines()[1].text, /token=42/)
+
+  // 宿主明着拒了的那一条（没有 token）⇒ 这里是警告级，说得出"那条进度不会有下文"。
+  handleLspProgressEvent('lsp.message',
+    { language: 'java', severity: 3, message: '', method: 'window/workDoneProgress/create' })
+  const rejected = requestLines()[requestLines().length - 1]
+  assert.equal(rejected.level, 2)
+  assert.match(rejected.text, /InvalidParams/)
+  resetSurface()
+})
+
+test('record 那一档不落通知组也不算丢弃；把处理器摘掉就立刻变成丢弃（这一族"该失败"的形状）', () => {
+  resetSurface()
+  assert.deepEqual(LSP_DYNAMIC_REQUEST_METHODS, ['client/registerCapability', 'client/unregisterCapability', 'window/workDoneProgress/create'])
+  for (const method of LSP_DYNAMIC_REQUEST_METHODS) {
+    assert.equal(lspMessageRouteOf(method), 'record', `${method} 归 record`)
+    assert.equal(lspMessageGroupIdOf('record', 1), '', 'record 不属于任何通知组（上游那三条都不 doNotify）')
+    assert.equal(lspMessageDisplayIdOf('java', ''), '', '没有组就没有 displayId：给了一个就是替协议记账预约一个气球')
+  }
+  // 反向验证的左半边：把这三条的处置**摘掉**（先覆盖成 no-op，再用它自己的反登记口删掉）⇒
+  // 同类事件不再被记账，而是落进丢弃计数（= 这类缺陷第一次有了可观察的痕迹）。
+  for (const method of LSP_DYNAMIC_REQUEST_METHODS) registerLspServerMessageHandler(method, () => {})()
+  for (const method of LSP_DYNAMIC_REQUEST_METHODS) {
+    assert.ok(!lspServerMessageHandlerMethods().includes(method), `${method} 现在确实没人接`)
+    assert.equal(handleLspProgressEvent('lsp.message', registrationEvent('java', [{ id: 'x', method: 'm' }], method)), true)
+    assert.equal(droppedLspServerMessages(method), 1, `${method} 没人接 ⇒ 必须计一次丢弃`)
+    assert.deepEqual(lspServerMessages, [], `${method} 即便没人接也不许冒充别的方法弹出去`)
+  }
+  registerDefaultLspServerMessageHandlers()
+  assert.equal(handleLspServerMessageEvent({ language: 'java', severity: 3, message: '', method: 'client/registerCapability', registrations: [{ id: 'back', method: 'textDocument/hover' }] }), true)
+  assert.equal(lspDynamicRegistrations.back.method, 'textDocument/hover', '处理器注册回去 ⇒ 同一条事件重新被记账')
+  resetSurface()
+})
+
+test('服务器停了就作废它那一台登记的动态能力（上游那张表是挂在客户端实例上的）', () => {
+  resetSurface()
+  handleLspProgressEvent('lsp.message', registrationEvent('java', [{ id: 'j1', method: 'textDocument/hover' }]))
+  handleLspProgressEvent('lsp.message', registrationEvent('kotlin', [{ id: 'k1', method: 'textDocument/hover' }]))
+  assert.deepEqual(Object.keys(lspDynamicRegistrations).sort(), ['j1', 'k1'])
+  assert.equal(handleLspProgressEvent('lsp.progressReset', { language: 'java' }), true)
+  assert.deepEqual(Object.keys(lspDynamicRegistrations), ['k1'], '只清这一台的，别的服务器那份注册表不动')
+  assert.equal(expireLspMessageRequestsOnStop('kotlin'), 0, '停机这条不牵连别的语言的在途问句')
+  resetSurface()
+})
+
+test('接线：宿主那六条服务器请求都有回包，转出来的正是这三条', () => {
+  resetSurface()
+  const client = read('native/lsp.cpp')
+  for (const method of ['window/workDoneProgress/create', 'client/registerCapability', 'client/unregisterCapability',
+                        'workspace/workspaceFolders', 'workspace/configuration', 'workspace/applyEdit']) {
+    assert.ok(client.includes(`"${method}"`), `分派表里有 ${method} 这一支（没有就是掉进 -32601 的那类缺陷）`)
+  }
+  // 回包在转出**之前**：转出那头的回调万一抛，不能把回包一起带走（服务器会一直等这一条）。
+  const registerBody = client.slice(client.indexOf('void Client::answer_register_capability'))
+  const respondAt = registerBody.indexOf('respond(id, Json(nullptr), Json(nullptr));')
+  const forwardAt = registerBody.indexOf('forward_server_request(params, "client/registerCapability")')
+  assert.ok(respondAt > 0 && forwardAt > respondAt, '先回包再转出（顺序反了 = 一次异常就能把这条请求变成永不回复）')
+  assert.match(client, /respond\(id, Json\(nullptr\), Json\{\{"code", -32601\}, \{"message", "Method not found"\}\}\)/,
+    '认不得的方法回 MethodNotFound，而不是不回')
+  const bootstrap = read('native/lsp_host_bootstrap.cpp')
+  assert.match(bootstrap, /for \(const char\* key : \{"registrations", "unregisterations", "token"\}\)/,
+    '宿主把这三条的参数原样透传出来（内容丢了就又回到"收下不记账"）')
+  // 前端这一头：三条都登记了处置，且只登记这三条。
+  assert.ok(LSP_DYNAMIC_REQUEST_METHODS.every(method => lspServerMessageHandlerMethods().includes(method)),
+    '转出来的三条都有处置器（少一条就落进丢弃计数）')
+  resetSurface()
+})
+
+test('不带 method 的旧宿主事件保持改动之前的行为（一律按 showMessage 显示，不计丢弃）', () => {
   assert.equal(handleLspProgressEvent('lsp.message', { language: 'java', severity: 3, message: '老形状' }), true)
   assert.deepEqual(lspServerMessages.map(item => [item.severity, item.message]), [[3, '老形状']])
   assert.equal(droppedLspServerMessages(), 0, '没有 method 不等于有人没接')
@@ -309,9 +489,18 @@ test('端到端：服务器消息真的走通到通知面（watcher 醒、通知
   assert.equal(lspServerMessages.length, 2, '两条都还在队列里等着被读')
   await nextTick()
 
-  const rows = written.filter(entry => entry.displayId === 'lsp:message:java')
-  assert.deepEqual(rows.map(entry => [entry.message, entry.error]), [['导入失败', true], ['构建脚本有问题', true]],
-    '两条都变成通知行，Error/Warning 标成错误样式（progressNotices 的 severity<=2 规则）')
+  const rows = written.map(entry => [entry.message, entry.error, entry.displayId])
+  assert.deepEqual(rows, [
+    ['导入失败', true, 'lsp:message:java'],
+    ['java：1 行（错误 1）', true, 'lsp:log:java'],
+    ['构建脚本有问题', true, 'lsp:log:message:java'],
+    ['java：2 行（错误 1）', true, 'lsp:log:java'],
+  ],
+  '两条服务器消息各自变成一行通知、Error/Warning 都标错误样式（progressNotices 的 severity<=2），'
+  + '外加该语言的日志摘要那一行（`lsp:log:<语言>` = `lspLogNoticeOf`）⇒ 一共四行、顺序固定。'
+  + '分级按条目自带的 displayId 分开：showMessage 落「LSP window/showMessage」、'
+  + 'logMessage 的 Error/Warning 落「LSP window/logMessage: errors, warnings」'
+  + '（上游 LspServerNotificationsHandlerImpl.kt:385-390 与 :393-404，组 id 字面值 :464/:470）')
   assert.deepEqual(lspServerMessages, [], '消费方把这批读走了（watcher 真醒了 = 通道是活的）')
   assert.deepEqual(lspLogEntries.value.filter(entry => entry.kind === 'message').map(entry => entry.text),
     ['导入失败', '构建脚本有问题'], '通知面那一拍同时把消息写进「语言服务」日志（Error/Warning 不再只停在队列里）')

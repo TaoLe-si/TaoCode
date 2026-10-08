@@ -52,6 +52,15 @@ struct Plugin {
     std::string name;
     std::string version;
     std::string description;
+    // 变更说明 —— 上游清单的 `<change-notes>` 元素（
+    // `platform/pluginSystem/parser/impl/src/com/intellij/platform/pluginSystem/parser/impl/PluginXmlConst.kt:42`
+    // 的 `CHANGE_NOTES_ELEM = "change-notes"`，读取面同目录 `XmlReader.kt:193` 的
+    // `builder.changeNotes = getNullifiedContent(reader)` 那一支，getter 在
+    // `platform/core-impl/src/com/intellij/ide/plugins/IdeaPluginDescriptorImpl.kt:195`）。
+    // 界面消费点：`platform/platform-impl/src/com/intellij/ide/plugins/newui/PluginDetailsPageComponent.kt:1394`
+    // 的 `changeNotesPanel!!.show(getChangeNotes())`（那块面板在 `:847-862` 建，空内容就整块不可见）。
+    // 空串 = 清单没写 ⇒ 前端不渲染那一行（不放假控件）。
+    std::string change_notes;
     // IDEA 的 `IdeaPluginDescriptor.getDisplayCategory()`：分组用（`InstalledPluginsTab` 按它
     // 分桶，缺省归入 "Other Tools"）。空串表示没写，分组由前端兜底。
     std::string category;

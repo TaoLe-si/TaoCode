@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -72,7 +73,19 @@ const char* completion_kind(unsigned number) {
 
 Json hover_text(const Json& contents) {
     if (contents.is_string()) return contents;
-    if (contents.is_object() && contents.contains("value")) return contents.at("value");
+    if (contents.is_object() && contents.contains("value")) {
+        // `MarkedString` 的对象形态 `{language, value}`：上游
+        // `TextRangeAndMarkupContent.fromHover`（platform/lsp-impl/src/impl/features/documentation/
+        // TextRangeAndMarkupContent.kt:32-38）把这一段**裹成围栏代码块**（围栏 + language + 换行 +
+        // 值 + 换行 + 围栏）再拼进 markdown。只取 `value` 会把语言标记整个丢掉，于是本仓的
+        // 悬停/快速文档里那段代码没有语法标记、与后面的正文也分不开。
+        if (contents.contains("language") && contents.at("language").is_string()) {
+            const auto language = contents.at("language").get<std::string>();
+            const auto value = contents.at("value").is_string() ? contents.at("value").get<std::string>() : std::string();
+            return Json("```" + language + "\n" + value + "\n```");
+        }
+        return contents.at("value");
+    }
     if (contents.is_array()) {
         std::string joined;
         for (const auto& part : contents) {
@@ -82,6 +95,59 @@ Json hover_text(const Json& contents) {
         return joined;
     }
     return Json(nullptr);
+}
+
+Json apply_item_defaults(const Json& item, const Json& defaults) {
+    if (!item.is_object()) return item;
+    if (!defaults.is_object() || defaults.empty()) return item;
+    Json merged = item;
+    // 列表级缺省：只在条目自己**没有**该键时回填（`LspCompletionUtil.kt:47-63` 逐条 if）。
+    for (const char* key : {"commitCharacters", "insertTextFormat", "insertTextMode", "data"})
+        if (!merged.contains(key) && defaults.contains(key)) merged[key] = defaults.at(key);
+    if (merged.contains("textEdit")) return merged;
+    if (!defaults.contains("editRange") || !defaults.at("editRange").is_object()) return merged;
+    const auto& edit_range = defaults.at("editRange");
+    const auto text = merged.contains("textEditText") && merged.at("textEditText").is_string()
+                          ? merged.at("textEditText").get<std::string>()
+                          : string_at(merged, "label");
+    // `editRange` 是 Either：左支 = Range、右支 = {insert, replace}。本仓前端只认 `{range, newText}`
+    // 的形状（`src/lspCompletion.ts` 的 `RawItem.textEdit`），右支取 `insert` 那一段 ——
+    // 与上游 `InsertReplaceEdit(textEditText, insert, replace)` 在"插入时用哪一段"上一致。
+    if (edit_range.contains("start") && edit_range.contains("end")) {
+        merged["textEdit"] = Json{{"range", edit_range}, {"newText", text}};
+    } else if (edit_range.contains("insert") && edit_range.at("insert").is_object()) {
+        merged["textEdit"] = Json{{"range", edit_range.at("insert")}, {"newText", text}};
+    }
+    return merged;
+}
+
+Json shape_completion_items(const Json& result) {
+    Json items = Json::array();
+    const Json* source = nullptr;
+    Json defaults = Json(nullptr);
+    if (result.is_array()) source = &result;
+    else if (result.is_object() && result.contains("items")) {
+        source = &result.at("items");
+        // `CompletionList.itemDefaults`（列表级缺省值）：条目自己没写的键从这里回填 ——
+        // 服务器把 `editRange`/`insertTextFormat`/`commitCharacters` 放在这一层很常见，
+        // 不回填等于整列表的默认编辑区间与 snippet 格式全丢（`LspCompletionUtil.kt:47-63`）。
+        if (result.contains("itemDefaults")) defaults = result.at("itemDefaults");
+    }
+    if (!source) return items;
+    for (const auto& raw_item : *source) {
+        if (!raw_item.is_object() || !raw_item.contains("label")) continue;
+        const Json item = apply_item_defaults(raw_item, defaults);
+        Json entry{{"label", item.at("label")}, {"kind", completion_kind(item.value("kind", 1))}};
+        if (item.contains("detail") && item.at("detail").is_string()) entry["detail"] = item.at("detail");
+        if (item.contains("insertText") && item.at("insertText").is_string()) entry["apply"] = item.at("insertText");
+        // 有些服务器不等 resolve 就给了文档，能省一次往返。
+        if (item.contains("documentation")) entry["documentation"] = hover_text(item.at("documentation"));
+        // `raw` 是**服务器给的原始项**（已回填列表级缺省）：`completionItem/resolve`
+        // 要求把它原样发回去（服务器靠里面的 `data` 找回条目）。与层级项用的是同一套做法。
+        entry["raw"] = item;
+        items.push_back(std::move(entry));
+    }
+    return items;
 }
 
 Json range_corner(const Json& range, const char* corner) {
@@ -124,7 +190,7 @@ Json text_edits(const Json& array) {
     return out;
 }
 
-Json shape_diagnostics(const Json& array) {
+Json shape_diagnostics(const Json& array, const std::function<std::string(const std::string&)>& fold_uri) {
     Json diagnostics = Json::array();
     if (!array.is_array()) return diagnostics;
     for (const auto& item : array) {
@@ -147,9 +213,49 @@ Json shape_diagnostics(const Json& array) {
         // 在这里裁掉的话宿主拿不到 tags，那两档外观就只剩本地规则能画。
         if (item.contains("code")) entry["code"] = item.at("code");
         if (item.contains("tags")) entry["tags"] = item.at("tags");
+        // `relatedInformation`（一条诊断的其它相关位置）：上游 LSP 宿主把它**原样保留**进诊断
+        // 数据（`LspDiagnosticAndLazyQuickFixes.kt:42`），问题面板据此列「相关位置」一节。本仓
+        // 折成宿主形状 `{path,line,character,message}` —— `path` 由调用方的 uri→工作区相对路径
+        // 折法给，折不出路径的条目丢弃（猜错位置比少列一行更糟，与
+        // `src/problemRelatedInformation.ts:66-67` 同一口径）。没有折法（`fold_uri` 为空）时
+        // 整格不写：老调用点与 native 单测拿到的形状与旧版逐字一致。
+        if (fold_uri && item.contains("relatedInformation") && item.at("relatedInformation").is_array()) {
+            Json related = Json::array();
+            for (const auto& info : item.at("relatedInformation")) {
+                if (!info.is_object()) continue;
+                const auto message = string_at(info, "message");
+                if (message.empty()) continue;
+                if (!info.contains("location") || !info.at("location").is_object()) continue;
+                const auto& location = info.at("location");
+                const auto uri = string_at(location, "uri");
+                if (uri.empty()) continue;
+                const auto path = fold_uri(uri);
+                if (path.empty()) continue;
+                const Json& location_range = location.contains("range") ? location.at("range") : Json::object();
+                const auto location_start = range_corner(location_range, "start");
+                related.push_back({{"path", path}, {"line", int_at(location_start, "line")},
+                                   {"character", int_at(location_start, "character")}, {"message", message}});
+            }
+            if (!related.empty()) entry["relatedInformation"] = std::move(related);
+        }
         diagnostics.push_back(std::move(entry));
     }
     return diagnostics;
+}
+
+PublishedBatch shape_publish_params(const Json& params,
+                                    const std::function<std::string(const std::string&)>& fold_uri) {
+    PublishedBatch batch;
+    // 坏输入不抛（这条跑在 Host 的读线程上，抛出去就是终止进程）：认不出来就当空批次 + 没版本。
+    batch.items = Json::array();
+    batch.version = Json(nullptr);
+    if (!params.is_object()) return batch;
+    if (params.contains("diagnostics")) batch.items = shape_diagnostics(params.at("diagnostics"), fold_uri);
+    // 只认整数：`3.0`、`"3"`、`null` 一律当「服务器没声明」。上游同样只在 `params.version`
+    // 非空时才比版本（`LspPublishDiagnosticsCache.kt:56-57`），没声明就走「照收」那条分支。
+    if (params.contains("version") && params.at("version").is_number_integer())
+        batch.version = params.at("version");
+    return batch;
 }
 
 void collect_symbols(const Json& nodes, Json& out) {

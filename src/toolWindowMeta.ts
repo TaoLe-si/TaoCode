@@ -21,7 +21,11 @@
 //
 // 原先这几张表各写一份、还互不一致（`toolWindowStripes` 把 vcslog/todo/debug 列在 left、
 // `toolLayouts` 把锚点全写成 left）—— 现在**只有本文件定义**，其余地方 import。
-import { Bell, Bookmark as BookmarkIcon, Boxes, Bug, Files, FolderTree, GitBranch, GitGraph, ListChecks, Search } from 'lucide-vue-next'
+import { IdeaAskAIIcon, IdeaBookmarksIcon, IdeaCommitIcon, IdeaDebugIcon, IdeaFindIcon, IdeaGradleIcon, IdeaNotificationsIcon, IdeaProjectIcon, IdeaStructureIcon, IdeaTodoIcon, IdeaVcsIcon } from './components/icons/toolWindowIcons.ts'
+// Agent 窗口的图标 = 上游 `AllIcons.ToolWindowAskAI`（`AllIcons.java:1494` =
+// `expui/toolwindows/toolWindowAskAI.svg`）—— IDEA 里 AI 助手的工具窗口图标。
+// 早先这里用的是 lucide `Bot`，那是把工具窗口条的 16/20 格双形态换成了 24 格描边图，
+// 与本仓「工具窗口条图标只走 IDEA expui 副本」的门禁冲突（`tests/idea-icons.test.mjs` 两条门）。
 import { mnemonicBindings, mnemonicOf } from './toolWindows.ts'
 import { beanToTask, type ToolWindowBean, type ToolWindowFactory, type RegisterToolWindowTask } from './toolWindowFactories.ts'
 
@@ -84,23 +88,23 @@ export const TOOL_WINDOW_REGISTRY = [
   // 按锚点分组会把它们的编号换掉 —— 那是用户看得见的行为。
   // `intellij.platform.lang.impl.xml` 的 `<toolWindow id="Project" anchor="left" …>`（项目视图）。
   // 可用性：上游没有 `shouldBeAvailable` —— 空项目也显示空态，所以恒可用。
-  { id: 'files', title: '项目', icon: Files, anchor: 'left' },
+  { id: 'files', title: '项目', icon: IdeaProjectIcon, anchor: 'left' },
   // IDEA 的 Commit 工具窗口（本仓的源代码管理面板就是它：信息 + 变更 + 提交动作）。
   // `CommitToolWindowFactory.isAvailable`（`vcsToolWindowFactories.kt:77-81`）要求项目里有 VCS 映射；
   // 本仓的等价物不能在渲染前问（要跑一次 git 才知道），所以维持"恒可用 + 面板自己报空态/错误"——
   // 真 exe 里打开一个没有 .git 的项目时它会如实说「读取 Git 日志失败…」（见 §AP 的取证记录）。
-  { id: 'git', title: '源代码管理', icon: GitBranch, anchor: 'left' },
+  { id: 'git', title: '源代码管理', icon: IdeaCommitIcon, anchor: 'left' },
   // IDEA 的 Version Control / Log 窗口（`defaultToolWindowlayoutProvider.kt:246` 配在 bottom）。
   // `ChangeViewToolWindowFactory.isAvailable`（`vcsToolWindowFactories.kt:60-63`）= `canBeAvailableInProject`；
   // 本仓的等价物 = 桌面端 + 打开了项目（浏览器预览没有 git 通道，没有项目就没有仓库可读）。
   // `canCloseContents="true"`：`VcsExtensions.xml:193-194` 那条注册写了这个属性。本仓这一格目前只挂
   // 一条日志内容，所以这一位在界面上还问不出来（见报告「做不到」那节）。
-  { id: 'vcslog', title: 'VCS 日志', icon: GitGraph, anchor: 'bottom', canCloseContents: true,
+  { id: 'vcslog', title: 'VCS 日志', icon: IdeaVcsIcon, anchor: 'bottom', canCloseContents: true,
     available: deps => deps.isDesktop && deps.hasWorkspace },
   // IDEA 的 Find 窗口（`:246` 同一条 V1 默认布局）。
-  { id: 'search', title: '搜索', icon: Search, anchor: 'bottom' },
+  { id: 'search', title: '搜索', icon: IdeaFindIcon, anchor: 'bottom' },
   // `todo.xml` 的 `<toolWindow id="TODO" anchor="bottom" …>`（`:60-61`，那条注册写了 `canCloseContents="true"`）。
-  { id: 'todo', title: '任务', icon: ListChecks, anchor: 'bottom', canCloseContents: true },
+  { id: 'todo', title: '任务', icon: IdeaTodoIcon, anchor: 'bottom', canCloseContents: true },
   // 结构视图：内容来自语言服务（`StructureView`）。上游没有对应的 `shouldBeAvailable`（IDEA 的结构
   // 窗口恒可用、只显示空态），这条是**本仓的映射**：没有语言服务就没有结构可给 ⇒ 灰着。
   // 它排在 TODO 之后不是随手写的：`$default.xml` 里 `ActivateOutlineToolWindow` 是 **Alt+6**、
@@ -108,20 +112,33 @@ export const TOOL_WINDOW_REGISTRY = [
   // `secondary="true"`：`intellij.platform.structureView.xml:55-56` 那条注册写的属性
   // （上游 `beanToTask` 把它写成 `sideTool`，`DesktopLayout.kt:46` 再拿它当 `WindowInfo.isSplit` 的初值 ⇒
   // 条纹按钮排在这一侧的**后半组**，`AbstractDroppableStripe.kt:59-61` 的 "side buttons in the end"）。
-  { id: 'outline', title: '结构', icon: FolderTree, anchor: 'left', secondary: true, available: deps => deps.lspReady },
+  { id: 'outline', title: '结构', icon: IdeaStructureIcon, anchor: 'left', secondary: true, available: deps => deps.lspReady },
   // `bookmarks.xml` 的 `<toolWindow id="Bookmarks" anchor="left" secondary="true" …>`（`:47-48`）：
   // 本仓的书签是纯本地状态，恒可用。
-  { id: 'bookmarks', title: '书签', icon: BookmarkIcon, anchor: 'left', secondary: true },
+  { id: 'bookmarks', title: '书签', icon: IdeaBookmarksIcon, anchor: 'left', secondary: true },
   // IDEA 的 Debug 窗口（`:248`）。本仓的调试器是 DAP 客户端，窗口恒在、内容空态。
-  { id: 'debug', title: '调试', icon: Bug, anchor: 'bottom' },
+  { id: 'debug', title: '调试', icon: IdeaDebugIcon, anchor: 'bottom' },
   // `plugins/gradle/.../intellij.gradle.xml:228`：`<toolWindow id="Gradle" anchor="right" …>`。
   // `AbstractExternalSystemToolWindowFactory.java:32-34`：`shouldBeAvailable = !linkedProjectsSettings.isEmpty()`
   // —— 本仓的等价物是"这个项目是已链接的 Gradle 项目"。
-  { id: 'gradle', title: 'Gradle', icon: Boxes, anchor: 'right', numbered: false,
+  { id: 'gradle', title: 'Gradle', icon: IdeaGradleIcon, anchor: 'right', numbered: false,
     available: deps => deps.isDesktop && deps.hasWorkspace && deps.gradleAvailable },
   // `intellij.platform.ide.impl.xml:1210-1212`：`<toolWindow id="Notifications" anchor="right" secondary="true" …>`。
   // 没有 `ActivateNotificationsToolWindow` 动作 ⇒ 不占 Alt+数字。
-  { id: 'notifications', title: '通知', icon: Bell, anchor: 'right', secondary: true, numbered: false },
+  { id: 'notifications', title: '通知', icon: IdeaNotificationsIcon, anchor: 'right', secondary: true, numbered: false },
+  // Agent 对话工具窗口（**本仓自己的注册**；上游对标物是 `AIAssistant` 那一格）。
+  // 上游依据：`platform/platform-impl/src/com/intellij/toolWindow/defaultToolWindowlayoutProvider.kt:263-273`
+  // 的 `addPlatformDefaultsV2()` 里 RIGHT 那一支明写
+  // `addOrUpdate("Notifications") { contentUiType = COMBO }` → `addOrUpdate("AIAssistant") { weight = 0.25f }`
+  // → `addOrUpdate("Database")` → `addOrUpdate("Gradle")` → `addOrUpdate("Maven")`
+  // ⇒ **AI 对话窗口在 IDEA 里就是停右边的**，且不是 side tool（那一支没写 `isSplit`）。
+  // 本仓这条对标那一格：右锚、非 secondary（与 `notifications` 不同组，所以排在它前面）。
+  // 用户要求（2026-10-07）：右栏一个 Agent 对话入口，改动以红绿差异呈现、Do/Undo/DoAll 决定去留；
+  // 读改都限定在当前工作区里 ⇒ 可用性 = 桌面端 + 打开了项目（浏览器预览没有本地文件通道）。
+  // `numbered: false`：没有对应的 Activate 动作，且**必须**排在表尾 —— 枚举顺序决定 Alt+数字的编号，
+  // 插到中间会把既有窗口的编号整体挪动（那是用户看得见的行为）。
+  { id: 'agent', title: 'Agent 对话', icon: IdeaAskAIIcon, anchor: 'right', numbered: false,
+    available: deps => deps.isDesktop && deps.hasWorkspace },
 ] as const satisfies readonly ToolWindowRegistration[]
 
 export type ToolWindowId = (typeof TOOL_WINDOW_REGISTRY)[number]['id']
@@ -152,7 +169,12 @@ function derived<T>(pick: (entry: RegistryEntry) => T): Record<ToolWindowId, T> 
 /** 条纹标题表（菜单/状态栏弹层/工具窗口标题栏都读它）。 */
 export const toolTitles: Record<ToolWindowId, string> = derived(entry => entry.title)
 
-/** 图标表。`gradle` 用 lucide 的 Boxes：lucide 没有 Gradle 图标，用"模块/构件"语义代替。 */
+/**
+ * 图标表。每一条都是 IDEA 的**原样图标**（`src/components/icons/` 里的 expui 副本），
+ * 出处是各插件的 `<toolWindow … icon="…">` 注册，逐条写在 `components/icons/index.ts` 的
+ * `TOOL_WINDOW_IDEA_ICON` 上。**不再用 lucide 顶替** —— lucide 是 24 格描边图，
+ * 与 IDEA 的 16/20 格双形态不是同一套形状（原先 `gradle` 就是拿 lucide `Boxes` 顶的）。
+ */
 export const toolIcons: Record<ToolWindowId, unknown> = derived(entry => entry.icon)
 
 /**
@@ -168,15 +190,36 @@ export const toolWindowOrder: ToolWindowId[] = REGISTRY.map(entry => entry.id)
 export const DEFAULT_TOOL_ANCHORS: Record<ToolWindowId, ToolWindowAnchor> = derived(entry => entry.anchor)
 
 /**
- * 每个停靠边内的**默认顺序** = 注册表顺序按锚点过滤。
- * 上游依据是 `defaultToolWindowlayoutProvider.kt:244-267` 的 V1/V2 默认布局
- * （left = Project → Commit → Structure → Bookmarks；bottom = Version Control → Find → TODO → Debug；
- * right = Gradle → Notifications）；这张派生结果与它一致这一点由判据锁住。
+ * 每个停靠边内的**默认顺序** = 注册表顺序按锚点过滤，**再按条纹比较器的第一判据分组**
+ * （`AbstractDroppableStripe.kt:59-62`「side buttons in the end」：后半组排后面，
+ * 同组内保持注册表次序）。上游依据是 `defaultToolWindowlayoutProvider.kt:244-267` 的
+ * V1/V2 默认布局（left = Project → Commit → Structure → Bookmarks；
+ * bottom = Version Control → Find → TODO → Debug；right = Notifications → AIAssistant → Gradle）。
+ *
+ * **为什么这里要排那一层分组**：这张表要回答的是「这条侧条画出来长什么样」，
+ * 所以它必须与 `src/toolWindowStripes.ts` 的 `stripeOrder` 同口径 —— 那边的第一判据就是
+ * `isSplit`。两边各排一次就会出现「默认顺序说 Gradle→Notifications、画出来却是
+ * Gradle→Agent→Notifications」这种自相矛盾（`tests/tool-layout-state.test.mjs` 的
+ * 「工厂恢复后条纹顺序 = 默认顺序」那条门就是冲它去的）。分组是**稳定**的，
+ * 对已分好组的列表再跑一次结果不变，所以拖拽/存档路径不会把它越排越乱。
+ *
+ * 上游那一格 AI 对话窗口对标本仓的 `agent`（见注册表里的注释）：它是右锚、非 side tool，
+ * 于是落在前面那组；`notifications` 是 side tool（EP `secondary="true"`），落在末尾 ——
+ * 这与 IDEA 里右侧条纹「常规按钮…（分隔线）…通知按钮」的画法一致。
  */
 export const DEFAULT_TOOL_ORDER: Record<ToolWindowAnchor, ToolWindowId[]> = {
-  left: toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === 'left'),
-  bottom: toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === 'bottom'),
-  right: toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === 'right'),
+  left: defaultOrderOn('left'),
+  bottom: defaultOrderOn('bottom'),
+  right: defaultOrderOn('right'),
+}
+
+/** 某一侧的默认条纹顺序：注册表顺序按锚点过滤 + 「后半组排后面」。 */
+function defaultOrderOn(side: ToolWindowAnchor): ToolWindowId[] {
+  const ids = toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === side)
+  const primary: ToolWindowId[] = []
+  const back: ToolWindowId[] = []
+  for (const id of ids) (BY_ID.get(id)?.secondary === true ? back : primary).push(id)
+  return [...primary, ...back]
 }
 
 /**
@@ -238,7 +281,7 @@ export function toolWindowTasks(deps: ToolWindowAvailability, suppressedIds: rea
  * `'references'` 这一格**不是**一条注册窗口（所以它不在上面那张 `TOOL_WINDOW_REGISTRY` 里）：
  * IDEA 那边被注册的是**装它的窗口** —— Find（`ToolWindowId.FIND`），而且是**按需注册**的
  * （`platform/lang-impl/src/com/intellij/usageView/impl/UsageViewContentManagerImpl.java:120-136`，
- * `:129` 那句 `registerToolWindow(ToolWindowId.FIND, …)`，`:132` 还写着 `shouldBeAvailable = false`），
+ * `:128-135` 那句 `registerToolWindow(ToolWindowId.FIND, …)`，`:133` 还写着 `shouldBeAvailable = false`），
  * 每次搜索只是往那个窗口的 ContentManager 里 `addContent`（同文件 `:149-190`；用法视图那条由
  * `platform/usageView-impl/src/com/intellij/usages/impl/UsageViewManagerImpl.java:145-163` 递进来）。
  * 本仓的那个 ContentManager 就是底部这一格（条目住在 `src/referenceContents.ts`），

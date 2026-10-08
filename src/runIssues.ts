@@ -17,6 +17,8 @@ import { createConsoleAnsiDecoder } from './consoleAnsi.ts'
 import { foldConsoleLines } from './consoleFold.ts'
 import { findRunHyperlinks, type RunHyperlink } from './runHyperlinks.ts'
 import { parseAnyIssue, type RunIssue } from './buildOutput.ts'
+import { applyConsoleFilters } from './consoleFilterProviders.ts'
+import { applyConsoleFoldings } from './executionExtensionPoints.ts'
 
 export interface RunIssuesDeps {
   /** 控制台已累积的输出（宿主是 reactive 数组，`join('')` 后按行切）。 */
@@ -37,7 +39,10 @@ function parseRunIssue(text: string): RunIssue | null {
 // 每行同时收集**全部** `file:line` 链接（`findRunHyperlinks`，上游 MultipleFilesHyperlinkInfo
 // 的等价物）与首个可跳转问题（编译器诊断的 `file(line,col)` 形态仍由 parseAnyIssue 认）。
 const runLines = computed(() => foldConsoleLines(
-  (() => {
+  // 插件贡献的控制台折叠（上游 `com.intellij.console.folding` / `ConsoleFolding`）先按
+  // `shouldFoldLine` 把该折的行折进上一行（`applyConsoleFoldings`），再走设置里那两个列表的
+  // 连续重复行折叠。没有插件折叠贡献时 `applyConsoleFoldings` 原样返回 ⇒ 行为与之前逐字相同。
+  applyConsoleFoldings((() => {
     // 一台状态机按行喂（上游 `AnsiEscapeDecoder` 的 per-stream emulator 同一件事：颜色跨行延续，
     // 直到 `ESC[0m` 或流结束）。每次重算都新建一台 —— 与「从输出开头重放一遍」等价。
     const ansi = createConsoleAnsiDecoder()
@@ -45,15 +50,19 @@ const runLines = computed(() => foldConsoleLines(
       const { text, chunks } = ansi.line(raw)
       const links = findRunHyperlinks(text, workspace.value?.root ?? '')
       const first: RunHyperlink | undefined = links[0]
+      // 插件贡献的控制台过滤器（上游 `com.intellij.consoleFilterProvider`）——**追加**在内置识别之后：
+      // 没有插件时这里是空数组，行为与之前逐字相同（判据 tests/console-filter-providers.test.mjs）。
+      const pluginHit = applyConsoleFilters(text, workspace.value?.root ?? '')[0]
       return {
         text,
-        issue: parseRunIssue(text) ?? (first ? { path: first.path, line: first.line, column: first.column } : null),
+        issue: parseRunIssue(text) ?? (first ? { path: first.path, line: first.line, column: first.column } : null)
+          ?? (pluginHit ? { path: pluginHit.path, line: pluginHit.line, column: pluginHit.column ?? 1 } : null),
         links,
         // 没有任何样式的行**不带这个字段** ⇒ 面板渲染路径与本轮之前逐字相同（判据钉住）。
         ...(chunks.length > 0 ? { chunks } : {}),
       }
     })
-  })(),
+  })(), workspace.value?.root ?? null),
   generalSettings.value.foldConsoleLines,
   generalSettings.value.foldExceptions,
   2000))

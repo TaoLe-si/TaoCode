@@ -4,9 +4,18 @@
 // 「哪些条目可见、每行什么颜色」，两者的输入输出都不一样。
 //
 // 上游依据：
-//   · 标记匹配：`TodoTreeBuilder`（`platform/todo`）用 `TodoPattern` 的正则与
-//     `isCaseSensitive()` 决定一个节点属于哪个标记 —— 本仓的扫描是 search.run 括号替代，
-//     徽标/过滤必须用同一套语义，否则同一个条目会两处说法不同（见 tests/todo-tree.test.mjs）。
+//   · 标记匹配（2026-10-06 todo2 自己开上游复核并订正）：模式串**原样**就是正则 ——
+//     `IndexPattern.compilePattern()`（platform/indexing-api/src/com/intellij/psi/search/
+//     IndexPattern.java:80-89）把 `patternString` 直接交给 `Pattern.compile`，只在
+//     `caseSensitive == false` 时补 `Pattern.CASE_INSENSITIVE`；命中是 `matcher.find()`
+//     的子串语义（platform/editor-ui-ex/src/com/intellij/psi/impl/search/
+//     IndexPatternSearcher.java:239,245-247）。上游**没有**隐式 `\b`、**没有** glob 档
+//     （对话框那一栏是正则语法高亮的输入框：`PatternDialog.java:64-67` 用 `dummy.regexp`）。
+//     本仓此前把模式再包一层 `\b(source)\b`，与上游不符（`TODO:` 这类标记恒为 0 条），
+//     也和提交前 TODO 检查那条链（`src/todoScan.ts` 把模式原样交给 `search.run`）两样说法。
+//   · 大小写：`caseSensitive` 是**每条模式**的档位，所以扫描的粗筛（一次 `search.run` 只能带
+//     一个全局开关）之后必须由 `keepPatternHits` 按各自的模式定夺 —— 与上游"索引粗筛计数
+//     （IndexPatternSearcher.java:66-74）+ 每条 Pattern 自己 find() 定夺"的两段式同形。
 //   · 颜色列：IDEA 的 TODO 颜色来自颜色方案（`TodoAttributes.getColor()` /
 //     `TodoPattern.getColor()`），TODO 工具窗口在标记列显示它；本仓没有色板页，
 //     等价物是模式自带的 `#RRGGBB`，缺省给一个中性色。
@@ -31,19 +40,42 @@ export const TODO_COLOR_FALLBACK = '#8a8f98'
 export const TODO_CURRENT_FILE_SCOPE = '__current_file__'
 
 /**
- * `TodoPattern` 的正则是否命中一段文本。空白正则永不命中（避免 `\b()\b` 匹配一切）；
- * 正则写坏时退化为字面量包含，与扫描（search.run）的容错口径一致。
+ * 一条模式（正则，**按上游原样使用，不加隐式 `\b`**）是否命中一段文本。
+ * 空白模式永不命中（避免空表时把每行都点亮）；正则写坏时退化为字面量包含，
+ * 与扫描（search.run）的容错口径一致。大小写由调用方按**该条模式自己的** `caseSensitive` 给。
  */
 export function markerMatches(text: string, pattern: string, caseSensitive = false): boolean {
   const source = pattern.trim()
   if (!source) return false
-  try { return new RegExp(`\\b(${source})\\b`, caseSensitive ? '' : 'i').test(text) }
+  try { return new RegExp(source, caseSensitive ? '' : 'i').test(text) }
   catch { return caseSensitive ? text.includes(source) : text.toLowerCase().includes(source.toLowerCase()) }
 }
 
 /** 一条 TODO 文本命中的模式（表序即优先级，IDEA 的 PatternTable 也是首条命中）。 */
 export function matchingTodoPattern<T extends TodoPatternView>(text: string, patterns: readonly T[]): T | undefined {
   return patterns.find(pattern => markerMatches(text, pattern.pattern, pattern.caseSensitive))
+}
+
+/**
+ * 扫描粗筛之后的**定夺**：只留下命中某条模式（按该条模式自己的 `caseSensitive`）的行，
+ * 并把 `kind` 写成那条模式的说明。上游同一形状 —— 索引那一步只是粗筛计数
+ * （`IndexPatternSearcher.java:66-74` 的 `getTodoCount(...) != 0` 才进 `executeImpl`），
+ * 真正决定"这是不是一条 TODO、属于哪条模式"的是每条 `IndexPattern` 自己的 `Pattern`
+ * （`:239-247` 的 `matcher.find()`）。
+ *
+ * 之所以要有这一步：一趟 `search.run` 只有一个全局 `caseSensitive`，粗筛按不区分大小写取**超集**，
+ * 勾选「区分大小写」由这里把反面大小写的命中剔掉 —— 否则那一档就是一列摆设（本仓此前的状态）。
+ * 模式表为空时什么都不留：没有定义任何标记就没有任何 TODO（不是"退回找 TODO"）。
+ */
+export function keepPatternHits<T extends { text: string }>(
+  rows: readonly T[], patterns: readonly TodoPatternView[],
+): Array<T & { kind: string }> {
+  const kept: Array<T & { kind: string }> = []
+  for (const row of rows) {
+    const hit = matchingTodoPattern(row.text, patterns)
+    if (hit) kept.push({ ...row, kind: hit.description })
+  }
+  return kept
 }
 
 /** 该条目在工具窗口里显示的颜色（模式没配就用中性色）。 */

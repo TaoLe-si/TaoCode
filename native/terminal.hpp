@@ -20,7 +20,10 @@ namespace taocode::terminal {
 // own ANSI/VT into a pipe that we stream verbatim to xterm.js. Bytes are carried
 // untouched in both directions — nothing is decoded, stripped or re-encoded here,
 // because the front end owns terminal semantics and the raw stream is not reliably
-// UTF-8. create/resize/kill/kill_all run on the caller (UI) thread; the output
+// UTF-8. The single exception is the bell: the host *observes* whether a chunk
+// contains a real BEL (BellCb below) and still forwards every byte untouched, so
+// nothing is consumed and the front end keeps owning what the stream means.
+// create/resize/kill/kill_all run on the caller (UI) thread; the output
 // callback fires on that terminal's own reader thread and must not re-enter.
 // Keystrokes are queued and written by a per-terminal writer thread, so a shell
 // that stops reading its input can never freeze the window.
@@ -33,6 +36,15 @@ public:
     // A code of -1 means the process was still alive when the pseudo console closed
     // and had to be terminated with the rest of the job.
     using ExitCb = std::function<void(int id, int exit_code)>;
+    // Fires when one output chunk contains a *real* bell (BEL 0x07 on the ground
+    // state, never the BEL that terminates an OSC title), at most once per chunk.
+    // This is the only escape-sequence reading the host does, and it stays out of
+    // band: the bytes still go to the front end verbatim, nothing is stripped or
+    // consumed. It exists because a terminal opened by runInTerminal has no xterm
+    // to hear the bell at all, and because output buffered until the panel mounts
+    // would make xterm ring for something that already happened. Same reader
+    // thread as OutputCb; the callback must not re-enter the manager.
+    using BellCb = std::function<void(int id)>;
 
     // Out of line: both touch the terminal map, whose value type is only complete
     // inside the .cpp. The destructor closes every terminal, so nothing outlives us.
@@ -60,6 +72,7 @@ public:
     std::vector<int> ids() const;  // open terminals; a shell that exited is dropped
     void kill_all();               // app shutdown: no shell is left behind
     void on_exit(ExitCb callback);  // nullptr clears it
+    void on_bell(BellCb callback);  // nullptr clears it; fires per terminal that rings
 
 private:
     // Queued keystrokes plus the write end of the input pipe. Shared with the
@@ -83,6 +96,7 @@ private:
     std::map<int, std::unique_ptr<Session>> sessions_;
     std::vector<std::unique_ptr<Session>> zombies_;  // shells that exited on their own
     ExitCb on_exit_;
+    BellCb on_bell_;  // read under mutex_, like on_exit_
     int next_id_ = 1;
 };
 

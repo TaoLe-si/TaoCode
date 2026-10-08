@@ -98,9 +98,14 @@ test('只读文档不动作，键位让给下一张 keymap', () => {
 test('接线：Ctrl+Enter 真的绑在这条命令上（$default.xml:959-961 = control ENTER）', () => {
   const view = readFileSync(new URL('../src/components/CodeEditor.vue', import.meta.url), 'utf8')
   assert.match(view, /import \{ splitLineCommand \} from '\.\.\/editorSplitLine'/)
-  assert.match(view, /\{ key: 'Ctrl-Enter', preventDefault: true, run: splitLineCommand\(smartEnter\) \}/,
+  // 键位本体 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限，拆一次降一次）：
+  // 模块里的键位读注入的 `splitLine`，宿主把 `splitLineCommand(smartEnter)` 注进去 —— 两边都要钉。
+  const keymap = readFileSync(new URL('../src/editorKeymap.ts', import.meta.url), 'utf8')
+  assert.match(keymap, /\{ key: 'Ctrl-Enter', preventDefault: true, run: splitLine \}/,
     'Ctrl+Enter 没接到拆行命令 ⇒ 本仓这条键位是空的')
+  assert.match(view, /splitLine: splitLineCommand\(smartEnter\)/,
+    '宿主没把拆行命令注入常驻 keymap ⇒ 模块里那条键位是死的')
   // 这一条要排在 basicSetup 之前，否则回车链先赢（与 Enter 那一行同一个理由）。
-  assert.ok(view.indexOf(`{ key: 'Ctrl-Enter'`) < view.indexOf('basicSetup,'),
+  assert.ok(view.indexOf('keymap.of(editorKeymap)') < view.indexOf('basicSetup,'),
     'Ctrl-Enter 排在 basicSetup 之后 ⇒ 键会被默认档吃掉')
 })

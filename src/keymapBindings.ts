@@ -144,6 +144,17 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
     chord: { key: 'n', control: 'ctrl', alt: true, forbid: ['shift'] }, upstream: '$default.xml:837-839 Inline' },
   { id: 'inspection.runByName', label: '按名称运行检查…', display: 'Ctrl Shift Alt I', scope: 'editor',
     chord: { key: 'i', control: 'ctrl', shift: true, alt: true }, when: lspEditorWhen, upstream: '$default.xml:276-278 RunInspection' },
+  // 「优化导入」（Code 菜单那一行 `code.optimizeImports`，`src/menus/codeMenu.ts:112`）：此前菜单写着
+  // `Ctrl Alt O` 而**分派表里没有这一条** ⇒ 「看着能按、按了没反应」（与 `navigate.super|test|related`
+  // 同一族缺口）。键位逐条核过上游 `platform/platform-resources/src/keymaps/$default.xml:340-342`
+  // = `<action id="OptimizeImports"><keyboard-shortcut first-keystroke="control alt O"/>`。
+  // `forbid: ['shift']` 与同物理键的另外三档划界：`control O` = OverrideMethods（`:544-546`）、
+  // `alt O` = ExportToTextFile（`:974-976`）、`Alt Shift O` = SelectVirtualTemplateElement（`:1002-1004`）；
+  // 上游另有一条 `control alt O` = UsageGrouping.FlattenModules（`:1256-1258`），那是用法视图的分组开关，
+  // 本仓没有那一档 ⇒ 不冲突。`when` 与菜单行的 `enabled` 逐字对齐（有编辑器 + 语言服务就绪）。
+  { id: 'code.optimizeImports', label: '优化导入', display: 'Ctrl Alt O', scope: 'editor',
+    chord: { key: 'o', control: 'ctrl', alt: true, forbid: ['shift'] }, when: lspEditorWhen,
+    upstream: '$default.xml:340-342 OptimizeImports' },
   { id: 'docs.quickDoc', label: '快速文档', display: 'Ctrl Q', scope: 'editor',
     chord: { key: 'q', control: 'ctrl', forbid: ['shift'] }, when: lspEditorWhen, upstream: '$default.xml:349-351 QuickJavaDoc' },
   { id: 'edit.copyReference', label: '复制符号引用', display: 'Ctrl Alt Shift C', scope: 'editor',
@@ -151,6 +162,13 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { id: 'edit.copyPath', label: '复制路径', display: 'Ctrl Shift C', scope: 'editor',
     chord: { key: 'c', control: 'ctrl', shift: true, forbid: ['alt'] }, when: editorWhen, upstream: '$default.xml:454-456 CopyPaths' },
 ]
+
+export const AGENT_TOOLBAR_KEY_BINDINGS = [
+  { id: 'openModelMenu', label: '打开模型菜单', display: 'Ctrl M', scope: 'tool-window',
+    chord: { key: 'm', control: 'ctrl', forbid: ['meta', 'shift', 'alt'] }, upstream: '.tools/ZCode/packages/shared/src/shortcutCommands.ts:80' },
+] as const satisfies readonly KeyBinding[]
+
+export const KEYMAP_EDITABLE_BINDINGS: readonly KeyBinding[] = [...KEY_BINDINGS, ...AGENT_TOOLBAR_KEY_BINDINGS]
 
 // ── 编辑器一族动作（有动作、**没有全局键位**）────────────────────────────────
 //
@@ -237,12 +255,12 @@ export const EDITOR_ACTIONS: readonly EditorActionBinding[] = [
   { id: 'cursor.below', upstreamId: 'EditorCloneCaretBelow', label: '在下行添加光标', keywords: 'clone caret below 多光标 下行 EditorCloneCaretBelow',
     command: 'cursor.below', key: { source: 'none', upstream: '上游注册 platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:218（`CloneCaretBelow`，动作组 PlatformActions.xml:199）、文案 ActionsBundle.properties:119-120；键位：`$default.xml` **无绑定**（同上，只有 `Sublime Text.xml:284` 给过 `control alt DOWN`，插件方案 VSCode.xml:134-136 给过 `ctrl alt down`/`shift ctrl alt down`），而 `$default.xml:882-884` 把 `control alt shift DOWN` 给了 `ResizeToolWindowDown` ⇒ 本仓那行编辑器键位已摘' } },
   { id: 'brace.match', upstreamId: 'EditorMatchBrace', label: '移动到配对的括号', keywords: 'match brace 配对括号 匹配括号 EditorMatchBrace',
-    command: 'brace.match', key: { source: 'upstream', display: 'Ctrl Shift M', cm: 'Ctrl-Shift-m', boundAt: 'src/components/CodeEditor.vue:845',
+    command: 'brace.match', key: { source: 'upstream', display: 'Ctrl Shift M', cm: 'Ctrl-Shift-m', boundAt: 'src/editorKeymap.ts:181',
       upstream: '$default.xml:1146-1148 EditorMatchBrace = control shift M；注册 intellij.platform.lang.impl.actions.xml:23；文案 ActionsBundle.properties:161' } },
 ]
 
 /** 键位显示串（菜单「快捷键」列查这里，不再手写第二份文案）。 */
-export function keymapKeys(actionId: string, bindings: readonly KeyBinding[] = KEY_BINDINGS): string {
+export function keymapKeys(actionId: string, bindings: readonly KeyBinding[] = KEYMAP_EDITABLE_BINDINGS): string {
   return bindings.find(binding => binding.id === actionId)?.display ?? ''
 }
 
@@ -336,7 +354,7 @@ export function isShortcutConflictAction(actionId: string, conflictActionId: str
  * `isShortcutConflict` 是 `KeymapPanel.isShortcutConflictAction` 的注入版（测试与设置页都能换判据）。
  */
 export function keymapConflicts(
-  bindings: readonly KeyBinding[] = KEY_BINDINGS,
+  bindings: readonly KeyBinding[] = KEYMAP_EDITABLE_BINDINGS,
   isShortcutConflict: (actionId: string, conflictActionId: string) => boolean = (a, b) => isShortcutConflictAction(a, b),
 ): KeymapConflict[] {
   const groups = new Map<string, KeyBinding[]>()
@@ -363,7 +381,7 @@ export function keymapConflicts(
  * 上游 `KeymapManagerEx.getConflicts` 只给数据结构，报告文本是各 UI（键位设置页）自己拼的；
  * 本仓没有键位设置页，所以由这个纯函数拼出一份，供工具入口复制到剪贴板。
  */
-export function keymapConflictReport(bindings: readonly KeyBinding[] = KEY_BINDINGS, isShortcutConflict?: (actionId: string, conflictActionId: string) => boolean): string {
+export function keymapConflictReport(bindings: readonly KeyBinding[] = KEYMAP_EDITABLE_BINDINGS, isShortcutConflict?: (actionId: string, conflictActionId: string) => boolean): string {
   const conflicts = keymapConflicts(bindings, isShortcutConflict)
   const header = `键位冲突检查：${bindings.length} 条绑定，${conflicts.length} 处冲突。`
   if (!conflicts.length) return `${header}\n同一作用域内没有重复键位。`
@@ -408,7 +426,7 @@ export function parseChord(text: string): KeyChord | null {
 }
 
 /** 按祖先链解析方案（近的覆盖远的，`null` 解绑）；环会在解析时被截断，不会死循环。 */
-export function resolveKeymapSchemes(schemes: readonly KeymapScheme[], base: readonly KeyBinding[] = KEY_BINDINGS): ResolvedScheme[] {
+export function resolveKeymapSchemes(schemes: readonly KeymapScheme[], base: readonly KeyBinding[] = KEYMAP_EDITABLE_BINDINGS): ResolvedScheme[] {
   const byName = new Map(schemes.map(scheme => [scheme.name, scheme]))
   return schemes.map((scheme) => {
     const chain: KeymapScheme[] = []

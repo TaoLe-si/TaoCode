@@ -77,8 +77,9 @@ test('Classes 档：只列语言服务标成类的符号，其它供给者与 ki
     item('cmd', 'Debug', 'commands'),
   ]
   assert.deepEqual(searchEverywhereResults(items, '', 'classes').map(each => each.id), ['cls', 'itf'])
-  // 反向：Project 档仍然收文件与全部符号（Classes 只是多了一个收窄档，不是替掉 Project）。
-  assert.deepEqual(searchEverywhereResults(items, '', 'project').map(each => each.id), ['file', 'cls', 'itf', 'mth', 'var'])
+  // 反向：Files 档只收文件、Symbols 档收全部符号（Classes 只是多了一个收窄档，不是替掉它们）。
+  assert.deepEqual(searchEverywhereResults(items, '', 'files').map(each => each.id), ['file'])
+  assert.deepEqual(searchEverywhereResults(items, '', 'symbols').map(each => each.id), ['cls', 'itf', 'mth', 'var'])
 })
 
 test('`Foo#member` 用 # 前的类名匹配符号（成员那一段只在打开时用）', () => {
@@ -88,21 +89,21 @@ test('`Foo#member` 用 # 前的类名匹配符号（成员那一段只在打开�
   ]
   // 方法 `parse` 不该因为 `#parse` 那段而以整个模式去比（否则它反而匹配「parse」）。
   assert.deepEqual(searchEverywhereResults(items, 'Demo#parse', 'classes').map(each => each.id), ['cls'])
-  assert.deepEqual(searchEverywhereResults(items, 'Demo#parse', 'project').map(each => each.id), ['cls'])
+  assert.deepEqual(searchEverywhereResults(items, 'Demo#parse', 'symbols').map(each => each.id), ['cls'])
   // 没有 `#` 时行为不变。
   assert.deepEqual(searchEverywhereResults(items, 'parse', 'classes').map(each => each.id), [])
-  assert.deepEqual(searchEverywhereResults(items, 'parse', 'project').map(each => each.id), ['parse'])
+  assert.deepEqual(searchEverywhereResults(items, 'parse', 'symbols').map(each => each.id), ['parse'])
 })
 
 test('显式 classesOnly 参数与档位定义同义（dialog 不传也不会漏掉这条规则）', () => {
   const items = [item('cls', 'Demo', 'symbols', { symbolKind: 5 }), item('mth', 'parse', 'symbols', { symbolKind: 6 })]
-  assert.deepEqual(searchEverywhereResults(items, '', 'project', 50, false, () => true, true).map(each => each.id), ['cls'])
+  assert.deepEqual(searchEverywhereResults(items, '', 'symbols', 50, false, () => true, true).map(each => each.id), ['cls'])
   assert.equal(SEARCH_EVERYWHERE_TABS.find(tab => tab.id === 'classes').classesOnly, true)
 })
 
 test('Classes 档走通用空态分支（它不是文本搜索档）', () => {
   const empty = read('src/searchEverywhereEmpty.ts')
-  assert.match(empty, /tab === 'all' \|\| tab === 'project'/, 'tabHasTextSearch 只认 all/project；classes 走通用分支')
+  assert.match(empty, /tab === 'all' \|\| tab === 'files'/, 'tabHasTextSearch 只认 all/files；classes 走通用分支')
 })
 
 // ── 接线守卫 ────────────────────────────────────────────────────────────────
@@ -125,9 +126,9 @@ test('对话框把查询词交给 open（否则 `Foo#bar` 的成员定位拿不�
 
 test('Classes 档进"有结果的档位"表，Tab 循环真的用它（空档不进循环）', () => {
   const onlyClass = [item('cls', 'Demo', 'symbols', { symbolKind: 5 })]
-  // 顺序按上游 tab priority 降序：All(MAX) → Classes(950) → Project(900) → Symbols(850) →
-  // Actions(800) → Run Configurations(350)。这一批只有 symbols 供给者，所以命中四档。
-  assert.deepEqual(availableSearchEverywhereTabs(onlyClass, ''), ['all', 'classes', 'project', 'symbols'])
+  // 顺序按上游 tab priority 降序：All(MAX) → Classes(950) → Files(900) → Symbols(850) →
+  // Actions(800) → Run Configurations(350)。这一批只有 symbols 供给者，所以命中三档（无 Files）。
+  assert.deepEqual(availableSearchEverywhereTabs(onlyClass, ''), ['all', 'classes', 'symbols'])
   const dialog = read('src/components/SearchEverywhereDialog.vue')
   assert.match(dialog,
     /cycleSearchEverywhereTab\(tab\.value, delta, availableTabs\.value\)/,

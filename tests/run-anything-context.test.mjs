@@ -61,16 +61,26 @@ test('getPath：项目→工作区根，模块→模块内容根，最近目录�
   assert.equal(contextPath(recent), 'D:/a')
 })
 
-test('模块描述：只有项目根拿不到才叫「未定义」，内容根 == 项目根就是空串（:22-25）', () => {
+test('模块描述：项目根拿不到**或**相对路径算不出才叫「未定义」，算得出的（含空串）照原样（:22-25）', () => {
   assert.equal(moduleDescription(true, 'app/src'), 'app/src')
   assert.equal(moduleDescription(true, ''), '', '相对路径为空是合法结果，不是「未定义」')
+  // 留痕（2026-10-06 recentdir 一批）：原写「只有项目根拿不到才是未定义」、实际上游那一个 `?:` 还兜住
+  // `getRelativePath` 自己返回 null 的那一档（模块目录与项目根没有公共前缀）——
+  // `platform/util-rt/src/com/intellij/openapi/util/io/FileUtilRt.java:418`。上游同一情况**不是**空串而是 `.`
+  // （同文件 `:404-405`），本仓的相对路径口径把工作区根本身表示成空串（`runAnythingContext.ts` 的 `contextPath`），
+  // 两条都是「算得出的合法结果」，所以这一档钉的是「空串不判未定义」，null 才判。
+  assert.equal(moduleDescription(true, null), CONTEXT_DESCRIPTION_UNDEFINED, '相对路径算不出（模块在项目根外面）也是未定义')
   assert.equal(moduleDescription(false, 'app/src'), CONTEXT_DESCRIPTION_UNDEFINED, 'guessProjectDir() 为 null 才是未定义')
 })
 
 test('最近目录的标签：非 Unix 上原样返回（FileUtil:1273 的 isUnix || !unixOnly）', () => {
   assert.equal(recentDirectoryLabel('D:/work/notes'), 'D:/work/notes', 'Windows 宿主：不做 ~ 缩写')
-  assert.equal(recentDirectoryLabel('/home/me/notes', true, '/home/me'), '~/notes', 'Unix 上家目录以内缩写成 ~')
-  assert.equal(recentDirectoryLabel('/home/me', true, '/home/me'), '~')
+  assert.equal(recentDirectoryLabel('/home/me/notes', true, '/home/me'), '~/notes', 'Unix 上家目录**以下**折成 ~/子路径（:1277）')
+  // 留痕（2026-10-06 recentdir 一批）：原钉的是 `'~'`，值**钉错了** —— 祖先判定用的是
+  // `isAncestor(userHomeDir, projectDir, /* strict = */ true)`（`platform/util/src/com/intellij/openapi/util/io/FileUtil.java:1276`），
+  // 而 strict 档在两段等长时返回 ThreeState.NO（同文件 `:180-182`；注释 `:130` 说明只有 strict=false 才认相等）
+  // ⇒ 路径**正好等于**家目录时整条折叠不成立，上游给的是原样全路径。
+  assert.equal(recentDirectoryLabel('/home/me', true, '/home/me'), '/home/me', '家目录本身不折成 ~（strict 祖先判定不含相等）')
   assert.equal(recentDirectoryLabel('/opt/notes', true, '/home/me'), '/opt/notes', '家目录以外不动')
   assert.equal(recentDirectoryLabel('D:/x', true), 'D:/x', '没有家目录就不缩写')
 })

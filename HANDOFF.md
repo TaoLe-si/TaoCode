@@ -1,4 +1,185 @@
-# 交接说明（顶部状态更新于 2026-10-05 B12 非 lp/ 子族续做轮；下面「本轮」段是 2026-09-27 的历史存档）
+# 交接说明（顶部状态更新于 2026-10-07「右 dock 三耦合 + emmet/配色方案页」批次；下面 10-07 早两段与 10-05 段是历史存档）
+
+## ⚑ 2026-10-07 · 追加收工：右 dock 三处遗留耦合已清（协调人亲做，真机四项验证）（最新现场）
+
+- **①齿轮行按侧各自算**：`menuUi.ts` 新增 `rightToolWindowGearRows`（`rightGearHostRows` 缺省回落左栏那份，单测夹具不破）；`App.vue` 右 dock 头部改挂它，`rightGearHostRows` 跟着 `rightView` 算。真机证据：左 ⋮（files）有「速度搜索」，右 ⋮（Agent）没有。
+- **②可见性按锚点路由**：`toolWindowStripes.ts` 新增可选 deps `showAtAnchor`/`rightView`/`rightVisible`；`setToolAnchor`/`showAfterTypeChange`/`restoreVisibility` 三处「亮窗口」一律经 `showAtAnchor`（宿主传 `routeToDock`），`currentVisibleIds` 把右栏那份记进账（恢复时两侧各自归位，不再一律塞左栏）。`toolWindowDockSide.ts` 的 `toolAnchors` deps 兼容惰性函数形态（解 App.vue 声明顺序 TDZ）。真机证据：agent 左栏点亮 → 移动到右侧 → 右栏自动亮起；重启后左「项目」+ 右「Agent 对话」各自归位。
+- **③窗口尺寸弦不再认错栏**：`toolWindowDocks.ts` 新增 `sideDockOf`（`.explorer-panel.right-dock` 选择器）；`panelResize.ts` 的 `resizeTarget` 焦点在右栏时返回 `panel:'rightDock'`（缺省回落 `activeAnchor`），`onWindowResize` 的 clamp 循环补上 `rightDock`。真机证据：焦点右栏 Ctrl+Alt+Shift+← → 右栏 240→296 左栏不动；反向亦然。
+- 判据同步：`tests/tool-window-gear.test.mjs` 的「两处共用同一份行」按新行为改写（左右各拿各的）。收工：**9312/9312、vue-tsc 0 错、module-size 5/5、build+native ✓、真机四项 ✓**；`App.vue` 保持 2679/2680、`toolWindowStripes.ts` 898/900。
+- 真机取证新坑：**CDP 菜单跨 run 会丢**（终端抢焦点 → `toolMenu` 关闭）—— 开菜单→点行必须在**同一个 realdbg run** 里；`clickText` 找「移动到右侧」这类精确行名最稳；eval 嵌套引号易炸用 `String.fromCharCode`；eval 全 null = 页面已导航，重启 exe。
+- **重要勘误 + 新工单 B0**：此前「outlineInheritedMembers 宿主侧没有 typeHierarchy 通道」是**查错了**——native `lsp_session_kinds.cpp:196-240` 早已全通 prepare/supertypes/subtypes（条目带 `raw`+`path`），前端 kind（`bridge.ts:176`）齐备，同链路参考实现 `navGotoSuper.ts`。完整接线工单（含四个落点、验收、环境复原）见 `docs/handoff-2026-10-07-minimax.md` §B0 —— **这是下一个执行者的最高优先件**。
+- **B0 已完成（2026-10-07 晚）**：结构视图「继承成员」全链接通 —— `src/outlineSupertypes.ts`（三跳取数 + **按需补开**：语言服务对没 open 过的文件回 `available:false`，第一次问不到就 `file.read`→`lsp.open {path,text}` 补开再问，真机 root cause，`tests/outline-supertypes.test.mjs` 8/8）；`OutlinePanel.vue` 加「显示继承的成员」开关（默认关、懒取数、类子树后插继承行、muted 走 `--muted` 令牌、双击跨文件跳转）。真机五项：出 4 行/样式 8 段 muted/往返 3↔7 行/跳 Base.java/判据走原模块。**已知注记**：jdtls detail 不带修饰符 ⇒ private 成员也显示（`outlineInheritedMembers.ts:222-230` 写明的 unknown 放行，非 bug；收紧需宿主给「修饰符」数据源）。
+- 终态：**9320/9320**、vue-tsc 0 错、module-size 5/5、vite build + native ✓；`App.vue` 2679/2680、`toolWindowStripes.ts` 898/900、`SettingsDialog.vue` 1182/1182、`OutlinePanel.vue` 336/900。真机环境已复原（lastProject 回 AE2、exe 已关）；Base.java/Child.java 留在 `.tools/ui-parity-proj/src` 作后续验证夹具。
+
+## ⚑ 2026-10-07 · 收工快照：9312/9312 全绿 + 下一执行者的工单
+
+**下一执行者（minimax m3.1）的完整工单在 `docs/handoff-2026-10-07-minimax.md`**（硬规则十条 + A1–A5 任务清单 + 明确不做的清单），本段只留对账表：
+
+- 本批（协调人亲做）：`src/emmetHtml.ts`（658 行全上游直译，12/12 判据）、`src/saveAsTemplate.ts`（5/5）、配色方案页接线（`settingsTreeMeta.ts` groupId 直属 + `SettingsDialog.vue` 1182/1182）、修两条遗留红（`AgentPanel.vue` aria-selected；`trustedPathRules.ts` 删上游两只「隐式放行」的手、合法助手改名 `isUnderWelcomeScreenDir`）。
+- 收工状态：`npm test` **9312/9312**、`vue-tsc` 0 错、`module-size` 5/5、`npx vite build` ✓、`scripts\build-native-locked.bat` ✓（2026-10-07）。
+- 新坑记两条：① node 类型剥离不吃 **TS 参数属性**（`constructor(private x)`）—— `src/*.ts` 一律字段声明；② 模块尺寸门禁按 `split('\n').length` 计数，**尾换行算一行**（wc 比 limit 小 1 才安全）。
+
+## ⚑ 2026-10-07 · ZCode 设置全量移植 + Agent 面板接线（历史存档）
+
+**本批全量报告在 `docs/batch-2026-10-07-zcode-port.md`**（清账明细、三档状态口径、拆分分工、遗留都在那里，本段只留路标）。
+
+用户需求：「项目已经由其他 agent 推进了，阅读交接文档，然后把 ZCode 的功能全量移植进入，包括设置以及其他逻辑」。
+
+### 这批做了什么
+
+1. **先清账**：上一批只报了 vue-tsc 与 module-size，**没跑全量**。实测基线 **7581 通过 / 24 失败**，本批**全部归零**——
+   其中 **5 条是真缺陷**（Agent 图标退回 lucide、`DEFAULT_TOOL_ORDER` 与条纹 side-tool 分组不自洽、
+   `projectTreeModel` 无 DOM 抛错、bundled `fileIconProvider` 两行藏在工厂体内不登记、
+   两处判据钉死了旧形状），**19 条是判据形状**。清单与逐条处置见报告 §一。
+2. **设置页 16 节全部有落点**：原先 9 节是同一段兜底空态。现在 9 节各有**纯逻辑模块 + 判据 + 自己的 `.vue` 组件**，
+   共用 `src/components/agent-settings/AgentSettingsSectionShell.vue`。页面职责收回到「节导航 + Agent 总设置」，
+   那段 `v-else` 兜底**删掉了**（留着等于「新节位进来就显示一段假说明」）。
+3. **面板接上会话库与斜杠命令**（上一批交付了模块却没接，是两份死代码）：会话按钮 + 弹层、每轮自动存档、
+   切场把转写装回活会话；`/` 开头的输入走命令表，Tab 补全，七条真命令各有出口，**认不出来的原样当消息发出去**。
+   为此给会话状态机补了 `clear()` / `restore()`（三条口径：轮数归零、历史调用绝不重新执行、历史 id 取负数）。
+4. **对话流卡死降级**：`src/agentBridgeTimeout.ts` 给宿主文件桥三处（读 / 取 version 的读 / 写）加时限，
+   到点按「读不到」收场而不是把面板永久锁死。**根因仍未定位，未做真机取证。**
+5. **自动归档接成真动作**：`archiveStaleSessions()`（`src/agentSessions.ts`）+ 面板挂上时跑一次。
+   口径与上游**有意**不同（ZCode 归档「超期的已完成会话」，本仓没有「完成」这个状态 ⇒ 只按多少天没动过判）。
+   三条护栏：当前那一场永不归档 / 阈值不合法一步不动 / 时间戳坏掉的记录不动它。**没做定时器。**
+6. **应用图标的构建依赖焊死了**：`.rc` 引用的 `app-icon.ico` 由生成器产出、不在任何源文件列表里 ⇒
+   CMake 不知道这条依赖，改完图重新生成 `.ico`，ninja 看 `.rc` 没动就**不重跑 rc.exe**，exe 继续嵌旧图标。
+   修法（`CMakeLists.txt`）：`set_source_files_properties(native/app-icon.rc PROPERTIES OBJECT_DEPENDS ...)`。
+   实测：只碰 `.ico`，ninja 会 `[1/2] Building RC object … [2/2] Linking`。判据 `tests/app-icon-artifact.test.mjs`。
+
+### 三档状态是这一批唯一的产品承诺
+
+`AgentSettingsSectionShell` 把每个控制项分成 `wired`（真控件）/ `config-only`（真控件 **+ 一句「尚未接入执行路径」**）/ `gap`（**不许渲染成控件**，只显示缺口）。
+判定由各节模块自己给（判据钉在 `tests/agent-*.test.mjs`）。**渲染成开关却不标 `config-only`，就是放假控件。**
+
+### 下一个会话从这里接（按序）
+
+1. **真机取证仍缺（第一优先）**：本批**没有**在真 exe 上验过对话流、面板会话库、设置页十节。
+   取证口径照 `scripts/realdbg.py`：条纹按钮要 CDP **真鼠标坐标**点击；换工作区 = 改
+   `%LOCALAPPDATA%/TaoCode/projects.json` 的 `lastProject`（VCS/工作区类在 `D:/TaoCode/.tools/ui-parity-proj` 上验；
+   当前 `lastProject` 是 `D:/Backup/Documents/untitled3`，正是交接件里那个会让 `file.read` 挂起的示例项目）。
+   `steps.json` 里不许写 `\s` 这类 JSON 转义。**设 `TAOCODE_DEBUG_PORT` 再起 exe 才有 CDP 端口**
+   （`native/webview_options.hpp:56-62`）；不开那个变量与原先完全一致。
+2. **`file.read` 挂起的根因仍未定位**：本批只把它从「永久锁死面板」降级成「一次诚实的失败」。
+3. **真模型接入（AG-01）**：`providers` 表只有存储面，`modelConnectionNotice` 那句「尚未接入联网模型」是产品承诺，有判据钉着，**别删**。
+4. **8 个孤儿模块**（`statusBarListener` / `detachedEditorsHost` / `switcherHost` / `mavenModel` /
+   `pluginMarketRemote` / `virtualFilePointer` / `documentationBrowser` / `components/icons/index.ts`）是 10-06 中止 lane 的遗留，
+   不属 ZCode 移植面但让 `node .tools/find-orphan-modules.mjs --gate` 一直红。接上去之前先核实每个半成品是否正确。
+5. **`src/agentAutomations.ts` 735 行**（机检上限 900，能过）：若嫌大，把 cron 引擎拆成独立模块。
+6. **自动归档没做定时器**：现在是「会话库一打开就扫一遍」。真做成后台常驻任务，
+   要先回答「关掉窗口时那次扫描还算不算」。
+
+### 应用图标：根因是 ICO 编码（256 以下必须 DIB），不是缓存
+
+桃报过两次：「exe 显示的还是旧图标」＋「大图标/中图标都是花体，只有详细信息那一档是普通 T」。
+**根因**：`scripts/gen-app-icon.mjs` 的 `buildIco()` 把**七档全写成 PNG**。而 Windows
+**只允许 256×256 那一档用 PNG**，256 以下必须是未压缩 DIB（BITMAPINFOHEADER + 底向上 XOR BGRA + AND 掩码）。
+GDI 解不了小尺寸 PNG ⇒ 整张图标组被判不可用，表现为「大档还行、某一档退回系统默认图」。
+**原判据里那条 `assert.deepEqual(png 头, …)` 把一个 Windows 硬要求写成了本仓规矩**，所以绿灯了很久。
+
+修法：`encodeDib()` + `size >= 256 ? PNG : DIB`。证据：`Icon(path, size, size)`（GDI 按尺寸去挑组里那档）
+修复前 32px 读出**噪声**，修复后 16/24/32/48/64/128 **每档精确命中**且都是花体 T。
+**副本对照**：把 exe 复制成新文件名后，系统返回的仍是花体 T ⇒ 文件与装载都正常。
+
+第二个坑也焊死了：`.rc` 引用的 `app-icon.ico` 由生成器产出、不在任何源文件列表里 ⇒ CMake 不知道这条依赖，
+改完图重新生成 `.ico`，ninja 看 `.rc` 没动就**不重跑 rc.exe**。
+`set_source_files_properties(native/app-icon.rc PROPERTIES OBJECT_DEPENDS …)`，实测只碰 `.ico` 也会重编重链。
+
+**排查这类问题的工具与它们的坑**（都在 `.tools/`）：
+
+| 脚本 | 回答什么 | 踩过的坑 |
+|---|---|---|
+| `verify-exe-icon.mjs` | 每档载荷有没有进产物 | 载荷全在 ≠ 组登记对了 ≠ 编码合法 |
+| `read-pe-group-icon.mjs` | `RT_GROUP_ICON` 登记几档、指向谁；可带 outDir 逐档导出 | **PE 资源树里的偏移是相对 `.rsrc` 节起点的**，不是绝对偏移也不是 RVA（只有叶子的 DataRVA 才是 RVA） |
+| `read-ico-by-size.ps1` | **让 GDI 按尺寸去读**（唯一能逐档验证的口） | —— |
+| `shell-probe.ps1` / `enum-exe-icons.ps1` | 系统给什么图 | `ExtractIconEx(file,-1,…)` 返回**图标组个数**（本仓一直是 1），**不是档数**；`SHGetFileInfo` 没有「取 48px」这个口（`SHGFI_LARGEICON` 是 **0**） |
+
+**还有一层**：即使文件与装载都正确，Explorer 也会拿 5 天前那次构建留下的位图（`IconCache.db`）。
+**F5 不刷它**（F5 只刷视图）。清法：停 Explorer（Windows 不会自动拉回来，**要手动 `Start-Process explorer.exe`**）
+⇒ 缓存随进程退出清掉 ⇒ 图标重新从文件读。
+
+### 本批新踩的坑
+
+- **往 `.vue` 里插 `<style>` 内容必须插进 `<style scoped>` 标签内部**。插在标签外面时 SFC 解析器把它当顶层内容丢掉：
+  样式不生效，而 `tests/ui-consistency.test.mjs` 那类门禁扫不到它 —— 看起来"全绿"其实那段 CSS 根本没进产物。
+- **`.vue` 里的相对导入不带 `.ts` 扩展**（`'../uiIcons'`），`.vue` 组件导入才带 `.vue`。
+  `tests/ui-icons.test.mjs` 的 iconSize 导入门禁要求路径以 `uiIcons` 结尾，带了 `.ts` 就判红。
+- **`new RegExp` 拼字符串写判据**会双重转义、判据永不命中（老坑，本批又在 `.mjs` 里踩了一次 TS 泛型：
+  `new Promise<string>(...)` 在 `.mjs` 里被解析成比较运算，直接抛 `Promise resolver undefined is not a function`）。
+
+**保留文件余量**（口径 `split('\n').length`，末尾换行也算一行）：`src/App.vue` **2680/2680 = 0** ｜
+`src/components/SettingsDialog.vue` **1182/1182 = 0**（两处都贴顶，本批**没碰**这两个文件）｜
+`src/components/AgentPanel.vue` **660/900** ｜ `src/components/AgentSettingsPage.vue` **326/900**。
+
+---
+
+## ⚑ 2026-10-07 早 · Agent 对话并入右栏批次（上一段；其 §四 的 1-2 条已被本批收编）
+
+**本批全量报告在 `docs/batch-2026-10-07-agent.md`（判据/门禁/真机取证/遗留清单都在那里，本段只留路标）。**
+
+用户三轮需求：①右栏 Agent 对话窗口 + Agent 设置单开一栏 + 项目分区改自动读当前项目 + 对话文件跳左侧编辑器 + 红绿 diff 双出口 + Do/Undo/Do All；②移植全量 ZCode 功能、主代理亲手接线、可用子代理；③直接克隆 ZCode 源码完整复刻。
+
+**已落地**：右栏 `agent` 工具窗口全链路（纯逻辑 5 模块 + 子代理 2 模块，**102/102 判据**）、`agentHostWire` 写盘对齐 `revertHistory` 口径、设置页三组 16 节逐字对齐 ZCode（源码浅克隆在 `.tools/ZCode`，gitignore 已挡）、Do/Undo 语义（待决 Undo 不写盘；已落盘 Undo 盘上被外部改过则 `conflict` 拒绝）、三个真 bug（左下角设置图标=dist 过期、应用图标=窗口类 `IDI_APPLICATION`+rc.res 陈旧、**右 dock 渲染左侧=缺 `order:98`**，Gradle/通知同样中招）、他人遗留 9 条类型错误清零。门禁：vue-tsc **0 错**、module-size **5/5**。
+
+**下一个会话从这里接（按序，细节见报告 §四）**：
+1. **对话流真机未验完**：untitled 示例项目上发消息 `busy` 卡死、`messages:0`，疑似真 exe 对 untitled 的 `file.read` 挂起——先换 `D:/TaoCode/.tools/ui-parity-proj`（改 `%LOCALAPPDATA%/TaoCode/projects.json` 的 lastProject）复验；坐实则给 `agentHostWire.readFile` 加超时兜底。
+2. **会话库/斜杠命令还没接进 AgentPanel**（模块+判据已交付）：面板会话下拉 + `send()` 拦 `/` 走 `parseAgentCommand`；`general.messageStream*`/`taskAutoArchive*` 开关接面板与会话库。
+3. 设置页 9 个空态节逐个对着 `.tools/ZCode` 落地（记忆→MCP 表单→子智能体→技能→自动化→钩子→浏览器/电脑控制）。
+
+**两条新踩的坑**：条纹按钮激活必须 CDP **真鼠标坐标**点击（`clickText` 时灵时不灵、合成 `el.click()` 推不动 Vue）；`steps.json` 里不许写 `\\s` 这类转义（python json 直接炸）。**保留文件余量**：`App.vue` **1 行**、`SettingsDialog.vue` **1 行**（都贴顶，先拆再写；门禁按 `split('\n').length` 计数，**末尾换行也算一行**——本批删掉 SettingsDialog 末尾换行才过线）。
+
+## ⚑ 2026-10-06 17:40 · 并发批次被中止时的现场（下一个会话从这里接）
+
+**中止方式**：用户中断 + 17 条 `TaskStop` 全部回 `No task found` ⇒ 已确认停：**间隔 8 秒两次取样，近 70/90 秒内 `src|tests|native` 零文件写入**。
+工作区**未提交**（`git status --porcelain` = **549** 条），**未 push**（push 从来等用户批）。
+
+### 门禁基线（此刻实测，别引用旧数字）
+| 项 | 数字 |
+|---|---|
+| 全量 `node --test tests/*.test.mjs` | **6553 tests / 6543 pass / 10 fail** |
+| `module-size` + 引用/账本门（5 份合跑） | 28 / 27 pass / **1 fail**（= native 尺寸，见下） |
+| `python scripts/verdict_table.py --check` | **7/7 一致**；`--check platform_rest` **3/3 一致**（← 17:2x 前还是 exit 1，`ledgerfix` 修好的） |
+| `.tools/find-orphan-modules.mjs --gate` | **红 1**：`src/components/CodeActionPopup.vue` |
+| ctest | 期望 **39**（本轮无 native 新增 `add_test`；histdays 是否加了未核） |
+
+### 那 10 条红的逐一归因（全是"被中止的 lane 停在半路"，不是产品回归）
+1. **`native/history.cpp` 935 > 上限 910** —— `histdays` 在加按天过期时被切断。**上限只许降不许抬** ⇒ 处置：把新增那族拆进 `native/history_*.cpp`（同文件头注释里写的 2026-10-05 拆 `history_diff.cpp` 的先例），或先撤它的半截。
+2. **`BOM 能力清单 = 宿主 encoding_list…`** 与 3. **`编码类失败的码都是宿主真会抛的`** —— `encod2` 的判据（17:1x 曾 15/15 绿）被 `linesep2` 改 `native/workspace.cpp` 的 `encoding_list`/错误码形状打红。**两边都在说真话，要先判 UTF-32/CR 那批该不该进**，再同步判据；不许只把判据改绿。
+4-5. **`门真的被读：audibleBell=false 就不响…`** 与 **`订阅者收 id，且与门无关…`** —— `termbell` 的**判据先落、实现在中止前没落**（经典"有测试没实现"）。
+6. **`上游保留期就一个 advancedSetting：localHistory.daysToKeep 默认 5 天`** —— 同型：`histdays` 判据落了、宿主过期逻辑没落。
+7-9. **`a tracked unstaged file gets diff / revert / stage / patch / refresh`**、**`an untracked file gets add-to-VCS…`**、**`a staged file gets unstage…`** —— VCS/提交族三条，`vcslogdisp`/`statusclose` 一带的在飞形状；**先开红消息原文定位是哪一侧变了**，别按名单硬改。
+10. **`用了 iconSize 的模板必须真的 import 它`** + 上面孤儿门那条红，**同一件事**：`codeactionpopup` 新建的 `src/components/CodeActionPopup.vue` 用了 `iconSize` 没 import，且**没有任何生产消费方**（它本来就等主代理在 `App.vue` 挂一行）。⇒ **优先处置**：要么补 import + 挂载，要么整体撤下（死文件不进基线）。
+
+### 保留文件余量（`tests/module-size.test.mjs` 口径：`split('\n').length`）
+`src/App.vue` **2714/2737 = 23** ｜ `src/bridge.ts` **905/905 = 0 贴顶**（加字段必须同批等量删）｜ `src/components/CodeEditor.vue` **1146/1147 = 1** ｜ `native/main.cpp` **1846/2000 = 154** ｜ `native/workspace.cpp` **1237/1385 = 148** ｜ `src/gradleHost.ts` **897/900 = 3**。
+**我早前对外传过的 31/1/3 是错的**，17:1x 由 `searchdiffdoc` 实测纠正。
+
+### 今天这批已验证落地的（都有判据 + 阳性对照）
+- 仪表盘停止格读 `row.stoppable/stopText` 并发请求前记 `markRunInstanceStopping`（`MainToolbar.vue`，198/198）
+- `App.vue` 三处整篇 `setDraft` 补 `bumpDocumentRevision`（commitpaths C1，154/154；回归护栏已翻成"必须为空"）
+- 编码 BOM：UTF-16 强制档 + 复选框置灰走规则模块（15/15）
+- 去抖收成一份真源：宿主两处 + 折叠控制器改读 `LOW_PRIORITY_QUIESCENCE_MS=300` / `DIAGNOSTICS_QUIESCENCE_MS=250`（新增判据带阳性对照）
+- **`Ctrl+Alt+O` 按不动的根因已修**（`createKeymap` 缺 `runOrganizeImports`），并**新增一条门**：键位表按"宿主给没给"决定注不注册的出口，`App.vue` 装配必须真的给（`keymap*/menu*/module-size` 67/67）
+- MCP 服务端已实现并**注册生效**（见下）
+
+### 账本 / T-4 的未了
+`ledgerfix`（握账本独占权）撞 150 轮上限，死在"正准备写 T-4"。已落的一半**自洽**：`--check` 与 `--check platform_rest` 都一致、`b*-verdict`/`verdict-generated` 全绿（117 条里唯一红是 native 尺寸）。
+**未做**：`tests/verdict-table-check.test.mjs` 仍只覆盖 7 条产物 ⇒ "某族账本与生成器不一致"这类红 **`npm test` 永远看不见**。账本独占权现在**空着**，可直接派。
+
+### 待派队列（切片已写细，照发即可）
+`runconfclose`（运行配置对话框/树剩余，被上限挡回过）｜ `histdays` 收尾（拆 `history.cpp` + 落 daysToKeep）｜ `termbell` 收尾（bell 通道实现）｜ `linesep2` 与 `encod2` 判据的**对账**（UTF-32/CR 谁为准）｜ `codeactionpopup` 收尾（import + 挂载 + W2/W3 同批）｜ `dockheader`、`suppressionrule`、`usertemplatevar`、`statusbarwire`、`exeverdict`、`completionins`、`foldcheck`、`ssmatch`、`vcslogdisp`、`usageexport`、`lspdiagver`、`rerunscope2`（这 12 条中止时**未交报告** ⇒ 它们的代码**算无归属**，接手前先 `git diff` 逐文件判定）。
+
+### MCP（新基建，本会话起可用）
+`~/.qoder/settings.json` 的 `mcpServers.taocode` → `D:\TaoCode\build\taocode_mcp.exe --root D:\TaoCode --repo-dir D:\TaoCode`，`env TAOCODE_DEBUG_PORT=9333`。
+stdio JSON-RPC、**零网络监听**；档位 **read=allow，write/run=ask→默认拒绝**，`network=never`。工具面 10 个已连上（`fs_list/fs_read/fs_write/git_status/git_diff/project_list/run_start/run_stop/run_output/ui_probe`）。
+**`ui_probe` 现在会被 PERMISSION_DENIED 挡**——要真机探测需给 exe 加 `--allow-run`（**等用户点头**，我没自行升档）。
+
+### 给下一个会话的两条纪律（本轮新踩出来的）
+- **`git status` 里没有 diff ≠ 功能不存在**（可能早已 commit 进 HEAD）。本仓 17:0x 就有一次 lane 拿"工作区干净"当"0 行落点"判错功能，被只读 lane 用 `git log` 证伪。判现状必须：打开文件读实现 + `grep` 找生产消费方 + `git log --oneline -- <文件>`。
+- **`doesNotMatch`/"不许出现 X" 型判据必须配阳性对照**。我自己写过一条永不命中的空判据（`new RegExp` 拼字符串导致双重转义），靠阳性对照才暴露。
+
+---
+
 
 > ⚠️ **2026-10-05 晚，两轮独立验收指出下面那句 `npm test 2455/2455` 已过期，别直接信。**
 > 现树 `tests/` 下 **459 个**文件、静态 `test()` 调用 **3891** 个。
@@ -443,6 +624,14 @@ toolbar 15 / action 16 / rail 20 / artwork 24 / hero 28），`ICON_STROKE = 2`�
 于是 `buttonClasses` 恒为空、**门禁永远绿** → 改判 `typeof value.content !== 'string'`。
 前三个是"写错"，第四个是"失效"—— 失效的最危险，因为它看起来一直是绿的。
 `:hover` 那条门禁第一版靠类名里有没有 `button` 字样猜，误报 39 处；改用 `@vue/compiler-dom` 走真实模板后收敛到 6 处真缺，全补上。
+> **2026-10-06 `audit2` 留痕（原写「6 处真缺全补上」、实况只覆盖门禁可见域）**：门禁现在 0 红，但它自己漏判三类
+> —— ①底规则写成**分组选择器**（`.a, .b { … }`）时 `rules.find(r => r.selector === base)` 找不到（`tests/ui-motion.test.mjs:269`）；
+> ②底规则**上一行有注释**时 `cssBodies` 把注释当选择器的一部分（同文件 `:51` 不剥注释，而 `:21` 解析令牌时是剥的）；
+> ③`base` 含空格就 `continue`（同文件 `:262`），于是 `.x li:hover` 这种**标签型**底规则永不入判。
+> 按这三类重扫 `src/` 抓到 1 处真缺并已补：`src/components/DependencyAnalyzerDialog.vue:134` 的 `.analyzer-list li`
+> （`:135` 的 `:hover` 改 `background`，底规则原本没有 `transition`，且 `<li>` 拿不到 `src/style.css:54` 的全局 `button` 过渡）。
+> 反向验证：往 `src/components/BranchPopup.vue` 注 1 条形状正常的探针（`.probe-hover` 单类底规则）⇒ 门禁 11 条里红 1 条；
+> 把探针换成①②两种形状 ⇒ 门禁回到 11/11 全绿、而宽扫报 2 条 ⇒ 上面三条漏判是实测不是推测。撤探针后复绿。
 
 **一条补充教训**：门禁写完先过、再**人工核对它到底在不在干活**。批次八十二/八十四各出现过一次"假绿"，
 这批第四次 —— 只不过这次假绿的不是自己写的新门禁，而是 `:hover` 那条收集器恒空。

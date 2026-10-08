@@ -23,7 +23,7 @@
 // `src/App.vue` 加（见报告的接线请求一节），设置页形态（`SettingsDialog` 顶在行数上限、
 // 节点表 `src/settingsTreeMeta.ts` 归接线批）留到那一轮。
 import {
-  KEY_BINDINGS, chordIdentity, isShortcutConflictAction, keymapConflicts, parseChord,
+  KEYMAP_EDITABLE_BINDINGS, chordIdentity, isShortcutConflictAction, keymapConflicts, parseChord,
   type KeyBinding, type KeymapConflict, type KeyChord, type KeyChordInput, type KeyScope,
 } from './keymapBindings.ts'
 
@@ -300,7 +300,7 @@ function dynamicBindingsOf(overrides: KeymapOverrides): KeyBinding[] {
  */
 export function effectiveKeyBindings(
   overrides: KeymapOverrides = currentOverrides(),
-  base: readonly KeyBinding[] = KEY_BINDINGS,
+  base: readonly KeyBinding[] = KEYMAP_EDITABLE_BINDINGS,
 ): KeyBinding[] {
   if (!Object.keys(overrides).length) return [...base, ...dynamicBindingsOf(overrides)]
   return [
@@ -353,7 +353,7 @@ function commit(next: KeymapOverrides): void {
  *     （移走冲突 / 保留 / 取消），本仓把选择权交给调用方：这里**不**自动移走，只返回冲突清单。
  */
 export function assignShortcut(actionId: string, chord: KeyChord | string): { conflicts: KeymapConflict[] } | { error: string } {
-  if (!knownActionIds(KEY_BINDINGS).has(actionId)) return { error: `没有名为「${actionId}」的键位动作。` }
+  if (!knownActionIds(KEYMAP_EDITABLE_BINDINGS).has(actionId)) return { error: `没有名为「${actionId}」的键位动作。` }
   const restriction = restrictionReason(actionId)
   if (restriction) return { error: restriction }
   const text = typeof chord === 'string' ? chord : chordToOverrideText(chord)
@@ -366,7 +366,7 @@ export function assignShortcut(actionId: string, chord: KeyChord | string): { co
 
 /** 解绑一个动作（上游「清除快捷键」；`null` 在覆盖表里就是解绑，见 `parseOverrides`）。 */
 export function unassignShortcut(actionId: string): boolean {
-  if (!knownActionIds(KEY_BINDINGS).has(actionId)) return false
+  if (!knownActionIds(KEYMAP_EDITABLE_BINDINGS).has(actionId)) return false
   if (!Object.prototype.hasOwnProperty.call(overrides.current, actionId)) return false
   const next = { ...overrides.current, [actionId]: null }
   commit(next)
@@ -420,7 +420,7 @@ export interface KeymapRow {
 export function keymapRows(
   bindings: readonly KeyBinding[] = effectiveKeyBindings(),
   query = '',
-  base: readonly KeyBinding[] = KEY_BINDINGS,
+  base: readonly KeyBinding[] = KEYMAP_EDITABLE_BINDINGS,
   overrides: KeymapOverrides = currentOverrides(),
 ): KeymapRow[] {
   const needle = query.trim().toLowerCase()

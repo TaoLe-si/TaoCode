@@ -133,3 +133,19 @@
   并且这条常量现在是**零消费方的死文案**（规约第 5 条孤儿口径）。
 - **上游依据**：`platform/lang-impl/src/com/intellij/lang/customFolding/GotoCustomRegionAction.java:65`
   （无区域时给提示这一支）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1（`createStickyLines` 补 `view` 实参）未落** —— 目标 `src/App.vue:559`（本 lane 可改），但数据源 `editorMetrics()` / `stickyMetrics()` 需 `src/components/CodeEditor.vue` 先 defineExpose（见 W-2，禁改清单）⇒ 无度量时模块退回旧路径。**需 CodeEditor owner** 先落 W-2 的出口，之后 App.vue 一行接上。
+- **W-2** —— 目标 `src/components/CodeEditor.vue`（禁改清单）。需 CodeEditor owner。
+- **W-3（按分栏算粘性行）** —— 目标 `src/App.vue` + `src/stickyLines.ts`（`stickyLineProviders.ts` 已就位）。依赖 W-1 的 view 度量，同上。
+- **surround.ts 的折叠模板** —— 目标 `src/surround.ts:34-37`（本 lane 可改面），但请求原文归 bucket5b/folding 的组件在途，未接。
+
+结论：W-1/W-2/W-3 串在 CodeEditor owner 上，本 lane 不单方面接（无度量 = 假面板）。
+
+补充复核：**W-1 未落** —— `src/App.vue:559` 的 `createStickyLines({...})` 仍只有 `editorSettings, outline, currentLine, language`，无 `view` 实参（数据源 `CodeEditor.vue` 的度量出口未落，见 W-2）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W-1/W-2/W-3 串在 CodeEditor owner 上，本 lane 不单方面接（无度量 = 假面板）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

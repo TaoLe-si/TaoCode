@@ -155,3 +155,17 @@ new（同一段缩进；`run` 的形参类型见 `src/backgroundTasks.ts:33-54`�
 `platform/progress/shared/src/suspender/TaskSuspension.kt:24-28`。
 `src/backgroundTasks.ts:218` 那句 `while (queueSuspendReason.value !== null) await …` 是队列侧的等待环，
 任务体一旦带检查点，省电模式就能真的让路（现在只有"不再开新的"生效）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1（messageDialog 宿主）** —— 同 statusbar 请求 1，登记。
+- **W2（通知设置页）** —— `src/settingsTreeMeta.ts`（非本 lane）。
+- **W3（gradleHost 挂起检查点）** —— `src/gradleHost.ts`（本 lane 可改面），登记。
+- **W4（ProblemsPanel 导出 Details 勾选）** —— `ProblemsPanel.vue`（本 lane 可改面，属桶 2 半区），登记为「需 ProblemsPanel owner」。
+
+结论：零接线（W1/W4 登记，W2/W3 转 owner/登记）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（W1/W4 登记，W2/W3 转 owner/登记）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

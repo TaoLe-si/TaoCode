@@ -25,6 +25,14 @@ import type { JdkInfo } from './buildHost.ts'
 import { JAVA_RUNTIME_ID, languageRuntimeType, runtimeExecutable, runtimeOwnsProgram, type LanguageRuntimeEntry } from './languageRuntimes.ts'
 import { currentTargetPlatform, targetPlatformOfPath, type TargetPlatform } from './targetPlatform.ts'
 import { LOCAL_TARGET_TYPE_ID, type TargetEnvironment } from './targetEnvironments.ts'
+// 运行目标那一族的 EP 宿主（上游 `com.intellij.executionTargetType` /
+// `com.intellij.executionTargetProvider` / `com.intellij.executionTargetLanguageRuntimeType` /
+// `com.intellij.runConfigurationTargetEnvironmentAdjusterFactory`，id 逐字见那边文件头）：
+// 下面三处就是这些 EP 的**真实消费点**（目标列表、自定义目标的可执行文件解析、模板折算）。
+import {
+  adjustViaTargetEnvironmentFactories, executableViaLanguageRuntimeType, executionTargetsFromProviders,
+  executionTargetsFromRegisteredTypes, isKnownTargetTypeId,
+} from './executionTargetExtensionPoints.ts'
 
 export type ExecutionTargetKind = 'local' | 'jdk' | 'custom'
 
@@ -74,18 +82,26 @@ export function jdkExecutionTargets(jdks: readonly JdkInfo[], platform: TargetPl
 }
 
 /**
- * 用户自定义目标（上游 `TargetEnvironmentConfiguration`）：一个目标环境可以挂多个运行时，
+ * 自定义目标（上游 `TargetEnvironmentConfiguration`）：一个目标环境可以挂多个运行时，
  * 本仓的目标列表按「每个运行时一项」展开 —— 上游的「运行于」下拉同样用显示名列出目标
  * （RunOnTargetPanel.java:139-145 的 initModel + MasterDetails:330-334 的运行时摘要）。
  * 没配运行时的目标仍然列出来（标成未配好），因为上游也把校验不过的目标留在树里，
  * 只是图标换成 InvalidRunConfigurationIcon（MasterDetails.kt:336-346）。
+ *
+ * 类型过滤走**目标环境类型注册表**（`isKnownTargetTypeId`）：内建的只有 `LocalTarget`，
+ * 所以无插件时与之前逐字一致；第三方按 `com.intellij.executionTargetType` 注册一个新类型后，
+ * 该类型的环境才会被列进来（原来是写死 `=== LOCAL_TARGET_TYPE_ID`）。
  */
 export function customExecutionTargets(environments: readonly TargetEnvironment[], platform: TargetPlatform = currentTargetPlatform()): ExecutionTarget[] {
-  return environments.filter(environment => environment.typeId === LOCAL_TARGET_TYPE_ID).map(environment => {
+  return environments.filter(environment => isKnownTargetTypeId(environment.typeId)).map(environment => {
     const runtimes = environment.runtimes.filter(runtime => runtime.homePath.trim())
     const first = runtimes[0]
     const targetPlatform = first ? targetPlatformOfPath(first.homePath) : platform
-    const executable = first ? runtimeExecutable(first, targetPlatform) : ''
+    // 可执行文件解析归属：注册表里认领该运行时类型的贡献优先（上游由该类型的
+    // `createIntrospector` 在目标机上解析），没有则回落本机的 `runtimeExecutable`（默认档）。
+    const executable = first
+      ? (executableViaLanguageRuntimeType(first, targetPlatform) ?? runtimeExecutable(first, targetPlatform))
+      : ''
     return {
       id: `${CUSTOM_TARGET_PREFIX}${environment.uuid}`,
       name: environment.displayName,
@@ -99,11 +115,39 @@ export function customExecutionTargets(environments: readonly TargetEnvironment[
   })
 }
 
+/**
+ * 目标全表（`ExecutionTargetManager.getTargets` 的收集步）：
+ * 内建三档（本机 / `app.jdks` 探测的 JDK / 用户自定义目标）+ EP 贡献的两档
+ * （`com.intellij.executionTargetProvider` 的提供者给的、`com.intellij.executionTargetType`
+ * 的非本机类型自报的）。**按 id 去重、内建在前**：内建默认提供者（上游
+ * `DefaultExecutionTargetProvider`）给的就是本机目标那条 ⇒ 无插件时结果与之前逐字一致。
+ * `options.project`/`options.profile` 是提供者看到的项目/配置面（消费点 `src/runActions.ts`）。
+ */
 export function listExecutionTargets(
-  jdks: readonly JdkInfo[], options: { custom?: readonly TargetEnvironment[]; platform?: TargetPlatform } = {},
+  jdks: readonly JdkInfo[],
+  options: {
+    custom?: readonly TargetEnvironment[]
+    platform?: TargetPlatform
+    project?: { root?: string | null; name?: string | null }
+    profile?: { name: string; type?: string; program?: string; command?: string }
+  } = {},
 ): ExecutionTarget[] {
   const platform = options.platform ?? currentTargetPlatform()
-  return [localExecutionTarget(), ...jdkExecutionTargets(jdks, platform), ...customExecutionTargets(options.custom ?? [], platform)]
+  const base = [localExecutionTarget(), ...jdkExecutionTargets(jdks, platform), ...customExecutionTargets(options.custom ?? [], platform)]
+  const project = { root: options.project?.root ?? null, name: options.project?.name ?? null }
+  const profile = options.profile ?? { name: '' }
+  const contributed = [
+    ...executionTargetsFromRegisteredTypes(project),
+    ...executionTargetsFromProviders(project, profile),
+  ]
+  const seen = new Set(base.map(target => target.id))
+  const out = [...base]
+  for (const target of contributed) {
+    if (!target?.id || seen.has(target.id)) continue
+    seen.add(target.id)
+    out.push(target)
+  }
+  return out
 }
 
 export function targetById(targets: readonly ExecutionTarget[], id: string | undefined): ExecutionTarget | undefined {
@@ -143,10 +187,33 @@ export function writeRunTargetsEnabled(store: TargetStore | undefined, enabled: 
  * 上游对没有匹配运行时的配置不换、也不报错（`CompoundRunConfiguration.kt:150` 回落默认目标），
  * 这里保持同样语义：返回空对象表示「不动」。
  */
+/**
+ * 目标对配置初值的作用（上游「Run on target」选中的运行时决定执行环境）：
+ * 目标挂的运行时若与配置现有程序同形态（Java 目标的 `java`/`javaw`、Gradle 目标的 `gradle`、
+ * Python 目标的 `python`…），把程序换成该运行时的可执行文件；其余情况只保留目标记录。
+ * 判据是 `LanguageRuntimeTypeDef.matches`（src/languageRuntimes.ts），与上游「配置类型自己
+ * `findLanguageRuntime` 查自己的运行时数据」是同一条路：只有配了对应语言的配置才被换。
+ * 上游对没有匹配运行时的配置不换、也不报错（`CompoundRunConfiguration.kt:150` 回落默认目标），
+ * 这里保持同样语义：返回空对象表示「不动」。
+ *
+ * 顺序照上游：先问**目标环境请求调节器工厂**（`com.intellij.runConfigurationTargetEnvironmentAdjusterFactory`
+ * 的 `Factory.isEnabledFor` → `createAdjuster` → `adjust`，上游在拿请求之前调它），没人认领再走
+ * 内建的「运行时归属」判定。没有工厂时（上游平台内的默认档）与之前逐字一致。
+ */
 export function applyTargetToTemplateProgram(
   template: { program?: string; command?: string }, target: ExecutionTarget | undefined,
-): { program?: string } {
-  if (!target || target.kind === 'local' || !target.runtime) return {}
+): { program?: string; command?: string } {
+  if (!target || target.kind === 'local') return {}
+  const adjusted = adjustViaTargetEnvironmentFactories(template, {
+    id: target.id, name: target.name, runtimeTypeId: target.runtime?.typeId, homePath: target.runtime?.homePath,
+  })
+  if (adjusted) {
+    return {
+      ...(adjusted.program !== undefined ? { program: adjusted.program } : {}),
+      ...(adjusted.command !== undefined ? { command: adjusted.command } : {}),
+    }
+  }
+  if (!target.runtime) return {}
   const executable = runtimeExecutable(target.runtime, target.platform ?? currentTargetPlatform())
   if (!executable) return {}
   const type = languageRuntimeType(target.runtime.typeId)

@@ -84,8 +84,8 @@ const canOk = computed(() => !props.model.error && !props.model.busy)
         <p v-if="model.error" class="member-chooser-error" role="alert">{{ model.error }}</p>
         <p v-if="model.note" class="member-chooser-note">{{ model.note }}</p>
         <div class="dialog-actions">
-          <button class="subtle-button" @click="emit('cancel')">取消</button>
           <button class="primary-button" :disabled="!canOk" @click="emit('ok')">确定</button>
+          <button class="subtle-button" @click="emit('cancel')">取消</button>
         </div>
       </footer>
     </section>
@@ -98,7 +98,7 @@ const canOk = computed(() => !props.model.error && !props.model.busy)
 .member-chooser-body { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3); min-height: 0; overflow: auto; }
 .member-chooser-panel { display: flex; flex-direction: column; gap: var(--space-1); }
 .member-chooser-section { margin: 0; font-size: 11px; color: var(--muted); }
-.member-chooser-text { margin: 0; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); font: 12px var(--font-mono); color: var(--text); background: var(--surface); white-space: pre-wrap; }
+.member-chooser-text { margin: 0; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); font: 12px var(--font-mono); color: var(--text); background: var(--editor); white-space: pre-wrap; }
 .member-chooser-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
 .member-chooser-field input { width: 260px; max-width: 60vw; }
 .member-chooser-table { width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }

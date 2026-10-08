@@ -45,15 +45,17 @@ test('tab 集合、名称与顺序照上游注册的 tabFactory 与各 tab 的 p
   // Files `SeFilesTab.kt:52` 900、Symbols `SeSymbolsTab.kt:50` 850、Actions `SeActionsTab.kt:56` 800、
   // Text `SeTextTab.kt:56` 250。
   assert.deepEqual(SEARCH_EVERYWHERE_TABS.map(tab => tab.label),
-    ['All', 'Classes', 'Project', 'Symbols', 'Actions', 'Run Configurations', 'Text'])
+    ['All', 'Classes', 'Files', 'Symbols', 'Actions', 'Run Configurations', 'Text'])
   assert.deepEqual(SEARCH_EVERYWHERE_TABS.map(tab => tab.id),
-    ['all', 'classes', 'project', 'symbols', 'commands', 'runConfigs', 'text'])
+    ['all', 'classes', 'files', 'symbols', 'commands', 'runConfigs', 'text'])
   assert.deepEqual(SEARCH_EVERYWHERE_TABS[0].sources, ['project', 'symbols', 'commands', 'runConfigs', 'text'], 'All 必须是并集')
   // Classes = 只吃符号供给者，再按语言服务的 kind 收窄（不是按名字猜）。
   assert.deepEqual(SEARCH_EVERYWHERE_TABS[1].sources, ['symbols'])
   assert.equal(SEARCH_EVERYWHERE_TABS[1].classesOnly, true)
-  // Project = 本仓的合成档（上游没有这一 tab），收项目文件 + 项目类/符号，取 Files(900) 的位次。
-  assert.deepEqual(SEARCH_EVERYWHERE_TABS[2].sources, ['project', 'symbols'])
+  // Files = 上游 900 那一档（`SeFilesTab.kt:52`），**只吃文件供给者**。
+  // 订正 2026-10-06（B12 lane C）：上一版这里是 "Project" 合成档（文件+符号），
+  // 按族判词「Files/Symbols 独立档」拆回上游的两档，Project 合成档随之删除。
+  assert.deepEqual(SEARCH_EVERYWHERE_TABS[2].sources, ['project'])
   // Symbols = 上游 850 那一档，本仓就是 LSP workspace/symbol 那一批。
   assert.deepEqual(SEARCH_EVERYWHERE_TABS[3].sources, ['symbols'])
   // **订正 2026-10-06（桶 9b）**：Text 档已经接上宿主 `search.run`（`src/searchEverywhereHost.ts`
@@ -84,16 +86,17 @@ test('Symbols 档只收符号，不收文件（上游 SeSymbolsTab 那一档）'
   // 供给者没结果时那一档不进 tab 行（与「只渲染有真实供给者的」同一条规则）。
   // `items` 里没有任何 source==='symbols' 的项，所以 Classes 与 Symbols 两档都空。
   assert.deepEqual(availableSearchEverywhereTabs(items, ''),
-    ['all', 'project', 'commands', 'runConfigs'], 'items 里没有 symbols 供给者')
-  // 有 symbols 供给者时 Symbols 才进表，且位次按 priority 排在 Project 之后。
+    ['all', 'files', 'commands', 'runConfigs'], 'items 里没有 symbols 供给者')
+  // 有 symbols 供给者时 Symbols 才进表，且位次按 priority 排在 Files 之后。
   // `sym` 没有 symbolKind（它是个方法 `DemoClass#parse`），所以 Classes 那档仍空 —— 这正是
   // `classesOnly` 的判据：不按名字猜，只认语言服务标的 Class/Interface/Enum/Struct。
   assert.deepEqual(availableSearchEverywhereTabs(withSymbol, ''),
-    ['all', 'project', 'symbols', 'commands', 'runConfigs'])
+    ['all', 'files', 'symbols', 'commands', 'runConfigs'])
 })
 
 test('每个 tab 只显示自己供给者的项', () => {
-  assert.deepEqual(searchEverywhereResults(items, '', 'project').map(each => each.id), ['file', 'class'])
+  assert.deepEqual(searchEverywhereResults(items, '', 'files').map(each => each.id), ['file', 'class'],
+    'Files 档只收文件供给者（上游 SeFilesTab）')
   assert.deepEqual(searchEverywhereResults(items, '', 'commands').map(each => each.id), ['cmd'])
   assert.deepEqual(searchEverywhereResults(items, '', 'runConfigs').map(each => each.id), ['cfg'])
   assert.equal(searchEverywhereResults(items, '', 'all').length, 4, 'All 是三者并集')
@@ -104,27 +107,27 @@ test('排序走 rankCommands 的语义：整段命中压过散序子序列，关
   assert.deepEqual(hits.map(each => each.id), ['class', 'cfg'], 'DemoClass 与 Demo 都在标题里整段命中')
   // 关键词别名（IDEA 的 keywords）也算命中：'rebuild' 只出现在动作的 keywords 里。
   assert.deepEqual(searchEverywhereResults(items, 'rebuild', 'commands').map(each => each.id), ['cmd'])
-  // 供给者不匹配时，即便标题命中也不该出现（Project 里不该冒出动作）。
-  assert.deepEqual(searchEverywhereResults(items, 'rebuild', 'project'), [])
+  // 供给者不匹配时，即便标题命中也不该出现（Files 里不该冒出动作）。
+  assert.deepEqual(searchEverywhereResults(items, 'rebuild', 'files'), [])
 })
 
 test('结果有上限，避免大项目的文件清单全铺出来', () => {
   const many = Array.from({ length: SEARCH_EVERYWHERE_LIMIT + 20 }, (_, index) => item(`f${index}`, `f${index}.java`, 'project'))
-  assert.equal(searchEverywhereResults(many, 'f', 'project').length, SEARCH_EVERYWHERE_LIMIT)
+  assert.equal(searchEverywhereResults(many, 'f', 'files').length, SEARCH_EVERYWHERE_LIMIT)
 })
 
 test('有结果的 tab 才进 tab 行（没有供给者的 tab 不渲染）', () => {
-  assert.deepEqual(availableSearchEverywhereTabs(items, ''), ['all', 'project', 'commands', 'runConfigs'])
+  assert.deepEqual(availableSearchEverywhereTabs(items, ''), ['all', 'files', 'commands', 'runConfigs'])
   const onlyFiles = [items[0]]
-  assert.deepEqual(availableSearchEverywhereTabs(onlyFiles, ''), ['all', 'project'],
-    '只有文件时只剩 All 与 Project —— 不能留一个永远空着的 Actions')
+  assert.deepEqual(availableSearchEverywhereTabs(onlyFiles, ''), ['all', 'files'],
+    '只有文件时只剩 All 与 Files —— 不能留一个永远空着的 Actions')
 })
 
 test('Tab / Shift+Tab 在有结果的 tab 之间循环并跳过空的', () => {
-  const available = ['all', 'project']
-  assert.equal(cycleSearchEverywhereTab('all', 1, available), 'project')
-  assert.equal(cycleSearchEverywhereTab('project', 1, available), 'all', '要回绕')
-  assert.equal(cycleSearchEverywhereTab('project', -1, available), 'all')
+  const available = ['all', 'files']
+  assert.equal(cycleSearchEverywhereTab('all', 1, available), 'files')
+  assert.equal(cycleSearchEverywhereTab('files', 1, available), 'all', '要回绕')
+  assert.equal(cycleSearchEverywhereTab('files', -1, available), 'all')
   // 当前 tab 已经没有结果（切走后再筛没）时，从第一个开始，而不是卡住。
   assert.equal(cycleSearchEverywhereTab('commands', 1, available), 'all')
   assert.equal(cycleSearchEverywhereTab('all', 1, []), 'all', '一个 tab 都没有时保持原样')
@@ -137,12 +140,14 @@ test('上下移动选中项会回绕', () => {
   assert.equal(moveSearchEverywhereIndex(0, 0, 1), 0, '没有结果时不该算出非法下标')
 })
 
-test('符号与文件同属 Project tab（IDEA 的 project scope）', () => {
+test('Files 与 Symbols 是两档（上游 SeFilesTab / SeSymbolsTab），各收各的供给者', () => {
   const withSymbol = [...items, item('sym', 'DemoClass#parse', 'symbols', { subtitle: 'DemoClass.java:12' })]
-  assert.deepEqual(searchEverywhereResults(withSymbol, '', 'project').map(each => each.id), ['file', 'class', 'sym'],
-    'Project 收文件与符号，不收动作与运行配置')
+  assert.deepEqual(searchEverywhereResults(withSymbol, '', 'files').map(each => each.id), ['file', 'class'],
+    'Files 只收文件，不收符号')
+  assert.deepEqual(searchEverywhereResults(withSymbol, '', 'symbols').map(each => each.id), ['sym'],
+    'Symbols 只收符号，不收文件')
   assert.deepEqual(searchEverywhereResults(withSymbol, '', 'commands').map(each => each.id), ['cmd'])
-  // 符号只在 All / Classes / Project / Symbols 里出现，Actions / Run Configurations 不该混进来。
+  // 符号只在 All / Classes / Files(不含) / Symbols 里出现，Actions / Run Configurations 不该混进来。
   assert.deepEqual(searchEverywhereResults(withSymbol, 'parse', 'runConfigs'), [])
 })
 
@@ -164,7 +169,21 @@ function lifecycleHost(t) {
   const fsChanges = vue.reactive({ version: 0, paths: [] })
   const calls = []
   const request = (method, params) => new Promise((resolve, reject) => calls.push({ method, params, resolve, reject }))
-  const commandSearch = loadTranspiled(commandSearchJs, name => { throw new Error(`Unexpected commandSearch dependency: ${name}`) })
+  // `commandSearch.ts` 除了命令表还要 `actionAliasMatch` / `aliasMatchScore`（上游 `GotoAction` 的
+  // 别名/同义词匹配档，落点 `src/ideShellExtensionPoints.ts`）。那是**真实逻辑**，拿桩顶掉就等于
+  // 在测一份假行为 —— 所以直接把生产的那份链加载进来。两个模块都是叶子（`ideShellExtensionPoints`
+  // 只依赖 `extensionPoints`，而后者零 import），不需要桥。
+  const extensionPoints = loadTranspiled(transpile('extensionPoints.ts'), name => {
+    throw new Error(`Unexpected extensionPoints dependency: ${name}`)
+  })
+  const ideShell = loadTranspiled(transpile('ideShellExtensionPoints.ts'), name => {
+    if (name === './extensionPoints.ts' || name === './extensionPoints') return extensionPoints
+    throw new Error(`Unexpected ideShellExtensionPoints dependency: ${name}`)
+  })
+  const commandSearch = loadTranspiled(commandSearchJs, name => {
+    if (name === './ideShellExtensionPoints.ts' || name === './ideShellExtensionPoints') return ideShell
+    throw new Error(`Unexpected commandSearch dependency: ${name}`)
+  })
   const classes = loadTranspiled(classesJs, name => {
     if (name === './commandSearch.ts' || name === './commandSearch') return commandSearch
     throw new Error(`Unexpected classes dependency: ${name}`)
@@ -177,12 +196,17 @@ function lifecycleHost(t) {
   const exclusions = loadTranspiled(transpile('searchExclusions.ts'), name => {
     throw new Error(`Unexpected searchExclusions dependency: ${name}`)
   })
+  // 会话级搜索历史（`src/searchEverywhereHistory.ts`，无运行时依赖；`localStorage` 缺失时给空表）。
+  const history = loadTranspiled(transpile('searchEverywhereHistory.ts'), name => {
+    throw new Error(`Unexpected searchEverywhereHistory dependency: ${name}`)
+  })
   new Function('require', 'exports', hostJs)(name => {
     if (name === 'vue') return vue
     if (name === './bridge' || name === './bridge.ts') return { fsChanges, request }
     if (name === './searchEverywhereClasses.ts' || name === './searchEverywhereClasses') return classes
     if (name === './searchEverywhereText.ts') return textTab
     if (name === './searchExclusions.ts') return exclusions
+    if (name === './searchEverywhereHistory.ts') return history
     throw new Error(`Unexpected host dependency: ${name}`)
   }, exports)
   const deps = {
@@ -194,7 +218,7 @@ function lifecycleHost(t) {
   const host = scope.run(() => exports.createSearchEverywhereHost(deps))
   // 这几条测的是**文件与符号**两条通道的生命周期：把当前档切到 Project，
   // Text 档的整工作区扫描就不参与（`textWanted()` 认档），请求序列保持原样。
-  host.setSearchEverywhereTab('project')
+  host.setSearchEverywhereTab('files')
   t.after(() => scope.stop())
   return { ...host, deps, calls, fsChanges, scope,
     files: () => host.searchEverywhereItems.value.filter(item => item.source === 'project').map(item => item.title),
@@ -320,20 +344,20 @@ test('默认档不启用模糊匹配（上游注册表键默认 false），行�
   assert.equal(FUZZY_FILES_ENABLED_DEFAULT, false)
   // `gcf` 命中 GotoClassFile 的文件名，但按旧的 rankCommands 语义不命中 DemoClass / Main。
   const list = [fuzzyFile('gcf', 'src/GotoClassFile.kt'), fuzzyFile('main', 'src/demo/Main.java')]
-  assert.deepEqual(searchEverywhereResults(list, 'gcf', 'project').map(each => each.id), ['gcf'])
+  assert.deepEqual(searchEverywhereResults(list, 'gcf', 'files').map(each => each.id), ['gcf'])
 })
 
 test('启用后文件走 Smith-Waterman：驼峰缩写能命中，路径片段也能命中', () => {
   const list = [fuzzyFile('gcf', 'src/GotoClassFile.kt'), fuzzyFile('main', 'src/demo/Main.java')]
-  assert.deepEqual(searchEverywhereResults(list, 'gcf', 'project', SEARCH_EVERYWHERE_LIMIT, true).map(each => each.id), ['gcf'])
+  assert.deepEqual(searchEverywhereResults(list, 'gcf', 'files', SEARCH_EVERYWHERE_LIMIT, true).map(each => each.id), ['gcf'])
   // 搜路径片段 `src/main`：文件名 `Main.java` 上对不上，退到整条路径才命中。
-  assert.deepEqual(searchEverywhereResults(list, 'srcmain', 'project', SEARCH_EVERYWHERE_LIMIT, true).map(each => each.id), ['main'])
+  assert.deepEqual(searchEverywhereResults(list, 'srcmain', 'files', SEARCH_EVERYWHERE_LIMIT, true).map(each => each.id), ['main'])
 })
 
 test('弱命中按 minScore 阈值丢掉（search.everywhere.fuzzy.files.min.score=6500）', () => {
   // `nothing` 只在路径里捞到 `i`+`n` 两个字符：分数为正但归一分 0.24，进不了结果。
   const list = [fuzzyFile('app', 'src/main/App.kt')]
-  assert.deepEqual(searchEverywhereResults(list, 'nothing', 'project', SEARCH_EVERYWHERE_LIMIT, true), [])
+  assert.deepEqual(searchEverywhereResults(list, 'nothing', 'files', SEARCH_EVERYWHERE_LIMIT, true), [])
 })
 
 test('启用模糊后文件与动作仍能放进同一个列表排序（两档换算到 0..10000 同一条数轴）', () => {

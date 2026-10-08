@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "workspace.hpp"  // taocode::Json, taocode::WorkspaceError
 
@@ -26,8 +27,20 @@ class History {
 public:
     inline constexpr static std::size_t default_max_versions_per_file = 50;
 
+    // 保留期：上游只有一个设置 —— advancedSetting `localHistory.daysToKeep`，默认 **5**
+    // （platform/lvcs-impl/resources/intellij.platform.lvcs.impl.xml:133；代码兜底同一个数：
+    //  platform/lvcs-impl/src/com/intellij/history/core/ChangeListImpl.kt:19-20
+    //   DAYS_TO_KEEP_PROPERTY_KEY / DEFAULT_DAYS_TO_KEEP = 5，缺键时 catch 回落到它，见 :127-136）。
+    // 本仓先取上游默认并硬在模块里：新增持久化键要六处成对（见 docs/batch-2026-10-06-histdays.md §6），
+    // 半条链不如没有。
+    inline constexpr static long long default_days_to_keep = 5;
+    // ChangeList.kt:42 DEFAULT_INTERVAL_BETWEEN_ACTIVITIES_MILLISECONDS = 12.hours。
+    // 单位是毫秒，与 purge 的 period 同单位（PersistentChangeListStorage.kt:321 直接和 delta 比）。
+    inline constexpr static long long activity_interval_millis = 12LL * 60LL * 60LL * 1000LL;
+
     explicit History(std::filesystem::path store_root,
-                     std::size_t max_versions_per_file = default_max_versions_per_file);
+                     std::size_t max_versions_per_file = default_max_versions_per_file,
+                     long long days_to_keep = default_days_to_keep);
     History(const History&) = delete;
     History& operator=(const History&) = delete;
 
@@ -56,13 +69,31 @@ public:
                    const std::string& current_content) const;
 
     std::size_t max_versions_per_file() const noexcept { return max_versions_; }
+    long long days_to_keep() const noexcept { return days_to_keep_; }
     const std::filesystem::path& store_root() const noexcept { return store_root_; }
 
 private:
     std::filesystem::path store_root_;
     std::size_t max_versions_ = default_max_versions_per_file;
+    long long days_to_keep_ = default_days_to_keep;
     mutable std::mutex mutex_;
 };
+
+// 本地历史的「按天过期」口径，逐条对齐上游
+// platform/lvcs-impl/src/com/intellij/history/core/PersistentChangeListStorage.kt:308-329
+// 的 `findFirstObsoleteBlock` —— 它**不是**墙钟差：
+//   · `time_millis` 按**新→旧**排列（本仓索引即此序，上游是 getLastRecord() 往回走 :312-325）；
+//   · 从最新一条开始往回累加相邻间隔 `delta = time_millis[i-1] - time_millis[i]`；
+//     最新那条自己 `delta` 记 0（`:315 prevTimestamp == 0L -> = t`），所以**基准是最新快照的时间戳**，
+//     不是当前时间：一条都不写的旧项目不会因为现实里过了 N 天而被清；
+//   · `:321 length += if (delta < intervalBetweenActivities) delta else 1` —— 间隔 <12h 累加真实毫秒，
+//     **≥12h 只累加字面量 1**（`:320` 的注释把它*称作*一天，单位仍是毫秒，因为 `:323` 要和 period 比大小）；
+//     于是跨夜/跨周末的空档几乎不计龄，period=5 天其实是「5 天的活动时长」；
+//   · `:323 if (length >= period) return last` —— 累计首次达到 period 的那条起（连同更旧的）过期，
+//     上游随后 `:300 deleteRecordsUpTo(firstObsoleteId)` 整段删掉。
+// 返回第一个过期条目的下标；全不过期返回 `time_millis.size()`。
+std::size_t first_obsolete_index(const std::vector<long long>& time_millis,
+                                 long long period_millis, long long interval_millis);
 
 // 纯函数：LCS 行级 unified diff（约 3 行上下文），供 diff() 与测试复用。
 std::string unified_diff(std::string_view before, std::string_view after);

@@ -29,12 +29,15 @@ test('取消是协作式的：任务体走到下一个 checkCanceled 才算收�
     },
   })
   await tick(0)
-  assert.equal(queue.cancellingTitle.value, '', '没点取消时不该有中间态')
+  // 「正在取消」中间态只剩 `queueRow` 这一个出口（`cancellingTitle` 那条扁平 computed 零生产消费者，
+  // 2026-10-06 progflow 删除）：钉用户看得见的那一句，比钉一个没人读的 ref 更贴近界面。
+  assert.equal(queue.queueRow.value, null, '没排队、没挂起、没取消时队列不画这一行')
   const done = queue.cancelCurrentAndAwait()
-  assert.equal(queue.cancellingTitle.value, '慢任务', '按下去到收尾之间面板要有一行「正在取消」')
-  assert.match(queue.queueRow.value.detail, /正在取消：慢任务/)
+  assert.match(queue.queueRow.value.detail, /^正在取消：慢任务/, '按下去到收尾之间面板要有一行「正在取消」')
+  assert.equal(queue.queueRow.value.cancellable, false,
+    '已经在收尾的那一段不再给取消按钮（上游 InfoAndProgressPanel.kt:876 的 `isCancellable() && !isStopping`）')
   assert.equal(await done, true, '任务在超时前停了就该返回 true')
-  assert.equal(queue.cancellingTitle.value, '', '收尾后那一行必须消失')
+  assert.equal(queue.queueRow.value, null, '收尾后那一行必须消失')
   assert.equal(reachedEnd, false, '取消检查点之后的代码不该再跑')
   assert.equal(queue.isEmpty(), true)
 })
@@ -54,16 +57,16 @@ test('任务不理取消：等到超时返回 false，那一行留着，直到�
   const done = await queue.cancelCurrentAndAwait(20)
   assert.equal(done, false, '任务体不检查取消时不该谎称已经取消')
   assert.ok(Date.now() - started < 250, '超时就该先返回，不等任务跑完')
-  assert.equal(queue.cancellingTitle.value, 'Stubborn', '它还在跑，这一行不能凭空消失')
+  assert.match(queue.queueRow.value.detail, /^正在取消：Stubborn/, '它还在跑，这一行不能凭空消失')
   await tick(450)
   assert.equal(finished, true)
-  assert.equal(queue.cancellingTitle.value, '', '真的收尾后要把「正在取消」收掉')
+  assert.equal(queue.queueRow.value, null, '真的收尾后要把「正在取消」收掉')
 })
 
 test('没有正在跑的任务时取消是空操作，等到的是"已完成"', async () => {
   const queue = createBackgroundTaskQueue()
   assert.equal(await queue.cancelCurrentAndAwait(5), true)
-  assert.equal(queue.cancellingTitle.value, '')
+  assert.equal(queue.queueRow.value, null)
 })
 
 test('取消回调照旧只调一次，队列继续往下走', async () => {

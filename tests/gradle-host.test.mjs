@@ -218,8 +218,66 @@ test('通知的「同步更改」走后台队列，入队后真的同步且队�
   await tick()
   assert.equal(h.calls.filter(([m]) => m === 'gradle.sync').length, synced + 1, '队列里的任务真的发起了同步')
   h.finish(); await tick()
-  assert.equal(backgroundTasks.backgroundTaskQueue.queuedCount.value, 0)
+  // 队列对外只剩那几件（`queuedCount` 那条扁平 ref 已由 progflow 按死出口删除，查询面是 `isEmpty()`）。
+  assert.equal(backgroundTasks.backgroundTaskQueue.queueRow.value, null, '没人排队时队列那一行不出现')
   assert.equal(backgroundTasks.backgroundTaskQueue.isEmpty(), true)
+  h.stop()
+})
+
+// 走队列的那条重载**参加协作**（2026-10-06 progflow；请求 `docs/wiring-requests-2026-10-06-status2.md` W3）。
+// 上游：`ProgressSuspender.freezeIfNeeded`（platform/platform-impl/src/com/intellij/openapi/progress/impl/ProgressSuspender.java:154-181）
+// 把"挂起"做成 `checkCanceled()` 里的一次等待 ⇒ 任务体走到检查点才让路；取消那一路是
+// 指示器自己的 `cancel()`（`ProgressIndicatorModel.kt:79-81`），本仓由 `queueRow.cancellable` 那颗按钮触发。
+// 本仓的粒度：Gradle 子进程内部没有节拍，所以让路落在"不为下一个链接目录开新进程"这一层。
+test('队列挂起时重载卡在目录之间，恢复后才起下一个 Gradle 进程（协作检查点真的在链上）', async () => {
+  const h = host({ dirs: ['a', 'b'] }); await tick(); h.finish(); await tick()
+  h.deps.isOpenInEditor = () => true
+  h.notices.length = 0
+  await h.api.onBuildFilesChanged(['a/build.gradle'])
+  const syncAction = h.notices[0][5][0]
+  const queued = backgroundTasks.backgroundTaskQueue
+  syncAction.run()
+  await tick()
+  const syncCalls = () => h.calls.filter(([m]) => m === 'gradle.sync').length
+  const firstCalls = syncCalls()
+  // 第一个目录的进程跑完 ⇒ 队列进入"下一个目录"这一步，此刻把它挂起。
+  h.finish()
+  queued.setSuspended('省电模式：代码洞察和后台任务已禁用')
+  await tick()
+  assert.equal(syncCalls(), firstCalls, '挂起期间不该为第二个目录开新的 Gradle 进程')
+  assert.match(queued.queueRow.value.detail, /^已挂起：省电模式/, '队列那一行要说清是被谁挂起的')
+  assert.equal(queued.queueRow.value.cancellable, true, '挂起期间那条可取消的任务仍然点得着取消')
+  queued.setSuspended(null)
+  await tick()
+  assert.equal(syncCalls(), firstCalls + 1, '恢复后第二个目录照常起来')
+  h.finish(); await tick()
+  assert.equal(queued.isEmpty(), true, '整串重载收尾')
+  h.stop()
+})
+
+test('挂起中按取消：队列的取消把任务从检查点上放回来，后面的目录不再起进程', async () => {
+  // 上游那一条是 `ProgressSuspender.java:55-61`：给指示器装的 `cancelled()` 监听先 `resumeProcess()`
+  // 再走取消 —— 挂起中的任务被取消时必须让它从 `myLock.wait()` 里出来，否则永远收不了尾。
+  // 本仓同一对动作在 `src/backgroundTasks.ts` 的 `Indicator.cancel()`（`suspender.resume()` + `resumeWaiters()`）。
+  const h = host({ dirs: ['a', 'b'] }); await tick(); h.finish(); await tick()
+  h.deps.isOpenInEditor = () => true
+  h.notices.length = 0
+  await h.api.onBuildFilesChanged(['a/build.gradle'])
+  const syncAction = h.notices[0][5][0]
+  const queued = backgroundTasks.backgroundTaskQueue
+  syncAction.run()
+  await tick()
+  const syncCalls = () => h.calls.filter(([m]) => m === 'gradle.sync').length
+  const firstCalls = syncCalls()
+  h.finish() // 第一个目录跑完 ⇒ 任务体走到"下一个目录"的那个检查点
+  queued.setSuspended('省电模式：代码洞察和后台任务已禁用')
+  await tick()
+  assert.equal(syncCalls(), firstCalls, '前置：挂起期间确实没有起新进程（否则这条用例是空的）')
+  assert.equal(await queued.cancelCurrentAndAwait(500), true,
+    '取消要能把卡在 awaitResumed() 的任务体放回来（等不到就是 false = 它还在转）')
+  await tick()
+  assert.equal(syncCalls(), firstCalls, '取消后不再为剩下的目录开 Gradle 进程')
+  assert.equal(queued.isEmpty(), true, '取消算结束：队列不留永远收不了尾的任务')
   h.stop()
 })
 

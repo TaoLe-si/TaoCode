@@ -1,11 +1,13 @@
 // 状态栏**中间那段文字**（IDEA 的 `StatusBar.Info.set` 通道）。
 //
 // 上游链路三跳，逐跳核过：
-//   1. `StatusBar.Info.set(text, project, requestor)`（`ide-core/.../StatusBar.kt:34-49`）→
+//   1. `StatusBar.Info.set(text, project, requestor)`（`platform/ide-core/src/com/intellij/openapi/wm/StatusBar.kt:34-45`，
+//      `TOPIC` 在 `:30`）→
 //      往 `StatusBarInfo.TOPIC` 发 `setInfo(text, requestor)`。
 //   2. `IdeStatusBarImpl` 转给 `InfoAndProgressPanel.setText(text, requestor)`
 //      （`InfoAndProgressPanel.kt:439-451`）。
-//   3. `StatusPanel.updateText(nonLogText)`（`StatusPanel.java:168-213`）决定最终显示什么 ——
+//   3. `StatusPanel.updateText(nonLogText)`（仓里有四个同名文件，这里是
+//      `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/StatusPanel.java:175-220`）决定最终显示什么 ——
 //      本模块的规则全部出自这一步。
 //
 // `setText` 的两条过滤（`:439-451`），**两条都照抄**：
@@ -13,11 +15,12 @@
 //     别的来源发空串一律忽略 —— 否则任何路过的人都顺手把状态栏擦白。
 //   · 返回值 = **是不是通知在托管这段话**，`currentRequestor` 据此更新（`:448`）。
 //
-// `StatusPanel.updateText`（`:168-213`）的显示规则：
+// `StatusPanel.updateText`（`:175-220`）的显示规则：
 //   · 通知托管（`nonLogText` 为空 **且** 有 statusMessage）→ 显示通知文字，并且当
 //     "上一条不是通知托管"（`myDirty`）或这条已过 60 秒时追加 ` (相对时间)`；托管期间
-//     每 30_000ms 重算一次时间后缀（`:190-201` 的 `alarm.addRequest(this, 30000)`）。
-//   · 否则显示 `nonLogText` 并把 `myDirty` 置 true（`:203-209`）。
+//     每 30_000ms 重算一次时间后缀（`:195-210` 那段 `Runnable`，`alarm.addRequest(this, 30000)` 在 `:208`、
+//     60 秒那道判据在 `:200`）。
+//   · 否则显示 `nonLogText` 并把 `myDirty` 置 true（`:212-217`）。
 //
 // 本仓的"通知"就是 `src/notices.ts` 的 `noticeLog`，所以 `setNoticeStatus` 由那边在**有新通知时**
 // 调用（IDEA 是 `ApplicationNotificationsModel` 往 statusMessage 里塞）。
@@ -28,15 +31,15 @@
 
 import { ref } from 'vue'
 
-/** 通知通道的 requestor 名（`ApplicationNotificationsModel.EVENT_REQUESTOR`，`:60`）。 */
+/** 通知通道的 requestor 名（`platform/platform-impl/src/com/intellij/notification/impl/ApplicationNotificationsModel.kt:20`）。 */
 export const EVENT_REQUESTOR = 'notification'
 
 /** 没有通道说话、也没有通知托管时的兜底文字（本仓原有的"就绪"）。 */
 export const IDLE_TEXT = '就绪'
 
-/** `myDirty || now - stamp >= 60_000`（`StatusPanel.java:190`）。 */
+/** `myDirty || now - stamp >= 60_000`（`StatusPanel.java:200`）。 */
 export const TIME_SUFFIX_AFTER = 60_000
-/** 时间后缀的刷新间隔（`StatusPanel.java:201`）。 */
+/** 时间后缀的刷新间隔（`StatusPanel.java:208` 的 `alarm.addRequest(this, 30000)`）。 */
 export const TIME_SUFFIX_REFRESH = 30_000
 
 /** 一条可显示的通知（上游 `StatusMessage` 的 notification/text/stamp 三件）。 */
@@ -60,7 +63,7 @@ export function relativeStamp(stamp: number, now: number): string {
   return `${Math.floor(hours / 24)} 天前`
 }
 
-/** 通知在状态栏上的一行（`StatusPanel.java:186-201` 的那段 `Runnable`）。 */
+/** 通知在状态栏上的一行（`StatusPanel.java:195-210` 的那段 `Runnable`）。 */
 export function noticeStatusText(notice: StatusNotice, now: number, needsStamp: boolean): string {
   if (!needsStamp && now - notice.stamp < TIME_SUFFIX_AFTER) return notice.message
   return `${notice.message} (${relativeStamp(notice.stamp, now)})`

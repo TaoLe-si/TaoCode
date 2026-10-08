@@ -36,3 +36,9 @@
 - **不接的后果**：结构视图只剩「选中 → 跳源码」这一向（`StructureViewComponent.java:794-802` 的 `scrollToSource`，本仓已可用），
   反向的「光标 → 树中定位并滚过去」（`:655`）用户看不见，判词 `docs/inventory/verdict-projectviews.md:30` 里
   「autoscroll to/from source 两个开关」只能算做了一半。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1 已接线**：`src/components/ToolWindowView.vue:198` 的 `<OutlinePanel>` 已带 `:source="ctx.todoSource"`（`v-if="source"` 的开关现在会渲染）。复核 `node --test tests/outline-view.test.mjs tests/structure-follow.test.mjs` ⇒ **pass 43 / fail 0**。
+
+结论：**零待接**，未改任何文件。

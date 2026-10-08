@@ -133,7 +133,10 @@ test('只有 Alt 的键位档：不带 Ctrl 也要能命中，且同物理键的
 //      而 `boundAt` 记的行号就是它所在的行（挪了行号也要红，不许留假坐标）。
 test('编辑器一族：上游没键位的不编键位，写了键位的必须真绑着（菜单文案与键位栏同源）', () => {
   const menu = readFileSync(new URL('src/menus/editMenu.ts', root), 'utf8')
-  const editor = readFileSync(new URL('src/components/CodeEditor.vue', root), 'utf8').split('\n')
+  // 编辑器常驻 keymap 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限，
+  // 拆一次降一次）；`boundAt` 指向新落点，判据读同一份文件、行号仍要指着真在绑的那一行。
+  const editor = readFileSync(new URL('src/editorKeymap.ts', root), 'utf8').split('\n')
+  const lineMatches = (text, action) => text.includes(`key: '${action.key.cm}'`) && text.includes(`editingCommands['${action.command}']`)
   const editableRows = [...menu.matchAll(/ctx\.editable\('([^']+)', '([^']*)', '([^']*)'/g)]
   assert.equal(new Set(EDITOR_ACTIONS.map(action => action.id)).size, EDITOR_ACTIONS.length, 'id 不许重复')
   for (const action of EDITOR_ACTIONS) {
@@ -155,9 +158,15 @@ test('编辑器一族：上游没键位的不编键位，写了键位的必须�
       continue
     }
     const [boundFile, boundLine] = action.key.boundAt.split(':')
-    assert.equal(boundFile, 'src/components/CodeEditor.vue', `${action.id} 的键位在编辑器 keymap 里`)
+    assert.equal(boundFile, 'src/editorKeymap.ts', `${action.id} 的键位在编辑器 keymap 里`)
     const line = editor[Number(boundLine) - 1] ?? ''
-    assert.ok(line.includes(`key: '${action.key.cm}'`), `${action.id} 的 ${action.key.cm} 不在 ${action.key.boundAt}`)
+    // 盘上真正在绑这一把键的那一行（同一把键 + 同一个命令）：只许有一处，且 boundAt 必须指着它 ——
+    // 这一行报错时直接给出行号，别让"漂移 5 行"变成一条看不出该改哪的断言。
+    const realAt = editor.findIndex(text => lineMatches(text, action)) + 1
+    assert.ok(realAt > 0, `${action.id} 在 CodeEditor.vue 的编辑器 keymap 里根本没有 \`key: '${action.key.cm}'\` + ${action.command} 那一行`)
+    assert.equal(editor.filter(text => lineMatches(text, action)).length, 1, `${action.id} 的这把键在编辑器 keymap 里绑了不止一处`)
+    assert.ok(line.includes(`key: '${action.key.cm}'`),
+      `${action.id} 的 ${action.key.cm} 不在 ${action.key.boundAt}（盘上真正在绑的是 src/components/CodeEditor.vue:${realAt} ⇒ 改 boundAt 或改实现，别留着指空行）`)
     assert.ok(line.includes(`editingCommands['${action.command}']`), `${action.id} 在 ${action.key.boundAt} 绑的不是 ${action.command}`)
     if (action.key.source === 'upstream') assert.match(action.key.upstream, /\$default\.xml:\d/)
     else assert.ok(action.key.upstream.startsWith('本仓绑定'), `${action.id} 的键位是本仓给的，必须写明不许冒充上游`)
@@ -315,5 +324,30 @@ test('menuUi 与 searchEverywhereHost 的计数注释与键位表同步（数字
     .match(/那 (\d+) 个只有键位、没有菜单行的动作/)
   assert.ok(hostComment, 'searchEverywhereHost.ts 那句「那 N 个」的写法变了 ⇒ 同上，一起改这里')
   assert.equal(Number(hostComment[1]), orphanIds.length, 'searchEverywhereHost.ts 的计数与表不一致')
+})
+
+// keymap.ts 里有一道闸门：宿主没把某个 ctx 出口塞进 `createKeymap({...})`，那条 action 就**不参与注册**
+// （`handlerOf` 返回 undefined ⇒ 命中键位也只把键原样放行）。方向是对的 —— 它挡的是
+// 「键位表写着 Ctrl+Shift+T、按下去只吞键不干活」的假动作。但反过来的失败没有任何门看着：
+// 17:1x 实测 `code.optimizeImports`（Ctrl+Alt+O）在键位表、Code 菜单、`semanticActions` 出口三处都齐，
+// 唯独 `App.vue:1816` 的装配没给 `runOrganizeImports` ⇒ 菜单能点、键按不动，而当时所有键位判据全绿。
+// 这条钉的就是"表的另一头有人接着"。
+test('keymap.ts 里以"宿主给没给"决定注不注册的出口，App.vue 的装配必须真的给', () => {
+  const keymap = readFileSync(new URL('src/keymap.ts', root), 'utf8')
+  const app = readFileSync(new URL('src/App.vue', root), 'utf8')
+  const gate = /const unwired = new Set\(\[([\s\S]*?)\]\)/.exec(keymap)
+  assert.ok(gate, 'keymap.ts 那道「没给就不注册」的闸门换了形状 ⇒ 这条门要跟着改，不许让它空转')
+  const wanted = [...new Set([...gate[1].matchAll(/([A-Za-z][\w]*)\s*\?\s*''\s*:/g)].map(m => m[1]))].sort()
+  assert.ok(wanted.length >= 4, `至少要钉住 4 条条件出口（实际扫到 ${wanted.length} 条：${wanted.join(', ')}）`)
+  const call = /createKeymap\(\{([\s\S]*?)\n\}\)/.exec(app)
+  assert.ok(call, 'App.vue 里 createKeymap({…}) 那一处装配找不到了')
+  // 只认紧跟逗号的**简写**实参（`runOrganizeImports,`）；`x: (...a) => fn(...a),` 那种逗号前是 `)`，不算给过。
+  const given = new Set([...call[1].matchAll(/(?:^|[,\s])([A-Za-z][\w]*)\s*,/gm)].map(m => m[1]))
+  for (const name of wanted) {
+    assert.ok(given.has(name),
+      `键位表按 ${name} 决定那条 action 注不注册，宿主装配里却没有 ⇒ 那把键静默放行、菜单里倒是能点（假动作）`)
+  }
+  // 反假绿：装配块里必须真的扫到过东西，否则上面那个循环是在空转。
+  assert.ok(given.size >= 40, `App.vue 的 createKeymap 块只扫到 ${given.size} 个实参 ⇒ 抽取形状错了，这条门拦不住任何东西`)
 })
 

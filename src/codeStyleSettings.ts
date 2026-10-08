@@ -106,33 +106,51 @@ export function setCodeStyleToggles(next: Partial<CodeStyleToggles>): CodeStyleT
 const POST_FORMAT_KEY = 'taocode.postFormat'
 
 /**
- * 格式化后处理设置（上游 `CodeStyleSettings` 里那批 `PostFormatProcessor` 开关）。
+ * 格式化后处理设置（上游 `CodeStyleSettings` 里那批 `PostFormatProcessor` 开关 + 空行上限）。
  * 默认值全部取自上游的字段默认（`CommonCodeStyleSettings.java:261`
- * `LINE_COMMENT_ADD_SPACE_ON_REFORMAT = false`），所以不落盘也等于上游默认。
+ * `LINE_COMMENT_ADD_SPACE_ON_REFORMAT = false`、`:290` `KEEP_BLANK_LINES_IN_CODE = 2`），
+ * 所以不落盘也等于上游默认；落盘的那份缺某个键时**按上游默认补**（不拿 0/undefined 冒充）。
  */
-export const postFormatSettings = ref<PostFormatSettings>({
-  ...defaultPostFormatSettings,
-  ...readStoredFlag(POST_FORMAT_KEY, 'lineCommentAddSpaceOnReformat'),
-})
+export const postFormatSettings = ref<PostFormatSettings>(readPostFormatStored())
 
 export function setPostFormatSettings(next: Partial<PostFormatSettings>): PostFormatSettings {
   postFormatSettings.value = { ...postFormatSettings.value, ...next }
-  writeStoredFlag(POST_FORMAT_KEY, { lineCommentAddSpaceOnReformat: next.lineCommentAddSpaceOnReformat })
+  writeStored(POST_FORMAT_KEY, {
+    lineCommentAddSpaceOnReformat: postFormatSettings.value.lineCommentAddSpaceOnReformat,
+    keepBlankLines: postFormatSettings.value.keepBlankLines,
+  })
   return postFormatSettings.value
 }
 
-function readStoredFlag(key: string, field: string): Record<string, boolean> {
+/**
+ * 读盘 + 补默认。`keepBlankLines` 只认整数：别的值（字符串、小数、NaN、负数）一律回退到上游默认 2
+ * （`CommonCodeStyleSettings.java:290`）—— 设置面还没那个复选框（`docs/wiring-requests-2026-10-06-format.md` W3），
+ * 坏值不能让格式化静默改规则。
+ */
+function readPostFormatStored(): PostFormatSettings {
+  const stored = readStored(POST_FORMAT_KEY)
+  const keep = Number.isInteger(stored.keepBlankLines) && (stored.keepBlankLines as number) >= 0
+    ? (stored.keepBlankLines as number)
+    : defaultPostFormatSettings.keepBlankLines
+  return {
+    ...defaultPostFormatSettings,
+    lineCommentAddSpaceOnReformat: typeof stored.lineCommentAddSpaceOnReformat === 'boolean'
+      ? stored.lineCommentAddSpaceOnReformat
+      : defaultPostFormatSettings.lineCommentAddSpaceOnReformat,
+    keepBlankLines: keep,
+  }
+}
+
+function readStored(key: string): Record<string, unknown> {
   try {
     const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(key)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    return typeof parsed[field] === 'boolean' ? { [field]: parsed[field] as boolean } : {}
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
   } catch {
     return {}
   }
 }
 
-function writeStoredFlag(key: string, values: Record<string, boolean | undefined>): void {
+function writeStored(key: string, values: Record<string, unknown>): void {
   try {
     if (typeof localStorage === 'undefined') return
     const raw = localStorage.getItem(key)

@@ -191,3 +191,17 @@ elevate?: boolean
 | `docs/wiring-requests-2026-10-06-vcs2.md` | `platform/editor-ui-api/src/com/intellij/openapi/editor/settings/EditorSettingsExternalizable.java` |
 
 按规约 §6 不代改他人文档；本文**没有**再写一遍那些带行号的形状（引用门会把转述当真引用收进去）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（`shell.openUrlWithBrowser` 菜单行）** —— native + bridge，非本 lane。
+- **R2（提权运行）** —— 不落（缺传输层）。
+- **R3（`Runner.FocusOnStartup` 测试）** —— `tests/**`，非本 lane。
+- **R4** —— 非本 lane 面。
+
+结论：零接线。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

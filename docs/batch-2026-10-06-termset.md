@@ -129,3 +129,53 @@
 **顺序要求**：R-1 先落（键与默认）⇒ R-2/R-3 才不空转；R-4 可独立下一批。
 落完 R-1 后必跑：`node --test tests/settings-keys-parity.test.mjs`、`node --test tests/terminal*.test.mjs`
 （「上游默认档钉 false」会自动从「钉请求文本」升级成「钉 `defaultEditorSettings`」）、`npm run test:native` 看 `tests passed`。
+
+---
+
+# 追加 · 2026-10-06 termset（第 2 切片）：copy-on-select / paste-on-middle-click 两个「假开关」
+
+> 上一节是同一 termset 路的「字号 + ANSI 颜色消费侧」交付（已入 citation-anchors 快照，原文一字未改，仅在下面追加）。
+> 本节代号仍记 termset，落在 `ex/terminal` 的设置面档位对齐。上游坐标本轮逐条 `sed -n` 开过。
+
+## A) 结论表
+
+| 族 | 项 | 判定 | 上游相对路径:行号（本轮亲自打开） | 本仓落点 文件:行号 | 一句话 |
+|---|---|---|---|---|---|
+| ex/terminal | 「Copy to clipboard on selection」旋钮 | `[x]` 本切片落模块侧 | 子类真身 `plugins/terminal/src/org/jetbrains/plugins/terminal/JBTerminalSystemSettingsProvider.java:74-81`（`copyOnSelect()` = `(isSystemSelectionSupported() \|\| getCopyOnSelection()) && Registry.is("editor.caret.update.primary.selection")`）；缺省 `plugins/terminal/src/org/jetbrains/plugins/terminal/TerminalOptionsProvider.kt:77`（`myCopyOnSelection = false`）；Linux 判定 `platform/editor-ui-api/src/com/intellij/openapi/ide/CopyPasteManager.java:83`（基类 `return false`，Linux 实现覆写为 true） | `src/terminalClipboard.ts`（`terminalCopyOnSelect(linux, copyOnSelection)`）、`src/components/TerminalPanel.vue:571`（`terminalCopyOnSelect(ON_LINUX, props.settings?.copyOnSelection ?? false)`） | 旧实现把这一档钉死成「只有 Linux」（引的是**基类** `JBTerminalSystemSettingsProviderBase.java:297-299`），而 JBTerminalPanel 实际 new 的是子类真身，那里 Windows/macOS 勾了旋钮也复制 ⇒ **勾选此前是死的**。改成 `linux \|\| 旋钮`，缺省 false ⇒ 落设置键前行为逐字不变 |
+| ex/terminal | 「Paste from clipboard on middle mouse button click」旋钮 | `[x]` 本切片落模块侧 | 子类真身 `JBTerminalSystemSettingsProvider.java:84-86`（`pasteOnMiddleMouseClick()` = `getPasteOnMiddleMouseButton()`，**不是**基类 `JBTerminalSystemSettingsProviderBase.java:302-304` 的无条件 `return true`）；缺省 `TerminalOptionsProvider.kt:78`（`myPasteOnMiddleMouseButton = true`） | `src/terminalClipboard.ts`（`terminalPasteOnMiddleClick(enabled)`）、`src/components/TerminalPanel.vue:415`（`terminalPasteOnMiddleClick(props.settings?.pasteOnMiddleMouseClick ?? true)`） | 旧实现写死 `return true`（引基类那一档），取消勾选也照样粘 ⇒ 死开关。改成读旋钮值，缺省 true ⇒ 与改造前逐字相同 |
+| ex/terminal | 响铃 audible bell（缺省 **true**） | `[-]` 本切片不落，仅登记 | `JBTerminalSystemSettingsProvider.java:64-66`（`audibleBell()` = `getAudibleBell()`）、缺省 `TerminalOptionsProvider.kt:76`（`mySoundBell = true`）；消费门 `plugins/terminal/frontend/src/com/intellij/terminal/frontend/view/impl/TerminalSessionController.kt:111-113`（`is TerminalBeepEvent -> if (settings.audibleBell()) Toolkit.beep()`）、块视图门 `plugins/terminal/src/org/jetbrains/plugins/terminal/block/output/TerminalAlarmManager.kt:12-14`（`commandIsRunning && audibleBell`）、BEL 来源 `plugins/terminal/frontend/src/com/intellij/terminal/frontend/session/ghostty/GhosttyTerminalSession.kt:276-278`（`onBell()` ⇒ `TerminalBeepEvent`） | — | 本仓 xterm 完全忽略 BEL（`TerminalPanel.vue` 无 `onBell` 订阅）⇒ 缺省 on 的上游行为这里**缺失**。但发声要宿主/原生通道：native 不在本路文件面、`src/App.vue` 保留、面板无既有 notify/flash 出口（`defineEmits` 只有 `focusTerminal`）。在不放假控件的铁律下无法只改模块侧就落一个真会响的档 ⇒ 登记给下一批（见 D） |
+
+## B) 本切片做了什么（模块侧 + 面板消费，净行数）
+
+1. `src/terminalClipboard.ts`（218 → 236，净 **+18**，全在文件头注释的「基类 vs 真身」留痕 + 两个函数注释）：
+   - `terminalCopyOnSelect(linux)` → `terminalCopyOnSelect(linux, copyOnSelection)`，体 `return linux || copyOnSelection`（真身 `JBTerminalSystemSettingsProvider.java:74-81`）。
+   - `terminalPasteOnMiddleClick()`（无条件 true）→ `terminalPasteOnMiddleClick(enabled)`，体 `return enabled`（真身 `:84-86`）。
+   - 文件头把「这两条是覆写值不是设置页旋钮」这句**订正**为「子类真身读 `getCopyOnSelection()`/`getPasteOnMiddleMouseButton()`，是设置页旋钮」，并留痕「旧注释引的是基类那一档」。
+2. `src/components/TerminalPanel.vue`（887 → 887，净 **0**，全 in-place）：props 的 `settings` 形状加两个可选布尔（`:75`）；`:415`、`:571` 两个调用点各读旋钮值（缺省档 `pasteOnMiddleMouseClick ?? true` / `copyOnSelection ?? false`）；两条相邻注释同步订正。**没往 bridge/native/App 加任何东西**；`TerminalPanel.vue` 未登记、上限 900，改后仍 887（余量 13，未逼近）。
+3. `tests/terminal-hyperlinks.test.mjs`（既有断言订正，判据）：原两条 `terminalCopyOnSelect(true)/terminalPasteOnMiddleClick()` 与两条面板源码锚点，钉的是**基类那一档**（值钉错），本轮按真身改写并**加严**：Linux 复制、非 Linux 缺省不复制、非 Linux 勾了才复制、中键旋钮关就不粘；两条 panel 锚点改指 `props.settings?.copyOnSelection ?? false` / `?? true`。一条没删、没把 `match` 降级成 `includes`。
+
+## C) 门禁原始数字（本切片）
+
+| 命令 | 数字 |
+|---|---|
+| `node --test tests/terminal*.test.mjs tests/process-*.test.mjs tests/module-size.test.mjs` | 改前基线 123（10 个 terminal/process 文件）+5（module-size）=**128 / 128 / 0**；本切片后仍 **128/128/0**（hyperlinks 文件条数不变，只改断言体） |
+| `node --test tests/terminal-clipboard.test.mjs tests/terminal-hyperlinks.test.mjs` | **29 / 29 / 0**（含订正后的「子类真身」门那条） |
+| `node --test tests/module-size.test.mjs` | **5 / 5 / 0**（TerminalPanel.vue 887 < 900 未登记；terminalClipboard.ts 236 < 900） |
+| `node .tools/find-missing-ext.mjs` | 干净（扫描 1374 文件） |
+| 隔离 tsconfig `npx tsc -p build/tsconfig.termset.json --noEmit`（files 只含 `src/terminalClipboard.ts`） | **0 错**（临时 tsconfig 收工删） |
+| `node .tools/find-orphan-modules.mjs --gate` | 红 **1 条**：`src/usageViewTreeModel.ts` ⇒ **非本路文件**（本切片零新建模块，不可能引入新孤儿；孤儿来自别的路） |
+| `node --test tests/source-citations.test.mjs tests/source-citation-anchors.test.mjs` | 见 E：本切片引用的坐标全部可解；快照「moved」/「扑空」红点都不属本切片 |
+| 全量 `npm test` / ctest | 按规约**不跑**（未改 native） |
+
+## D) 接线请求（写进 `docs/wiring-requests-2026-10-06-termset.md` 的 R-6/R-7）
+
+- **R-6**：把 `terminalCopyOnSelection`（bool，缺省 false）与 `terminalPasteOnMiddleMouseButton`（bool，缺省 true）两把持久化键**六处成对**落齐（`src/settingsModel.ts` 接口+缺省、`native/settings_schema.hpp` 白名单、`native/settings_schema.cpp` 默认值、`src/previewSettings.ts` 键表、`src/App.vue` 把 `editorSettings`/`terminalSettings` 透传进 `<TerminalPanel :settings=…>`）。目标出口名核对：面板已 `props.settings?.copyOnSelection ?? false`（`:571`）、`?? true`（`:415`）——宿主不传时行为与改造前逐字相同。`SettingsDialog.vue` 需加两行勾选（绑这两个真键名），文案走上游英文原句直译（本仓无 zh 包 ⇒ 措辞「无法核实」）。
+- **R-7**（下一批，不阻塞本切片）：audible bell 需要①native/宿主一条 `requestTerminalBell`（或复用状态栏/通知）发声出口 + ②面板 `instance.onBell(() => if (audibleBell) 触发)` + ③`terminalAudibleBell` 缺省 true 的键。本切片**未落**任何 onBell 假订阅。
+
+## E) 无法核实 / 未落（带具体卡点）
+
+1. 中文措辞：`copyOnSelect` / `pasteOnMiddleMouseClick` / `audibleBell` 三条设置项的上游**中文界面文案**无法核实——参考树无本地化包，只有英文原文（`getCopyOnSelection` 等是代码标识，不是 UI 串）。UI 落格时按英文原句直译并注释。
+2. `Registry.is("editor.caret.update.primary.selection")` 那半句条件：是 IDE 全局高级注册表项、不是终端设置页旋钮，本仓无对应物、无消费链 ⇒ **不建模**（不是把它当 false 硬编进门，而是根本不引入这个变量）。已如实写进 `terminalClipboard.ts` 文件头。
+3. audible bell 未落：具体卡点 = 发声需要宿主/原生通道，`native/` 不在本路文件面、`src/App.vue` 保留、`TerminalPanel.vue` 的 `defineEmits` 只有 `focusTerminal` 一个出口且净余量 13 行，加一条 onBell+发声会既逼近面板上限又造出「调了但没人发声」的死效果 ⇒ 违反「不放假控件」，宁可不落，登记 R-7。
+4. citation 门红点归属：`source-citations`/`anchors` 当前红，命中的是 `findrep2.md`/`menukeys.md`（`ConsoleViewImpl.kt:999999` 越界）与 `commitChecks.ts`/`ProblemsPanel.vue`/`runStartupFocus.ts`（别的 lane 在途改了被引区间）——**都不是本切片文件**；本切片新增坐标（上表 A/B 列）逐条开过参考树、区间在文件长度内。本切片**未改** `docs/inventory/**`（生成式账本、一次一路），anchors 快照随主代理装配时统一复采。
+5. 真机行为未验：不启动 GUI，「非 Linux 勾了选中即复制」「取消中键粘贴」只到纯函数 + 源码锚点层；宿主值传入前的可见行为与改造前逐字相同（缺省档）。

@@ -10,16 +10,31 @@ import { lspDiagnostics, request, type DocumentData, type GeneralSettingsState, 
          type LspDiagnostic, type LspExecuteCommandResult, type LspFileEdits, type LspFormatResult, type LspLocation, type LspPrepareRenameResult,
          type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type SaveResult, type Workspace } from './bridge.ts'
 import { applyTextEdits, wordAt } from './editorText.ts'
+// 改写落进编辑器也要给那一篇换修订号 —— 见 src/documentRevisions.ts（提交检查的指纹吃它）。
+import { bumpDocumentRevision } from './documentRevisions.ts'
 import { chooseTargetRows, implementationChooserTitle, implementationsUsageTitle, loadTargetContents, NO_IMPLEMENTATIONS_MESSAGE,
          sortTargetRows, typeChooserTitle, type ChooseTargetRow } from './chooseTarget.ts'
 import { failReferences, finishReferences, startReferences } from './referenceContents.ts'
+// 「优化导入」的请求形状与动作筛选（上游 `LspImportOptimizer.kt:68-80`）。
+import { organizeImportsActionOf, organizeImportsRequest } from './organizeImports.ts'
 import { mergePreviewEdits, nonCodeRenameEdits, nonCodeRenameSummary, renameConflictMessage, renamePreviewOf,
-         renameUsageSummary, SEARCH_IN_COMMENTS_DEFAULT, type NonCodeRenameEdits, type RenamePreview } from './renamePreview.ts'
+         renameTargetConflict, renameTargetConflictMessage, renameUsageSummary, SEARCH_IN_COMMENTS_DEFAULT,
+         type NonCodeRenameEdits, type RenamePreview } from './renamePreview.ts'
 // 重构预览（上游 `RefactoringDialog` + `UsageViewImpl`：应用前把「要改哪些地方」印成用法树，
 // 用户确认后才写盘）。模型在 src/refactorPreview.ts，扫描在 src/nonCodeUsages.ts。
 import { buildRefactorPreview, previewRequired, refactorPreviewTree, type RefactorPreviewNode } from './refactorPreview.ts'
 import { commentStyleFor } from './commentToggle.ts'
 import { suppressionActionsFor } from './localIntentions.ts'
+// 意图列表的档位顺序（上游 `CachedIntentions.getAllActions()` 的「先修复后意图」）与空档不占位，
+// 规则本体在 `src/intentionList.ts`；`openCodeActions` 是 Alt+Enter 那一路的消费方，
+// 行菜单那一路的消费方是 `src/components/IntentionListMenu.vue`。
+import { orderIntentionSections } from './intentionList.ts'
+// 扩展点 `com.intellij.intentionMenuContributor`：第三方按 id 挂的菜单贡献者往 Alt-Enter 里补条目
+// （消费点 `openCodeActions`，见下面 `collectedIntentions`）。
+import { collectedIntentions } from './intentionExtensionPoints.ts'
+// 扩展点 `com.intellij.refactoring.elementListenerProvider`：重命名落地后通知登记的监听者
+// （消费点 `writeRename`，见 `src/refactorRenameExtensionPoints.ts`）。
+import { notifyRefactoringElementListeners } from './refactorRenameExtensionPoints.ts'
 // 本地检查通道的诊断表（`src/junitInspections.ts:281`）与 JUnit 快速修复规则
 // （`src/junitQuickFix.ts:154`）。上游 Alt+Enter 拿的是 HighlightInfo 全集，
 // 本地 inspection 与外部注解并进同一张表（`src/problems.ts` 的 `allProblems`）——
@@ -40,7 +55,7 @@ import { formattingRestrictionFor } from './formattingRestriction.ts'
 // 每份文件生效的缩进（`CodeStyleSettings.getIndentSize` + `FileIndentOptionsProvider` 链）与
 // 格式化后处理设置（`PostFormatProcessor`）：模型在 src/codeStyleSettings.ts / src/postFormatProcessors.ts。
 import { indentOptionsFromSettings, makeEditorConfigReader, postFormatSettings, resolveIndentOptions } from './codeStyleSettings.ts'
-import { processLineCommentAddSpace } from './postFormatProcessors.ts'
+import { postFormatRegions, processFormattedText } from './postFormatProcessors.ts'
 import { backgroundTaskManager } from './progressTasks.ts'
 import { trustBlockReason } from './trustedProjects.ts'
 
@@ -92,7 +107,7 @@ export function createSemanticActions(deps: SemanticActionsDeps) {
   const { notify, isDesktop, generalSettings, editorSettings, workspace, active, activePath, findTab, editorFor, lspOn, lspReady, save,
           codeActions, actionPrompt, renamePrompt, renameValue, renameInput, invalidRenameName,
           baseName, explorer, leftView, prepareHierarchy, showOutput, refreshOutline, revealLocation, retitleTab } = deps
-async function onSemantic(payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }) {
+async function onSemantic(payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange; usage?: { shortName: string; longName: string; typeLabel: string } }) {
   const tab = findTab(payload.path)
   if (!tab || !lspOn(tab)) { notify('该文件未启用语言服务。', true); return }
   if (payload.kind === 'rename') {
@@ -128,7 +143,10 @@ async function onSemantic(payload: { kind: 'rename' | 'references' | 'codeAction
   // （`src/referenceContents.ts`）：先挂上"正在搜索"的那一行，回来再填地点，失败或空结果就撤掉它。
   const source = findTab(payload.path)
   const symbol = wordAt(source?.content ?? '', payload.line, payload.character)
-  const search = startReferences(symbol, `${payload.path}#${symbol}`)
+  // 标题两段来自**按语言的 provider 层**（上游 `FindUsagesProvider.getNodeText`/`getDescriptiveName`，
+  // 规则在 `src/findUsagesProvider.ts`）：调用方（文件树「查找用法」）已经拿 LSP 的 documentSymbol
+  // 算好短名/描述名就带进来；没有就退回光标处的词（上游 provider 一个都没命中时也是这个兜底）。
+  const search = startReferences(payload.usage?.shortName || symbol, payload.usage?.longName || `${payload.path}#${symbol}`)
   showOutput('references')
   try {
     const result = await request<LspReferencesResult>('lsp.request', { kind: payload.kind, path: payload.path, line: payload.line, character: payload.character })
@@ -217,7 +235,8 @@ async function runFormatting(path: string, range?: LspRange) {
     let touched = 0
     let suppressed = result.dropped   // 切段合并时服务器越界给出的重叠/重复编辑（`mergeFormatParts` 拦下的）
     let conflicted = 0
-    let postProcessed = 0
+    let insertedSpaces = 0
+    let collapsedBlanks = 0
     for (const file of result.edits) {
       const open = findTab(file.path)
       if (!open) continue  // formatting only makes sense on an open buffer
@@ -239,21 +258,44 @@ async function runFormatting(path: string, range?: LspRange) {
         next = merged.text
       }
       if (next === base) continue
-      // 格式化后处理器（上游 `PostFormatProcessor`，本仓只落
-      // `LineCommentAddSpacePostFormatProcessor`，规则在 src/postFormatProcessors.ts）：
-      // 在语言服务重排完之后补跑一遍。**只对发起格式化的那份文件跑**，且用 `base` 的长度当区间 ——
-      // 上游 `processText(source, rangeToReformat, settings)` 收的就是待重排区间。
+      // 格式化后处理（上游那一串 `PostFormatProcessor` + `WhiteSpace.arrangeLineFeeds` 的空行上限，
+      // 两条规则都在 src/postFormatProcessors.ts）：语言服务重排完之后补跑一遍，只对发起格式化的那份文件。
+      // 区间口径三条（都有上游出处，见该文件头）：
+      //   · **只跑启用段** —— `CoreCodeStyleUtil.java:121-142` 把后处理限制在
+      //     `FormatterTagHandler.getEnabledRanges` 里，所以 `// @formatter:off` 段里的行注释不补空格、
+      //     空行也不并掉（此前这里传的是整份文本，禁用段会被改到）；
+      //   · **只跑本次重排的那几段** —— 上游 `postProcessRanges` 收的是格式化区间（`:101-118`），
+      //     选区格式化不该动选区外的空行；本仓用 `postFormatRegions()` 把请求侧的区间端点
+      //     按已套用的编辑平移过来（上游靠 `RangeFormatInfo` 的智能指针重取，本仓没有 PSI）；
+      //   · 用户在格式化期间改过文档那一档（`snapshot !== undefined`）：端点换算不含用户那半位移
+      //     ⇒ 退回「整份文本 ∩ 启用段」，不假装换算准确。
       if (file.path === path) {
-        const processed = processLineCommentAddSpace(next, { start: 0, end: next.length }, postFormatSettings.value)
-        if (processed.inserted) { next = processed.text; ++postProcessed }
+        const regions = snapshot === undefined
+          ? postFormatRegions(base, edits, range ? (subRanges.length ? subRanges : [range]) : [])
+          : []
+        const processed = processFormattedText(next, regions, postFormatSettings.value, commentStyleFor(undefined, file.path))
+        if (processed.text !== next) {
+          next = processed.text
+          insertedSpaces += processed.inserted
+          collapsedBlanks += processed.collapsed
+        }
       }
       editorFor(file.path)?.setDraft(next)
+      // 意图/重构把预览正文刷进编辑器 = 上游 documentChanged（`DocumentImpl.java:171`）⇒ 这一篇换号，
+      // 提交检查的指纹才跟得上"内容又变了"那一维（`src/commitChecksResult.ts` 的第 3 段）。
+      bumpDocumentRevision(file.path)
       open.dirty = true  // buffer preview; user reviews then Ctrl+S
       ++touched
     }
+    // 后处理干了什么要单独说（上游的字符串没有这一条，本仓既有口径是「重排 + 括号里的本地补跑」）：
+    // 补空格与并空行是两条规则，分开报数才不会让人以为语言服务做了这两件事。
+    const postNote = [
+      insertedSpaces ? `补齐行注释空格 ${insertedSpaces} 处` : '',
+      collapsedBlanks ? `合并多余空行 ${collapsedBlanks} 行` : '',
+    ].filter(Boolean).join('，')
     if (conflicted) notify(`格式化结果与你在格式化期间的修改重叠，已跳过 ${conflicted} 个文件以免覆盖；请重新格式化。`)
     else if (!touched && suppressed) notify('格式化标记（@formatter:off）已禁用这些区域，未做改动。')
-    else notify(touched ? `已格式化当前缓冲（未保存），检查后按 Ctrl+S 保存。${postProcessed ? '（已按设置补齐行注释后的空格）' : ''}` : '格式已是最新。')
+    else notify(touched ? `已格式化当前缓冲（未保存），检查后按 Ctrl+S 保存。${postNote ? `（已按代码风格${postNote}）` : ''}` : '格式已是最新。')
   } catch (error) { notify(errorMessage(error), true) }
   finally { backgroundTaskManager.end(FORMAT_FORMATTING_TASK_ID) }
 }
@@ -412,19 +454,37 @@ async function openCodeActions(payload: { path: string; line: number; character:
     ...(lspDiagnostics.get(payload.path) ?? []).filter(item => item.line === payload.line),
     ...(localDiagnostics.get(payload.path) ?? []).filter(item => item.line === payload.line),
   ]
-  const localActions = !onlyFixes && tab
-    ? [
-        ...suppressionActionsFor({
-          path: payload.path, text: tab.content, diagnostics: lineRows,
-          enabled: isIntentionEnabled,
-        }),
-        // JUnit 修复只要 `{行, 来源}`（`JunitQuickFixInput.diagnostics`），`source` 缺省成空串 ——
-        // 两条规则（MisorderedAssertEqualsArguments / JUnit3StyleTestMethodInJUnit4Class）都按来源分流。
-        ...junitQuickFixActions({
-          path: payload.path, text: tab.content,
-          diagnostics: lineRows.map(item => ({ line: item.line, source: item.source ?? '' })),
-        }),
-      ]
+  // 本地两半**按档位分开**，不再串成一条 `localActions`：抑制条目是「意图」（上游
+  // `SuppressIntentionAction.java:19` 的 `implements IntentionAction` ⇒ 进 `myIntentions`），
+  // JUnit 那两条是「快速修复」（上游 inspection 的 quick fix ⇒ 进 `myInspectionFixes`）。
+  // 谁在前谁在后不由"哪段代码先写"决定，由 `src/intentionList.ts` 的 `INTENTION_GROUP_ORDER`
+  // 决定（上游 `CachedIntentions.java:353-368` 的 `getAllActions()`：先 errorFixes/inspectionFixes，
+  // 后 intentions）⇒ Alt+Enter 弹层里 JUnit 的修复现在排在抑制注释**前面**（旧形状是反的）。
+  const suppressions = !onlyFixes && tab
+    ? suppressionActionsFor({
+        path: payload.path, text: tab.content, diagnostics: lineRows,
+        enabled: isIntentionEnabled,
+      })
+    : []
+  const localFixes = !onlyFixes && tab
+    // JUnit 修复只要 `{行, 来源}`（`JunitQuickFixInput.diagnostics`），`source` 缺省成空串 ——
+    // 两条规则（MisorderedAssertEqualsArguments / JUnit3StyleTestMethodInJUnit4Class）都按来源分流。
+    ? junitQuickFixActions({
+        path: payload.path, text: tab.content,
+        diagnostics: lineRows.map(item => ({ line: item.line, source: item.source ?? '' })),
+      })
+    : []
+  // 扩展点 `com.intellij.intentionMenuContributor`：第三方按 id 挂的贡献者往菜单里补条目
+  // （上游 `ShowIntentionsPass` 遍历 EP 逐条 collectActions）。bundled 是 passthrough ⇒ 行为不变。
+  const contributed = !onlyFixes && tab
+    ? collectedIntentions({
+        path: payload.path,
+        language: payload.path.includes('.') ? payload.path.slice(payload.path.lastIndexOf('.') + 1).toLowerCase() : '',
+        text: tab.content, line: payload.line, character: payload.character, passId: 0,
+      }).map((row, index) => ({
+        title: row.title, index: -(index + 1), kind: row.kind, preferred: row.preferred,
+        edits: [...row.edits], command: row.command,
+      }))
     : []
   let serverFailed: unknown
   let serverActions: LspCodeAction[] = []
@@ -434,10 +494,11 @@ async function openCodeActions(payload: { path: string; line: number; character:
   } catch (error) { serverFailed = error }
   // IDEA's "Show Fix…" variants keep only actions that actually fix a diagnostic;
   // the server marks those with `isPreferred` or a `diagnostics` backlink.
-  const actions = [
-    ...(onlyFixes ? serverActions.filter(action => action.preferred || action.linkedDiagnostics) : serverActions),
-    ...localActions,
-  ]
+  // 空档不占位（上游 `getAllActions()` 就是几条列表串起来，空的自然没那一段），有档才排。
+  const actions = orderIntentionSections<LspCodeAction>([
+    { group: 'fix', rows: [...(onlyFixes ? serverActions.filter(action => action.preferred || action.linkedDiagnostics) : serverActions), ...localFixes] },
+    { group: 'intention', rows: [...contributed, ...suppressions] },
+  ]).flatMap(section => section.rows)
   if (!actions.length) {
     if (serverFailed) { notify(errorMessage(serverFailed), true); return }
     notify(onlyFixes ? '当前行没有与问题关联的快速修复。' : '此处没有可用的代码操作。')
@@ -455,17 +516,26 @@ function caretPayload() {
 }
 // IDEA's Code › 优化导入 (Optimize Imports, Ctrl+Alt+O): JDT/TS publish it as a
 // `source.organizeImports` code action; apply the first one directly.
+// 请求形状与动作筛选的规则在 `src/organizeImports.ts`（逐条对着上游 `LspImportOptimizer.kt:68-80`）。
 async function runOrganizeImports() {
   const tab = active.value
   if (!tab || !lspReady.value) { notify('优化导入需要语言服务。', true); return }
-  const payload = caretPayload()
+  // 上游那一份 LSP 侧实现（`platform/lsp-impl/src/impl/features/formatter/LspImportOptimizer.kt`）：
+  //   · `:77-80` 范围是 `Range(Position(0,0), Position(0,0))`，源码注释写着 `// doesn't matter`
+  //     ⇒ 整理导入是**文件级**动作，与光标在哪一列无关；本仓此前问的是光标处（`caretPayload()`），
+  //     服务器按范围筛动作时光标落在字符串/注释里就可能不给 source 动作
+  //     ⇒「动一下光标，Ctrl+Alt+O 就忽然能用/忽然不能用」；
+  //   · `:70-72` `only = listOf(SourceOrganizeImports)` 那一档要宿主在 `textDocument/codeAction` 的
+  //     context 里补（`native/lsp_code_actions.cpp:44-46` 目前只发 `diagnostics`）⇒ 见
+  //     `docs/wiring-requests-2026-10-06-refactorfix.md` R2；在它补上之前按 `kind` 精确筛，
+  //     标题正则只留给没填 kind 的老服务器（上游从不按标题认动作）。
+  //     （订正留痕：这里原先引的是 `docs/wiring-requests-2026-10-06-refactor1.md` R1 —— 本仓**没有**
+  //     那份文档，而真实存在的 `...-refactor.md` 的 R1 写的是树侧删除，不是这一件事。）
   try {
-    const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path: payload.path, line: payload.line, character: payload.character, diagnostics: [] })
-    const action = (result.actions ?? []).find(item =>
-      item.kind === 'source.organizeImports' || item.kind?.startsWith('source.organizeImports') ||
-      /organize\s*imports|优化导入/i.test(item.title))
+    const result = await request<LspCodeActionResults>('lsp.request', organizeImportsRequest(tab.path))
+    const action = organizeImportsActionOf(result.actions ?? [])
     if (!action) { notify('语言服务没有提供可用的导入优化。'); return }
-    actionPrompt.value = { path: payload.path }
+    actionPrompt.value = { path: tab.path }
     await applyCodeAction(action)
     actionPrompt.value = null
   } catch (error) { notify(errorMessage(error), true) }
@@ -512,7 +582,20 @@ async function applyCodeAction(action: LspCodeAction) {
 // 所以这三步合成一个入口，调用点不许拆开用。
 // 服务器没声明这个能力、或这个语言没有语言服务时静默跳过（改名本身照做），
 // 否则每改一个 .txt 都会弹一次错。
+//
+// 两道拦下都放在 `file.rename` **之前**（改名一旦落地就把旧路径吃掉了，回不去）：
+//   · 目标位已被占用 —— 上游 `CopyFilesOrDirectoriesHandler.checkFileExist`
+//     （`platform/lang-impl/src/com/intellij/refactoring/copy/CopyFilesOrDirectoriesHandler.java:543-571`）
+//     问「覆盖 / 跳过」，选跳过就 `RenameProcessor.java:230-237` 把这个条目从改名集合里 remove；
+//     关闭对话框在 `SkipOverwriteChoice.java:50` 同样落到 SKIP ⇒ 本仓按「跳过」那一支什么都不做
+//     （四选一需要弹层宿主；订正留痕：这里原先引的 `docs/wiring-requests-2026-10-06-refactor1.md` R2
+//     本仓**没有**那份文档，请求改记在 `docs/wiring-requests-2026-10-06-refactorfix.md` R3）。
+//   · 语言服务给的引用编辑互相覆盖 —— 与符号重命名同一份账（`renamePreviewOf`），
+//     上游对位 `RenameProcessor.preprocessUsages`（`:166-188`）：冲突没清掉就 return false，
+//     一个文件都不写。此前这条链**直接** `applyTextEdits` 落盘，重叠的 WorkspaceEdit 会把文件改花。
 async function renameEntryWithReferences(from: string, to: string) {
+  const conflict = renameTargetConflict(from, to, workspace()?.entries ?? [])
+  if (conflict) { notify(renameTargetConflictMessage(conflict, from), true); return }
   let referenceEdits: LspFileEdits[] = []
   if (isDesktop && workspace()) {
     try {
@@ -521,9 +604,11 @@ async function renameEntryWithReferences(from: string, to: string) {
       referenceEdits = result.available ? result.edits ?? [] : []
     } catch { /* 没有语言服务：跳过更新引用，改名照做 */ }
   }
+  const preview = renamePreviewOf(referenceEdits)
+  if (preview.conflicts.length) { notify(renameConflictMessage(preview), true); return }
   await request('file.rename', { from, to })
   await retitleTab(from, to)
-  if (referenceEdits.length) await applyEditsToFiles(referenceEdits, `已更新 ${baseName(from)} 的引用`)
+  if (preview.edits.length) await applyEditsToFiles(preview.edits, `已更新 ${baseName(from)} 的引用（${renameUsageSummary(preview)}）`)
 }
 // Apply a WorkspaceEdit (from rename or a code action) across files: write each
 // through the normal safe-save path, then refresh any open buffer + the server.
@@ -544,7 +629,13 @@ async function applyEditsToFiles(edits: LspFileEdits[], doneMessage: string) {
     const next = applyTextEdits(content, file.textEdits)
     if (next === content) continue
     const saved = await request<SaveResult>('file.write', { path: file.path, content: next, expectedVersion: version, encoding, bom, safeWrite: generalSettings.value.isUseSafeWrite })
-    if (open) { open.content = next; open.version = saved.version; open.dirty = false; editorFor(file.path)?.setDraft(next) }
+    if (open) {
+      open.content = next; open.version = saved.version; open.dirty = false
+      editorFor(file.path)?.setDraft(next)
+      // 写盘 + 把新正文刷进编辑器 = 这一篇的正文换了一版（上游 documentChanged，`DocumentImpl.java:171`）
+      // ⇒ 提交检查的指纹要跟着换号，否则上一轮结果被当成还作数。
+      bumpDocumentRevision(file.path)
+    }
     if (isDesktop) void request('lsp.change', { path: file.path, text: next }).catch(() => undefined)
     ++count
   }

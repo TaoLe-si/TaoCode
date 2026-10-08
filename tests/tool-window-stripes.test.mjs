@@ -89,7 +89,7 @@ test('a saved anchor stays reachable when the saved target order is missing or s
   // ⇒ notifications 排在后半组（这里就是末尾），files 在前面那组。
   // "同组内 order 0 在 order 1 之前"这一条判据没丢：它由下面那行底部侧条（todo 0 / gradle 1，
   // 两边都不是 side tool ⇒ 同组比 rank）继续钉住。
-  assert.deepEqual(h.stripeOrder.value('right'), ['files', 'notifications'], 'side tool 排在末尾，rank 只在同组内比')
+  assert.deepEqual(h.stripeOrder.value('right'), ['files', 'agent', 'notifications'], 'side tool 排在末尾，rank 只在同组内比')
   // 记录里写过的按 `order` 排（它们就是用户排过的那些），没写过的按出厂默认接在后面
   // （bottom 的默认 = vcslog→search→todo→debug）。
   assert.deepEqual(h.stripeOrder.value('bottom'), ['todo', 'gradle', 'vcslog', 'search', 'debug'])
@@ -105,9 +105,9 @@ test('dragging across stripes still honors the requested insertion position', t 
   })
   drag.onToolDragStart('files', {})
   drag.onToolDrop('right', 'gradle', { preventDefault() {} })
-  assert.deepEqual(h.stripeOrder.value('right'), ['files', 'gradle', 'notifications'])
+  assert.deepEqual(h.stripeOrder.value('right'), ['files', 'gradle', 'agent', 'notifications'])
   assert.equal(h.stripeOrder.value('left').includes('files'), false)
-  assert.deepEqual(host().stripeOrder.value('right'), ['files', 'gradle', 'notifications'])
+  assert.deepEqual(host().stripeOrder.value('right'), ['files', 'gradle', 'agent', 'notifications'])
 })
 
 // 真 bug 回归：标签条拖放的落点 id 就是被拖的按钮自己时，旧实现把它从表里摘掉再 `indexOf(id)`

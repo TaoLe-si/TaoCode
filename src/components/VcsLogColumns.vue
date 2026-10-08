@@ -2,19 +2,40 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { columnOrder, fitColumns, moveColumn, visibleColumns, type LogColumn, type LogWidths } from '../vcsLogColumns'
 import { LOG_COLUMN_TITLES } from '../vcsLogPresentation'
-const props = defineProps<{ storageKey: string; rows: Array<{ author: string; date: string; shortHash: string }>; viewport: number; rootWidth: number; hidden?: LogColumn[] }>()
+type LogColumnRow = { author: string; date: string; shortHash: string; hash: string; subject: string }
+const props = defineProps<{ storageKey: string; rows: LogColumnRow[]; viewport: number; rootWidth: number; hidden?: LogColumn[] }>()
+const emit = defineEmits<{ metrics: [value: { commitWidth: number; subjectWidths: Record<string, number> }] }>()
 const saved = ref<Partial<LogWidths>>({})
 const order = ref(columnOrder(null))
 const host = ref<HTMLElement>()
 const font = ref('11px sans-serif')
+const canvasReady = ref(false)
 const labels = LOG_COLUMN_TITLES
 let context: CanvasRenderingContext2D | null = null
-onMounted(() => { context = document.createElement('canvas').getContext('2d'); if (host.value) font.value = getComputedStyle(host.value).font || font.value })
-const widths = computed(() => fitColumns(props.rows, (text, column) => {
-  if (!context) return 50
-  context.font = column === 'hash' ? '10px monospace' : font.value
-  return context.measureText(text).width
-}, props.viewport, props.rootWidth, saved.value, props.hidden ?? []))
+onMounted(() => {
+  context = document.createElement('canvas').getContext('2d')
+  if (host.value) font.value = getComputedStyle(host.value).font || font.value
+  canvasReady.value = true
+})
+const widths = computed(() => {
+  void canvasReady.value
+  return fitColumns(props.rows, (text, column) => {
+    if (!context) return 50
+    context.font = column === 'hash' ? '10px monospace' : font.value
+    return context.measureText(text).width
+  }, props.viewport, props.rootWidth, saved.value, props.hidden ?? [])
+})
+const subjectWidths = computed(() => {
+  void canvasReady.value
+  const widthsByHash: Record<string, number> = {}
+  if (context) {
+    context.font = font.value
+    for (const row of props.rows) widthsByHash[row.hash] = context.measureText(row.subject).width
+  }
+  return widthsByHash
+})
+const metrics = computed(() => ({ commitWidth: widths.value.commit, subjectWidths: subjectWidths.value }))
+watch(metrics, value => emit('metrics', value), { flush: 'post' })
 // 勾掉的列不画表头也不占宽（`Vcs.Log.ToggleColumns`）。
 const shown = computed(() => visibleColumns(order.value, props.hidden ?? []))
 watch(() => props.storageKey, key => {
@@ -68,9 +89,9 @@ const style = computed(() => Object.fromEntries(order.value.flatMap((key, index)
 </template>
 <style scoped>
 .columns { min-width: 100%; width: max-content; font-size: 11px; }
-.invisible-header { display: flex; position: sticky; top: 0; height: 0; z-index: 2; gap: 8px; }
+.invisible-header { display: flex; position: sticky; top: 0; height: 0; z-index: 2; gap: var(--space-2); }
 .invisible-header > span { position: relative; flex-shrink: 0; }
 .reorder { position: absolute; left: 4px; right: 6px; height: 6px; cursor: grab; }
 .resize { position: absolute; right: -4px; width: 8px; height: 12px; cursor: col-resize; touch-action: none; }
-.resize:focus-visible { outline: 1px solid var(--accent); }
+.resize:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 </style>

@@ -1,6 +1,9 @@
 #pragma once
 
+#include <chrono>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -23,11 +26,17 @@ class Workspace {
 public:
     Json open(const std::filesystem::path& root, const std::vector<std::string>& excluded = {".git", "node_modules", "build", "dist"});
     Json list(const std::string& relative);
+    Json search_files(const std::function<bool()>& cancelled);
     // Text files travel as UTF-8 JSON, so `encoding` ('auto' = BOM sniffing, else
-    // 'utf-8' | 'gbk' | 'cp1252' | 'system' | 'utf-16le' | 'utf-16be') selects how the
-    // bytes on disk are decoded; read reports the encoding it used and whether the
-    // file carried a byte-order mark, and write re-encodes with the same pair.
+    // 'utf-8' | 'gbk' | 'cp1252' | 'system' | 'utf-32be' | 'utf-32le' | 'utf-16le' |
+    // 'utf-16be') selects how the bytes on disk are decoded; read reports the encoding it
+    // used and whether the file carried a byte-order mark, and write re-encodes with the
+    // same pair. 'auto' tests the marks in upstream's order
+    // (CharsetToolkit.java:424-429): UTF-8, UTF-32BE, UTF-32LE, UTF-16LE, UTF-16BE — the
+    // UTF-32 pair first, because a UTF-32LE mark (FF FE 00 00) starts with UTF-16LE's.
     Json read(const std::string& relative, const std::string& encoding = "auto");
+    static Json read_from_root(const std::filesystem::path& root, const std::string& relative,
+                               const std::string& encoding, std::size_t byte_limit);
     // IDEA opens a binary file in a read-only viewer instead of refusing it, and an
     // image file renders as a preview. The bytes travel base64-encoded (JSON is text),
     // capped at `limit` so a 4 GiB artifact cannot reach the renderer. `kind` sniffs
@@ -36,11 +45,18 @@ public:
     // IDEA's ToggleReadOnlyAttributeAction: flip FILE_ATTRIBUTE_READONLY and report
     // the new state so the editor can lock/unlock the buffer.
     Json set_read_only(const std::string& relative, bool read_only);
-    // ConvertToWindows/UnixLineSeparatorsAction: rewrite the file from `content` (the
-    // editor buffer, as saved with its own encoding/BOM) with every line ending
-    // normalized to "crlf" or "lf"; version-checked and read-only-guarded.
+    // ConvertToWindows/Unix/MacLineSeparatorsAction (the group `PlatformActions.xml:405-408`
+    // lists, `ConvertToMacLineSeparatorsAction.java:14` being the CR one): rewrite the file
+    // from `content` (the editor buffer, as saved with its own encoding/BOM) with every line
+    // ending normalized to "crlf", "lf" or "cr" — the three `LineSeparator.java:17-20`
+    // tiers; anything else is refused, and none of them falls back to a default byte
+    // sequence. Version-checked and read-only-guarded.
     Json convert_line_separators(const std::string& relative, const std::string& separator,
                                  const std::string& content, const std::string& expectedVersion);
+    // The bytes written reproduce the buffer's own line-ending tier, which is *counted*
+    // from `content` the way the loader counts it (`LoadTextUtil.java:801-813`), not
+    // matched against "\r\n" alone — a CR buffer has no CRLF in it and would otherwise be
+    // rewritten whole. `encoding` accepts the same list as read(), UTF-32 included.
     // `safe_write` is IDEA's "Use "safe write"" (GeneralSettings.isUseSafeWrite,
     // GeneralSettings.kt:92-97): the bytes are written to a sibling temporary file that
     // replaces the target only after the content is verified, so a failed save leaves the
@@ -51,6 +67,7 @@ public:
     Json write(const std::string& relative, const std::string& content,
                const std::string& expectedVersion, const std::string& encoding = "utf-8",
                bool bom = false, bool safe_write = true);
+    Json write_new(const std::string& relative, const std::string& content);
     // Tree mutations, all confined to the workspace root by the same relative-path
     // guards as read/write (no absolute paths, no '..', no reparse points).
     // IDEA's $Delete on a project-view selection confirms, then removes a populated
@@ -76,8 +93,17 @@ public:
     bool is_open() const;
 
 private:
+    struct SearchFileEntry {
+        std::string path;
+        bool directory = false;
+    };
+
     std::filesystem::path root_;
     std::vector<std::wstring> excluded_{L".git", L"node_modules", L"build", L"dist"};
+    std::shared_ptr<const std::vector<SearchFileEntry>> search_file_index_;
+    std::string search_file_index_root_;
+    std::string search_file_index_ignore_fingerprint_;
+    std::chrono::steady_clock::time_point search_file_index_cached_at_{};
     mutable std::mutex mutex_;
 };
 

@@ -30,7 +30,7 @@
 // 消费者：`src/lspNavigation.ts` 的文件内符号搜索（`fileSymbolEntries`）与工作区符号搜索
 // （`globalSymbolEntries`），以及「转到符号/类」的过滤与去重。
 
-import { symbolMatchesQuery } from './symbolSearch.ts'
+import { SPEED_SEARCH_STRUCTURE_SEPARATORS, symbolMatchesQuery } from './symbolSearch.ts'
 
 /** 符号条目（与 `src/lspNavigation.ts` 的 `SymbolEntry` 同形；`containerName` 是可选的）。 */
 export interface LspSymbolLike {
@@ -167,7 +167,7 @@ export function documentSymbolEntries(
 ): LspSymbolLike[] {
   const out: LspSymbolLike[] = []
   for (const symbol of symbols) {
-    if (!query || symbolMatchesQuery(symbol.name, query)) {
+    if (!query || symbolMatchesQuery(symbol.name, query, SPEED_SEARCH_STRUCTURE_SEPARATORS)) {
       out.push({
         name: symbol.name,
         kind: symbol.kind,

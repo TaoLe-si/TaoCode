@@ -55,7 +55,7 @@
 import { computed, ref } from 'vue'
 import type { ProblemRow } from './problems.ts'
 // 检查项身份（(source, code, tags) → 键与显示名），见 src/inspectionIdentity.ts。
-import { inspectionIdentityOf, type InspectionIdentity } from './inspectionIdentity.ts'
+import { inspectionIdentityOf, inspectionKeyCandidates, type InspectionIdentity } from './inspectionIdentity.ts'
 
 /** 一条检查器的本地设置。`severity: null` = 不覆盖（用服务端 severity）。 */
 export interface InspectionToolSetting {
@@ -324,11 +324,14 @@ export function resetInspectionProfile(): void {
  * `HighlightInfoType.java:49-55`），再「检查器::诊断码」，再「检查器」（旧存档唯一的形状），
  * 最后裸码。取**第一个有登记的**键 —— 于是「整个 eslint 停用」与「只停 eslint 的某条规则」
  * 能同时存在，窄的那条赢。
+ * 候选键用 `inspectionKeyCandidates` 的**展开版**：它把 `com.intellij.inspectionElementsMerger`
+ * EP 里登记的「旧检查项短名 → 新合并短名」也并进来（上游 `InspectionElementsMerger.getMergedToolNames`
+ * 那条 backward-compat），于是插件把老检查项并进新项后，老设置的启停仍然生效。
  */
 export function applyInspectionProfile(
   source: string, severity: number, code?: string | number | null, tags?: readonly number[] | null,
 ): number | null {
-  const keys = inspectionIdentityOf({ source, code, tags }).keys
+  const keys = inspectionKeyCandidates(inspectionIdentityOf({ source, code, tags }))
   for (const key of keys) {
     const setting = currentProfile().tools[key]
     if (!setting) continue

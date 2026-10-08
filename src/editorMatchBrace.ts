@@ -40,6 +40,12 @@
 import { Facet, type Extension } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import { hasAngleBraces, isAngleTypeArgumentList, matchingAnglePair } from './editorBrackets.ts'
+// 扩展点登记的自定义括号对（`com.intellij.braceMatcher` / `com.intellij.lang.braceMatcher`）：
+// 静态 `()[]{}` 之外的括号由 `extraBraceTarget` 消费（第三方按 id 挂进来就当场生效）。
+import { bracePairsFor, type BracePairLike } from './editorActionExtensionPoints.ts'
+
+/** 本仓静态认作括号的六个字符（不走 `extraBraceTarget` 那一档）。 */
+const STATIC_BRACE_CHARS = '()[]{}'
 
 /**
  * 编辑器当前语言的 id（`java` / `cpp` / `typescript` / `undefined`）。
@@ -60,8 +66,10 @@ const CLOSERS = ')]}'
 const PAIR: Record<string, string> = { '(': ')', '[': ']', '{': '}' }
 const MIRROR: Record<string, string> = { ')': '(', ']': '[', '}': '{' }
 
-/** 结构括号（跳过字符串 / 行注释 / 块注释）的下标表；被跳过的位置记 -1。 */
-export function braceTokens(text: string): number[] {
+/** 结构括号（跳过字符串 / 行注释 / 块注释）的下标表；被跳过的位置记 -1。
+ * `extraChars` 是额外认作括号的字符（`com.intellij.braceMatcher` 登记的括号对，见下面
+ * `extraBraceTarget`）；缺省空串 ⇒ 只认本仓静态的 `()[]{}`，行为与原来一致。 */
+export function braceTokens(text: string, extraChars = ''): number[] {
   const marks: number[] = new Array(text.length).fill(-1)
   let inString = ''
   let inLine = false
@@ -79,7 +87,7 @@ export function braceTokens(text: string): number[] {
     if (char === '"' || char === '\'' || char === '`') { inString = char; continue }
     if (char === '/' && next === '/') { inLine = true; ++i; continue }
     if (char === '/' && next === '*') { inBlock = true; ++i; continue }
-    if (OPENERS.includes(char) || CLOSERS.includes(char)) marks[i] = i
+    if (OPENERS.includes(char) || CLOSERS.includes(char) || extraChars.includes(char)) marks[i] = i
   }
   return marks
 }
@@ -161,7 +169,7 @@ export function innermostUnclosedOpener(marks: readonly number[], text: string, 
  * 右边 ⇒ 走第三条（`:93-110`），结果是把光标退回那个 `{` —— 上游同一条规则就是这么算的，
  * 不另加「左边也认」的便利档。
  */
-export function matchBraceTarget(text: string, caret: number, angle = false): number | null {
+export function matchBraceTarget(text: string, caret: number, angle = false, extraPairs: readonly BracePairLike[] = []): number | null {
   // `<>` 那一档先问（Java 的泛型）：光标挨着哪一侧就跳到另一侧的外沿。
   if (angle) {
     const pair = matchingAnglePair(text, caret)
@@ -176,7 +184,80 @@ export function matchBraceTarget(text: string, caret: number, angle = false): nu
   if (found) return found.kind === 'open' ? found.at + 1 : found.at
   // 第三条：光标不在括号上 ⇒ 最内层未闭合的左括号本身的位置。
   const opener = innermostUnclosedOpener(marks, text, caret)
-  return opener < 0 ? null : opener
+  if (opener >= 0) return opener
+  // 静态 `()[]{}` 都没接住：问扩展点登记的自定义括号对（`com.intellij.braceMatcher`）。
+  return extraBraceTarget(text, caret, extraPairs)
+}
+
+/**
+ * 静态 `()[]{}` 之外**登记**的括号对（`com.intellij.braceMatcher` / `com.intellij.lang.braceMatcher`
+ * 的 `getPairs()`）的配对导航。与 `matchBraceTarget` 的前三条同形（光标右边是括号 ⇒ 跳到另一侧；
+ * 都不在 ⇒ 最内层未闭合的开括号），只是括号集合换成登记表里的那些。
+ *
+ * 本仓静态的 `()[]{}` 不走这里（那三对仍由上面的快路径处理）⇒ 没有第三方登记时
+ * `extraPairs` 为空、本函数恒返回 null，既有行为零改动。
+ */
+export function extraBraceTarget(text: string, caret: number, extraPairs: readonly BracePairLike[]): number | null {
+  const pairs = extraPairs.filter(pair =>
+    pair?.leftBrace && pair.rightBrace && pair.leftBrace !== pair.rightBrace
+    && !STATIC_BRACE_CHARS.includes(pair.leftBrace) && !STATIC_BRACE_CHARS.includes(pair.rightBrace))
+  if (!pairs.length) return null
+  const pairOf = new Map<string, string>()
+  const mirror = new Map<string, string>()
+  const extraChars: string[] = []
+  for (const pair of pairs) {
+    pairOf.set(pair.leftBrace, pair.rightBrace)
+    mirror.set(pair.rightBrace, pair.leftBrace)
+    extraChars.push(pair.leftBrace, pair.rightBrace)
+  }
+  const marks = braceTokens(text, extraChars.join(''))
+  const isOpen = (ch: string | undefined): boolean => ch !== undefined && pairOf.has(ch)
+  const isClose = (ch: string | undefined): boolean => ch !== undefined && mirror.has(ch)
+  const forward = (at: number): number => {
+    const open = text[at]!
+    if (marks[at] < 0) return -1
+    let depth = 0
+    for (let i = at; i < text.length; ++i) {
+      if (marks[i] < 0) continue
+      const scan = text[i]!
+      if (scan === open) ++depth
+      else if (scan === pairOf.get(open)) { if (--depth === 0) return i }
+    }
+    return -1
+  }
+  const backward = (at: number): number => {
+    const close = text[at]!
+    if (marks[at] < 0) return -1
+    const open = mirror.get(close)!
+    let depth = 0
+    for (let i = at; i >= 0; --i) {
+      if (marks[i] < 0) continue
+      const scan = text[i]!
+      if (scan === close) ++depth
+      else if (scan === open) { if (--depth === 0) return i }
+    }
+    return -1
+  }
+  if (caret < text.length && isOpen(text[caret])) {
+    const close = forward(caret)
+    return close < 0 ? null : close + 1
+  }
+  if (caret < text.length && isClose(text[caret])) {
+    const open = backward(caret)
+    return open < 0 ? null : open
+  }
+  // 第三条：最内层未闭合的开括号（只在这张登记表上。
+  const stack: number[] = []
+  for (let i = 0; i < caret && i < text.length; ++i) {
+    if (marks[i] < 0) continue
+    const char = text[i]!
+    if (isOpen(char)) stack.push(i)
+    else if (isClose(char)) {
+      const last = stack[stack.length - 1]
+      if (last !== undefined && pairOf.get(text[last]!) === char) stack.pop()
+    }
+  }
+  return stack.length ? stack[stack.length - 1]! : null
 }
 
 /**
@@ -187,7 +268,11 @@ export function matchBraceTarget(text: string, caret: number, angle = false): nu
 export function matchBraceCommand(view: EditorView): boolean {
   const { state } = view
   const head = state.selection.main.head
-  const target = matchBraceTarget(state.doc.toString(), head, hasAngleBraces(state.facet(editorLanguageId)))
+  const language = state.facet(editorLanguageId)
+  // 扩展点登记的自定义括号对（`com.intellij.braceMatcher` / `com.intellij.lang.braceMatcher`）：
+  // 没有第三方登记时 `bracePairsFor` 只剩 bundled 的 `()[]{}`（静态快路径已处理）⇒ 行为不变。
+  const extraPairs = bracePairsFor({ language })
+  const target = matchBraceTarget(state.doc.toString(), head, hasAngleBraces(language), extraPairs)
   if (target === null || target === head) return false
   view.dispatch({ selection: { anchor: target }, scrollIntoView: true, userEvent: 'editor.match-brace' })
   return true

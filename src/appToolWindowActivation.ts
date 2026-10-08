@@ -28,12 +28,17 @@ export type ToolWindowActivationDeps = {
   bottomTab: Ref<BottomTabId | ToolWindowId>
   explorer: Ref<boolean>
   leftView: Ref<ToolWindowId>
+  /** 右 dock 装哪个窗口 / 可见性（左右各自一份状态，见 src/toolWindowDockSide.ts）。 */
+  rightView: Ref<ToolWindowId>
+  rightVisible: Ref<boolean>
   /** 该窗口的内容此刻能不能产出（沿用宿主那个 `toolDisabled` 的名字，锚点跟着搬）。 */
   toolDisabled: (id: ToolWindowId) => boolean
   /** 激活即把侧条按钮放回来（沿用宿主那个 `restoreStripeButton` 的名字，锚点跟着搬）。 */
   restoreStripeButton: (id: ToolWindowId) => void
-  /** 按当前锚点决定落哪一格（宿主传 `id => activationTarget(id).dock`）。 */
-  dockOf: (id: ToolWindowId) => 'bottom' | 'side'
+  /** 该窗口此刻停在哪一侧（宿主传 `id => toolAnchors[id] ?? 'left'`）。 */
+  anchorOf: (id: ToolWindowId) => 'left' | 'right' | 'bottom'
+  /** 按锚点把窗口送进对应 dock（宿主传 `createToolWindowDockSide` 的 `routeToDock`）。 */
+  routeToDock: (id: ToolWindowId) => 'left' | 'right' | 'bottom'
   /** 大纲档自己那条切换（`toggleOutline`，声明在宿主更晚的位置，用回调注入）。 */
   toggleOutline: () => void
   /** 记一次激活（沿用宿主那个 `recordActiveToolWindow` 的名字，锚点跟着搬）。 */
@@ -44,12 +49,13 @@ export function createToolWindowActivation(deps: ToolWindowActivationDeps) {
   function activateToolWindow(id: ToolWindowId) {
     if (deps.toolDisabled(id)) return
     deps.restoreStripeButton(id) // 激活即把侧条按钮放回来（上游 showToolWindowImpl:942）
-    // 锚点先判（`activationTarget` 住在 toolWindowStripes.ts，只看锚点不看窗口种类）。
+    // 锚点先判（`anchorOf` 只看锚点不看窗口种类；左右两条 dock 各自一份状态，见 src/toolWindowDockSide.ts）。
     // 原先 `files` / `outline` 两条专属分支排在锚点判断**之前**就 return，于是它们无视
     // `toolAnchors`：被 Move to Bottom 搬走后左栏没有入口，点击路径又只走 leftView/explorer，
     // 两侧都够不着 —— 窗口再也切不回来。IDEA 的 activate 一律按当前 ToolWindowAnchor 决定
     // dock（ToolWindowManagerImpl.activateToolWindow），与窗口种类无关。
-    if (deps.dockOf(id) === 'bottom') {
+    const anchor = deps.anchorOf(id)
+    if (anchor === 'bottom') {
       // 停靠在底部的工具窗口：显示在底部 dock（不占用左侧栏），再次点击即收起。
       const wasShown = deps.bottom.value && deps.bottomTab.value === id
       deps.bottom.value = !wasShown
@@ -59,11 +65,18 @@ export function createToolWindowActivation(deps: ToolWindowActivationDeps) {
     }
     if (id === 'files') { deps.explorer.value = !deps.explorer.value; deps.leftView.value = 'files'; if (deps.explorer.value) deps.recordActiveToolWindow(id); return }
     if (id === 'outline') { deps.toggleOutline(); if (deps.explorer.value && deps.leftView.value === 'outline') deps.recordActiveToolWindow(id); return }
-    deps.explorer.value = true
-    deps.leftView.value = deps.leftView.value === id ? 'files' : id
-    // Only a click that *brings the window forward* counts as an activation; the second click hides
-    // it, and hiding must leave the persistent stack alone (`setHiddenState`, :711-718).
-    if (deps.leftView.value === id) deps.recordActiveToolWindow(id)
+    if (anchor === 'right') {
+      // 右锚：再点同一个窗口 = 收起**右** dock（不碰左 dock —— 这正是用户报的那个缺陷）。
+      const wasShown = deps.rightVisible.value && deps.rightView.value === id
+      if (wasShown) deps.rightVisible.value = false
+      else { deps.routeToDock(id); deps.recordActiveToolWindow(id) }
+      return
+    }
+    // 左锚：同一个 id 再点就回 files（搬走之前的判据），否则带到前面。
+    const wasShown = deps.explorer.value && deps.leftView.value === id
+    deps.routeToDock(id)
+    if (wasShown) deps.leftView.value = 'files'
+    else deps.recordActiveToolWindow(id)
   }
   return { activateToolWindow }
 }

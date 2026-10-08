@@ -111,3 +111,17 @@ applyColorScheme(loadColorSchemeState())
 `ColorSchemeExporter.java:9`（导出为 .icls 文件）与 `ColorSchemeImporter` 需要**文件保存/打开**宿主通道；
 页面目前只有剪贴板降级（「复制方案 XML」）。若 bridge 已有/将加「保存文本到用户选的路径」，页面侧一行接上即可
 （`schemeToXml` 的形状已在 `tests/color-scheme-rules.test.mjs` 钉死）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1（把 `ColorSchemeSettingsPage.vue` 挂进设置树）跳过** —— 目标 `src/settingsTreeMeta.ts`（`PageKey` 联合 + `SETTINGS_NODES` + `PAGE_KEYS` + lucide import）**不在本 lane 可改面**（lane 所有权只含 `src/App.vue` / `src/components/**`（除四文件）/ `src/menus/**`）。`SettingsDialog.vue` 的 section 挂载点虽属本 lane，但 `SettingsDialog.vue` 的 `section` 键必须先在 `settingsTreeMeta.ts` 注册（`tests/settings-tree-parity.test.mjs` 会核），单挂 section = 跳转打开空页。**需 settings-tree owner** 处理（本 lane 复核：`src/components/ColorSchemeSettingsPage.vue` 仍是 orphan，`grep ColorSchemeSettingsPage src/` 只命中自身）。
+- **W-2（行级字体样式变量化）** —— 目标 `src/editorTheme.ts` / `editorSemanticColors.ts` / `editorBrackets.ts` / `tokens.css`（均非本 lane）。跳过。
+- **W-3（启动期应用存档方案）未落** —— 目标 `src/App.vue`（本 lane 可改），但依赖 W-2 的变量通道才有视觉差异；且 `applyColorScheme` 的启动期调用会影响全局主题（需谨慎）。登记为「等 W-2 通道」。
+- **W-4（导入/导出按钮）** —— 需 bridge 文件通道，非本 lane。
+
+结论：零接线（W-1 被 settingsTreeMeta 挡住转 owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（W-1 被 settingsTreeMeta 挡住转 owner）。」。
+本 lane 本轮接线：**W-3 已接** —— `src/App.vue` 的 `onMounted` 里加了 `applyColorScheme(loadColorSchemeState())`（import 在 `:96` 附近），启动期把存档配色灌进文档一次（注入样式自带 `:root[data-theme]` 限定，深浅切换无需再调）。W-1（挂设置树）需 `src/settingsTreeMeta.ts` owner；W-2 需 editorTheme/editorBrackets/tokens.css owner；W-4 需 bridge 文件通道。

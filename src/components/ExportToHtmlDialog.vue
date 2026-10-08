@@ -94,7 +94,7 @@ function submit() {
         <label class="field-row"><span>输出目录</span>
           <input :value="outputDirectory" :disabled="busy" placeholder="例如 D:\\export（绝对路径）" aria-label="输出目录" @input="outputDirectory = ($event.target as HTMLInputElement).value" />
         </label>
-        <div class="export-row"><button class="subtle-button" :disabled="busy" @click="emit('browse', outputDirectory)"><FolderOpen :size="iconSize.menu" />浏览…</button></div>
+        <div class="export-row"><button class="subtle-button" :disabled="busy" @click="emit('browse', outputDirectory)"><FolderOpen aria-hidden="true" :size="iconSize.menu" />浏览…</button></div>
 
         <h4 class="settings-group-title">选项</h4>
         <label class="checkbox-row"><input v-model="printLineNumbers" type="checkbox" /><span>显示行号</span></label>
@@ -105,8 +105,8 @@ function submit() {
         </p>
       </div>
       <div class="export-actions">
-        <button class="subtle-button" @click="emit('close')">取消</button>
         <button class="primary-button" :disabled="!canSave || busy" @click="submit">保存</button>
+        <button class="subtle-button" @click="emit('close')">取消</button>
       </div>
     </section>
   </div>
@@ -117,7 +117,7 @@ function submit() {
 .export-heading { flex: 1; color: var(--bright); font-weight: 500; }
 .export-body { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); }
 .export-scopes { display: flex; flex-direction: column; }
-.export-indent { padding-left: var(--space-5, 20px); }
+.export-indent { padding-left: var(--space-5, var(--space-5)); }
 .export-row { display: flex; }
 .export-actions { display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3); border-top: 1px solid var(--line); }
 .export-actions .primary-button { min-width: 88px; }

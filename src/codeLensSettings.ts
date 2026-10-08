@@ -36,14 +36,38 @@
 //      四把键在 `src/settingsModel.ts:445-451`、出厂值与界在 `native/settings_schema.cpp:414-417` 与
 //      `native/settings_editor_keys.hpp:56-62`（1..10 = 上游 `CodeVisionGlobalSettingsProvider.kt:43` 的
 //      `spinner(1..10, 1)`）；渲染侧的四把键也都在读了（总闸/组闸 `codeLensExtension.ts` 的 `visible`，
-//      每锚点条数 `codeVisionVisibleEntryLimit()`）。**只剩两个调用方**：启动读回
-//      （`src/workspaceLifecycle.ts:147` 之后）与设置页 `syncRuntime()`
-//      （`src/components/CodeVisionSettingsPage.vue:61-64`），都在别人名下 ⇒ 见
-//      `docs/wiring-requests-2026-10-06-lensgate.md` 的 L-1/L-2/L-3。
-//   2. 上游还有第三项「Lens Settings…」跳到设置页（`CodeVisionContextPopup.kt:24` 的
-//      `CodeVisionHost.settingsLensProviderId`）。本仓没有 Code Vision 设置页（要新建页面 ＋
-//      `src/settingsTreeMeta.ts` 的树节点，都是保留文件）⇒ **这一项不渲染**，
-//      而不是放一个点了没反应的条目。
+//      每锚点条数 `codeVisionVisibleEntryLimit()`）。**只接上了"读回"这一个方向**
+//      （这一串注释原来写"只剩一个调用方"，被后面的批次逐条推翻并按磁盘现状重写成"两个都接上"；
+//      订正留痕（2026-10-06 hlcache300）：**"两个都已经接上"这句过头**，反向那一条至今零生产调用方，
+//      按磁盘现状收回）：
+//      · 启动读回（L-1）：`restoreCodeVisionSettings(...)` 的生产调用点只有 `src/workspaceLifecycle.ts:227`
+//        一处（原写 `:224` —— 实开那一行是"旧存档缺键由原生侧补默认"那句注释，调用在 `:227`）；
+//      · 设置页 `syncRuntime()`：`src/components/CodeVisionSettingsPage.vue:69-78` 四把键全刷
+//        （L-3 由 2026-10-06 codelens2 落地，同批把 `GROUPS` 从两组换成 `CODE_VISION_GROUP_IDS` 四组）——
+//        注意它**不是** `restoreCodeVisionSettings` 的调用方，是直接写那张运行时表；
+//      · **反向 API 零生产调用方**：存盘出口 `codeVisionSettingsPatch()`（本文件 `:286`）只有
+//        `tests/code-lens-grouping.test.mjs`、`tests/code-vision-anchor-limit.test.mjs` 在用；
+//        `src/components/CodeVisionSettingsPage.vue:21` 与 `src/settingsModel.ts:484` 两处注释都写成它"存盘"，
+//        磁盘上并没有那根线 ⇒ 就是下面 L-4（`docs/wiring-requests-2026-10-06-lensgate.md:127-134` 登记、未接）。
+//      **仍未接**的还有 L-2（保存回包后重灌，`src/settingsPersistence.ts` 在别人名下）⇒
+//      见同一份 `docs/wiring-requests-2026-10-06-lensgate.md`。
+//      订正留痕（2026-10-06 codelens3）：读回那一步原来是**只加不删**（往旧表里追加），切工程时
+//      上一个工程关掉的组再也打不开，而设置页按盘上那份显示成"勾着" ⇒ 现在按上游
+//      `CodeVisionSettings.kt:164-166`（`loadState` 换掉整个 `State`）整份替换，见
+//      `restoreCodeVisionSettings` 的注释与 `tests/code-lens-grouping.test.mjs` 的「从盘上读回」两条。
+//   2. 上游还有第三项「`&Configure…`」跳到设置页（`CodeVisionContextPopup.kt:24` 的
+//      `CodeVisionHost.settingsLensProviderId`，那一行的文案键是
+//      `LensListPopup.tooltip.settings`，原文 `CodeVisionBundle.properties:10` = `&Configure…`）。
+//      **订正留痕（2026-10-06 codelens3）**：这里（以及 `src/codeLensExtension.ts` 的同一段）原来写的
+//      「Lens Settings…」不是上游文案 —— 上游同一个文件另有 `LensListPopup.tooltip.settings.settings`
+//      = `"&Settings`（`CodeVisionBundle.properties:11`，被 `CodeVisionListPopup.kt:23` 当 tooltip 用，
+//      不是这一行菜单），照它起名等于编造文案，故按逐字读到的原文改回 `&Configure…`。
+//      **订正留痕（2026-10-06 codelens2）**：原写「本仓没有
+//      Code Vision 设置页」已经不成立 —— 页在 `src/components/CodeVisionSettingsPage.vue`，
+//      挂在 `src/components/SettingsDialog.vue:808` 的 `code.vision` 那一节。这一项今天仍**不渲染**，
+//      理由换了：渲染通道（`src/codeLensExtension.ts`）手里没有 `openSettings`（那是宿主的依赖，
+//      宿主是保留文件 `src/components/CodeEditor.vue`）⇒ 放上去就是一枚点了没反应的条目。
+//      接法见 `docs/wiring-requests-2026-10-06-codelens2.md` 的 C-2。
 import { reactive } from 'vue'
 import { CODE_LENS_VISIBLE_MAX } from './codeLens.ts'
 
@@ -56,11 +80,38 @@ export const CODE_VISION_HIDE_ALL_ID = '!HideAll'
 export const LSP_CODE_VISION_GROUP_ID = 'LspCodeVisionProvider'
 /** 本地 `problems` provider 的组（`src/codeVisionProviders.ts` 的那个 id）。 */
 export const PROBLEMS_CODE_VISION_GROUP_ID = 'problems'
+/**
+ * 本地 `references`（用法计数）provider 的组 —— id 不是本仓起的：
+ * `platform/lang-impl/src/com/intellij/codeInsight/codeVision/settings/PlatformCodeVisionIds.kt:5`
+ * `USAGES("references")`，组闸读的就是这一格（`ReferencesCodeVisionProvider.kt:20-21` 的
+ * `override val groupId get() = PlatformCodeVisionIds.USAGES.key`）；
+ * 本仓的同名 provider 在 `src/codeVisionProviders.ts`（`usagesVisionProvider()` 的 `id: 'references'`）。
+ */
+export const USAGES_CODE_VISION_GROUP_ID = 'references'
+/** 本地 `inheritors`（继承者计数）provider 的组：上游同文件 `:6` `INHERITORS("inheritors")`（`InheritorsCodeVisionProvider.kt:11-12` 取它当 groupId）。 */
+export const INHERITORS_CODE_VISION_GROUP_ID = 'inheritors'
 
 /** `LspBundle.properties:33` 的 `codeLens.LspCodeVisionProvider.name`（中文包同键：`LSP CodeLens`）。 */
 export const LSP_CODE_VISION_GROUP_NAME = 'LSP CodeLens'
 /** 本地 problems provider 的组名（本仓文案；上游这一族的内置 provider 名字来自各自的 EP `name`，本仓只有这一个内置）。 */
 export const PROBLEMS_CODE_VISION_GROUP_NAME = '问题计数'
+/** 用法计数那一组的组名（本仓文案；上游原文 `CodeVisionBundle.properties` 的 `codeLens.references.name=Usages`，本地化包不在本地树 ⇒ 不抄一份没核实过的中文）。 */
+export const USAGES_CODE_VISION_GROUP_NAME = '用法计数'
+/** 继承者计数那一组的组名（本仓文案；上游原文同文件 `codeLens.inheritors.name=Inheritors`）。 */
+export const INHERITORS_CODE_VISION_GROUP_NAME = '继承者计数'
+
+/**
+ * 本仓**会真的渲染出条目**的全部组 = 设置页能勾掉的组 = 盘上那两个集合允许出现的组 id。
+ * 一处列，三处用（`src/previewSettings.ts` 的校验、`src/components/CodeVisionSettingsPage.vue` 的
+ * GROUPS、`native/settings_editor_keys.hpp` 的白名单逐条对齐）。
+ * 为什么必须是同一份：渲染侧按 `codeVisionGroupId()` 收口，**任何**没列进来的组 id 都能由
+ * 右键「隐藏这一组」写进运行时表（`handleCodeVisionExtraAction` 不查白名单），但写不进盘
+ * （校验拒 `Unknown Code Vision group`）⇒ 上一次 L-4（`codeVisionSettingsPatch()` → 存盘）一接，
+ * 右键一条用法计数就会让**之后每一次**设置保存返回 INVALID_SETTINGS。少一个组 = 埋一颗雷。
+ */
+export const CODE_VISION_GROUP_IDS: readonly string[] = [
+  LSP_CODE_VISION_GROUP_ID, PROBLEMS_CODE_VISION_GROUP_ID, USAGES_CODE_VISION_GROUP_ID, INHERITORS_CODE_VISION_GROUP_ID,
+]
 
 /** `CodeVisionContextPopup.kt:42` 的 `setMaxRowCount(15)`。 */
 export const CODE_VISION_POPUP_MAX_ROWS = 15
@@ -184,6 +235,8 @@ export function codeVisionContextActions(groupName: string): CodeVisionContextAc
 export function codeVisionGroupName(groupId: string): string {
   if (groupId === LSP_CODE_VISION_GROUP_ID) return LSP_CODE_VISION_GROUP_NAME
   if (groupId === PROBLEMS_CODE_VISION_GROUP_ID) return PROBLEMS_CODE_VISION_GROUP_NAME
+  if (groupId === USAGES_CODE_VISION_GROUP_ID) return USAGES_CODE_VISION_GROUP_NAME
+  if (groupId === INHERITORS_CODE_VISION_GROUP_ID) return INHERITORS_CODE_VISION_GROUP_NAME
   return groupId
 }
 
@@ -204,16 +257,35 @@ export function handleCodeVisionExtraAction(
   return false
 }
 
-/** 把一份磁盘上的设置灌回运行时真值（接线请求 S1 落地时由宿主编排调用）。
+/** 盘上那一份集合灌进运行时表的那一步：**整份替换这一格**（见 `restoreCodeVisionSettings` 的注释）。 */
+function replaceGroupSet(target: Record<string, boolean>, ids: readonly string[]): void {
+  for (const id of Object.keys(target)) delete target[id]
+  // 非字符串/空串不进表：原生侧的校验（`native/settings_editor_keys.hpp:89-97`）本来就挡掉了，
+  // 这一句只是保证「表里出现的 id 一定是个能查的键」，不让 `disabledGroups['']` 这种东西进去。
+  for (const id of ids) if (typeof id === 'string' && id !== '') target[id] = true
+}
+
+/** 把一份磁盘上的设置灌回运行时真值（接线请求 S1 / `docs/…-lensgate.md` 的 L-1 落地，
+ *  调用点 `src/workspaceLifecycle.ts:227`；2026-10-06 hlcache300 订正留痕：原写 `:224`，那一行是注释）。
  *  `codeVisionVisibleEntries`（每锚点条数上限）走的是同一条入口：坏值（非整数、0、负数）一律不写，
- *  表里留出厂 5 —— 与 `codeVisionVisibleEntryLimit()` 的兜底同一口径，旧存档缺这一键时也走这里。 */
+ *  表里留出厂 5 —— 与 `codeVisionVisibleEntryLimit()` 的兜底同一口径，旧存档缺这一键时也走这里。
+ *
+ *  两个组集合是**整份替换**（键缺了才保持现值），不是往旧表里追加。上游就是替换：
+ *  `CodeVisionSettings.kt:164-166` 的 `override fun loadState(state: State) = … this.state = state`
+ *  把整个 `State` 换掉，而那两个集合是 `State` 上的 `var`（`:45` 的 `disabledCodeVisionProviderIds`、
+ *  `:50` 的 `enabledCodeVisionProviderIds`）⇒ **盘上没有的那一条 = 回到出厂（开）**。
+ *  本仓这张表是跨项目存活的模块级 reactive（切工程不会新建一份），旧实现只加不删的后果是：
+ *  工程 A 里关掉 `references`，打开盘上写着空数组的工程 B 时那一组仍然一条都不画，
+ *  而设置页按盘上那一份把它显示成"勾着" —— 界面与画出来的东西相反。
+ *  判据：`tests/code-lens-grouping.test.mjs` 的「从盘上读回」那两条（关掉 ⇒ 那一组装饰 0 条、
+ *  换回空数组 ⇒ 立刻回来，且一次都不重问服务器）。 */
 export function restoreCodeVisionSettings(patch: {
   codeVisionEnabled?: boolean; disabledGroups?: readonly string[]; enabledGroups?: readonly string[]; codeVisionVisibleEntries?: number
 } | null | undefined): void {
   if (!patch) return
   if (typeof patch.codeVisionEnabled === 'boolean') codeVisionSettings.enabled = patch.codeVisionEnabled
-  for (const id of patch.disabledGroups ?? []) codeVisionSettings.disabledGroups[id] = true
-  for (const id of patch.enabledGroups ?? []) codeVisionSettings.enabledGroups[id] = true
+  if (patch.disabledGroups !== undefined) replaceGroupSet(codeVisionSettings.disabledGroups, patch.disabledGroups)
+  if (patch.enabledGroups !== undefined) replaceGroupSet(codeVisionSettings.enabledGroups, patch.enabledGroups)
   const entries = patch.codeVisionVisibleEntries
   if (entries !== undefined && Number.isInteger(entries) && entries > 0) codeVisionSettings.visibleEntries = entries
 }

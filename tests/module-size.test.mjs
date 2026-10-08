@@ -46,17 +46,21 @@ const NATIVE_REGISTERED = new Map([
       + '拆进 native/lsp_config.cpp，降到 1923）；把 `lsp.request` 的两段纯整形（入参整体转发、回参包壳）搬进 lsp_capability_queries.cpp、请求边界追踪搬进 native/request_trace.cpp。2026-09-28 桃定死：**上限固定 2000 行**，新能力一律抽成 native/xxx.cpp，不再逐行抠上限。',
   }],
   ['native/lsp_session.cpp', {
-    limit: 475,
+    limit: 453,
     note: 'LSP 会话：门控 + 文档生命周期 + request()/semantic() 两个分派入口。工具与整形已拆到 lsp_support.hpp/.cpp，`Session::ensure()`（起服务器 + initialize + 三个回调 + 补发 didOpen，228 行）拆到 native/lsp_host_bootstrap.cpp。'
       + '能力判定拆到 lsp_capability_queries.cpp，代码操作一族拆到 lsp_code_actions.cpp。'
       + '2026-10-05 把 `semantic()` 门控之后的**每个 kind 怎么发、怎么整形**那整条 if 链'
       + '（`position` / `relative` 两个局部量 + 约 30 个 kind + 末尾的 LSP_BAD_KIND 兜底，594 行）'
       + '整段搬进 native/lsp_session_kinds.cpp（新的 `Session::dispatch_semantic_kind`，void 返回，'
       + 'host/uri/language_name 由门控算好后传入）—— 本文件原来把「门控」与「整形」两件事挤在一起，'
-      + '这正是本条登记写的职责。链上每个分支的 `return;` 与全部注释逐字未改。上限 1075 降到 475。',
+      + '这正是本条登记写的职责。链上每个分支的 `return;` 与全部注释逐字未改。上限 1075 降到 475。'
+      + '2026-10-06 `textDocument/completion` 回参的整形（`CompletionList` / 数组两形态 + '
+      + '`itemDefaults` 回填 + 逐条折 `{label,kind,detail,apply,documentation,raw}`，原在 request() 回调里）'
+      + '整段搬进 lsp_support.cpp 的 `shape_completion_items`（那文件的职责就是「回参长什么样」）'
+      + '—— 上限 475 再降到 452。',
   }],
   ['native/dap.cpp', {
-    limit: 1480,
+    limit: 1412,
     note: 'DAP 客户端：会话/管道/reader + 请求的构造与发信 + 回信怎么包（ok 壳 / allThreadsContinuation）。'
       + '2026-10-04 补协议侧三条缺口（loadedSources/modules 按需重取、stepBack/reverseContinue、'
       + 'readMemory/disassemble）时**按请求族拆出 native/dap_inspect.cpp**（请求 + 整形），'
@@ -65,6 +69,11 @@ const NATIVE_REGISTERED = new Map([
       + 'breakpoint_locations/completions/goto_targets + verified_lines/normalize_breakpoints/'
       + 'requested_lines/breakpoint_messages，317 行）整个搬进 native/dap_shaping.cpp —— '
       + '那一族只管"响应长什么样"，不碰 socket 也不碰状态，搬走后上限 1790 → 1480。'
+      + '2026-10-06 把**取值族**（stackTrace/scopes/variables/setVariable/setExpression/evaluate/'
+      + 'exceptionInfo/completions/breakpointLocations）整个搬进 native/dap_values.cpp —— '
+      + '那一族只做"取一个值 + 整形"，与机制不共职责域；同文件里还补了分页（stackTrace 的 '
+      + 'startFrame/levels、variables 的 start/count）与第二批请求族（dataBreakpoints/'
+      + 'setDataBreakpoints/setFunctionBreakpoints/source），上限 1480 → 1411。'
       + '新请求族、新整形族一律进新文件。',
   }],
   ['native/workspace.cpp', {
@@ -78,12 +87,15 @@ const NATIVE_REGISTERED = new Map([
       + '（实现仍只有本文件这一份：Win32 错误码映射复制一份就会漂移），上限 1480 降到 1385。',
   }],
   ['native/history.cpp', {
-    limit: 910,
-    note: '本地历史：快照落盘 / 版本索引 / 指纹 / 并排差异。'
+    limit: 730,
+    note: '本地历史：快照落盘 / 版本索引 / 指纹。'
       + '2026-10-05 把「行级 unified diff 脚本」（切行 → LCS 出脚本 → 渲染 @@ 块，117 行）'
       + '连同 diff_cell_budget / diff_context 两个常数搬进 native/history_diff.cpp —— '
-      + '那一段不碰目录、句柄与索引，是一个独立的算法域，与留在本文件的并排词级标注'
-      + '（tokenize / word_marks / side_rows）只共用 Row 与 split_lines，上限 1050 降到 910。',
+      + '那一段不碰目录、句柄与索引，是一个独立的算法域，上限 1050 降到 910。'
+      + '2026-10-06 接「按天过期」（first_obsolete_index + days_to_keep）后回到 934 行，'
+      + '再把「并排差异」（tokenize / word_marks / side_rows / diff_sides_from_unified，约 210 行）'
+      + '整段搬进 native/history_sides.cpp —— 同样只吃 Row 与 split_lines，与 unified 渲染同域，'
+      + '上限 910 降到 730。',
   }],
   ['native/git.cpp', {
     limit: 938,
@@ -105,13 +117,17 @@ const NATIVE_REGISTERED = new Map([
  */
 const REGISTERED = new Map([
   ['src/App.vue', {
-    limit: 2737,
+    limit: 2680,
     note: '组装层：模板 + 各 ctx 注入 + 事件转发。新增逻辑一律拆 src/xxx.ts，App 里只留一行调用。'
       + '上限跟着拆降（2026-09-27 从 6262 连续拆到 2895）：diff 纯函数、插件/工作树/子模块/文件历史、'
       + '层级视图、设置持久化、包围/模板选择器、书签、磁盘同步、文件树与标签上下文操作、外观动作、'
       + 'LSP 生命周期与导航（含符号搜索）、代码洞察语义动作（onSemantic 分发链）、主菜单栏模型与交互、'
       + '运行/构建/调试/外部工具、全局快捷键分派（keymap）、运行/调试配置、工作区/项目生命周期、'
-      + '版本控制动作、编辑器文件级操作（冲突/文档/缩进/行尾/编码）、标签拖放、标签条单行布局、分栏与面板尺寸、生成/重构/文件移动、文件树操作、编辑区分栏与标签页开关、工具窗口命名布局、通知与状态栏键盘导航、编辑器侧视图与项目视图定位。',
+      + '版本控制动作、编辑器文件级操作（冲突/文档/缩进/行尾/编码）、标签拖放、标签条单行布局、分栏与面板尺寸、生成/重构/文件移动、文件树操作、编辑区分栏与标签页开关、工具窗口命名布局、通知与状态栏键盘导航、编辑器侧视图与项目视图定位。'
+      + '2026-10-06 UI lane 把「文件历史 / Git 工作树 / Git 子模块」三个对话框整块搬进 '
+      + 'src/components/ProjectGitDialogs.vue（62 行 markup 换宿主一行调用，依赖经 projectGitDialogContext '
+      + '注入），上限 2737 降到 2700；接着把「删除确认」对话框（34 行 markup + 一组 getter ctx）搬进 '
+      + 'src/components/DeleteConfirmDialog.vue，上限 2700 降到 2680（另留 8 行余量：App.vue 是多个 lane 共用的组装层，别的 lane 也会往里加）。',
   }],
   ['src/components/SettingsDialog.vue', {
     limit: 1182,
@@ -133,14 +149,18 @@ const REGISTERED = new Map([
       + '上限 1208 降到 905。',
   }],
   ['src/components/CodeEditor.vue', {
-    limit: 1147,
+    limit: 1032,
     note: 'CodeMirror 宿主。各 LSP 能力的解码/判定已拆 src/semanticTokens.ts、documentLinks.ts、inlineCompletionExtension.ts 等 —— '
       + '上限是拆一次降一次（2026-09-27 从 1250 降到 1220；再把语义着色的颜色表拆到 src/editorSemanticColors.ts、'
       + '追溯注解列的样式并进 src/editorBlameAnnotations.ts，降到 1195）。'
       + '接编辑器内查找栏时又拆两块：空白可视化 → src/editorWhitespace.ts、主题与词法着色 → src/editorTheme.ts，降到 1172；'
       + '接插入/覆盖模式时把轻量信息提示 → src/editorHint.ts（降到 1155）；接合并冲突导航条时把诊断标记与那几条状态扩展拆到 '
       + 'src/editorDiagnosticMarkers.ts / src/editorTheme.ts（降到 1148），后来真机抓到"计数停在旧值"，'
-      + '冲突清单改取实时文档、清单与两个动作整个搬进 src/editorMergeHost.ts，降到 1147。',
+      + '冲突清单改取实时文档、清单与两个动作整个搬进 src/editorMergeHost.ts，降到 1147。'
+      + '2026-10-06 再把**两张表**搬进 src/editorKeymap.ts —— 菜单动作面（`createEditorActions`）、'
+      + '常驻 keymap（`createEditorKeymap`，含折叠那一族与"为什么不绑"的逐条判决）与 Tab/Shift+Tab 的'
+      + '缩进命令（`createIndentCommands`）；它们只描述"有哪些命令、键位是什么"，与 CodeMirror 的'
+      + '生命周期（onMounted/watch/扩展组装）不共一个职责域。降到 1031。',
   }],
 ])
 
@@ -216,6 +236,11 @@ test('新模块本身也要够聚焦（单个新模块不该长成第二个大�
     'src/distractionFreeMode.ts', 'src/distractionFreeSession.ts', 'src/navigateInFile.ts',
     'src/diffText.ts', 'src/projectExtras.ts', 'src/hierarchyView.ts',
     'src/workspaceInspection.ts',
+    // daemon 分析侧这一批拆出来的模块（2026-10-07）：三条上游 EP 的接口/贡献/消费面
+    // （`daemonAnalysisExtensionPoints.ts` 从 `daemonExtensionPoints.ts` 拆出，主文件因此回到 900 以内），
+    // 以及它们的三条 bundled 贡献各自的落点。都是纯函数/纯逻辑模块（零运行时依赖或只依赖纯数据层）。
+    'src/daemonAnalysisExtensionPoints.ts', 'src/implicitUsageElement.ts',
+    'src/junitImplicitUsage.ts', 'src/commentFileLinks.ts',
   ]
   for (const path of focused) {
     const lines = lineCount(join(root, path))

@@ -49,19 +49,59 @@ Json shape_event(const std::string& name, const Json& body) {
     Json event{{"event", name}};
     const Json& source = as_object(body);
     if (name == "stopped") {
-        // {event:"stopped", reason, threadId, text?}
+        // {event:"stopped", reason, threadId, text?, allThreadsStopped?, preserveFocusHint?,
+        //  hitBreakpointIds?}。后三个是规范里的可选字段，UI 用得上：
+        //   · allThreadsStopped 决定"全部线程都停了吗"（多线程视图据此标灰）；
+        //   · preserveFocusHint 是适配器请求"别抢焦点"（命中日志断点时）；
+        //   · hitBreakpointIds 直接给出命中的断点 id，不用再猜是哪一条。
         event["reason"] = text_of(source, "reason");
         event["threadId"] = int_of(source, "threadId", 0);
         const auto text = text_of(source, "text");
         if (!text.empty()) event["text"] = text;
+        if (source.contains("allThreadsStopped") && source.at("allThreadsStopped").is_boolean())
+            event["allThreadsStopped"] = source.at("allThreadsStopped");
+        if (source.contains("preserveFocusHint") && source.at("preserveFocusHint").is_boolean())
+            event["preserveFocusHint"] = source.at("preserveFocusHint");
+        if (source.contains("hitBreakpointIds") && source.at("hitBreakpointIds").is_array())
+            event["hitBreakpointIds"] = source.at("hitBreakpointIds");
+    } else if (name == "continued") {
+        // {event:"continued", threadId?, allThreadsContinued?, preserveFocusHint?}。
+        // 规范里 `continued` 的 threadId 是**可选**的（省略 = 全部线程恢复），
+        // 前端 `DapEvent` 读的就是顶层 `threadId`，所以这里把它抬到顶层（原来只丢进 body）。
+        const auto thread = int_of(source, "threadId", 0);
+        if (thread > 0) event["threadId"] = thread;
+        if (source.contains("allThreadsContinued") && source.at("allThreadsContinued").is_boolean())
+            event["allThreadsContinued"] = source.at("allThreadsContinued");
+        if (source.contains("preserveFocusHint") && source.at("preserveFocusHint").is_boolean())
+            event["preserveFocusHint"] = source.at("preserveFocusHint");
+        event["body"] = source;
+    } else if (name == "thread") {
+        // {event:"thread", reason:"started"|"exited", threadId}。前端同时读顶层与 body，
+        // 这里两个都写（顶层是给 `applyDapThread` 的直读路径，body 保留适配器原样）。
+        event["reason"] = text_of(source, "reason");
+        const auto thread = int_of(source, "threadId", 0);
+        if (thread > 0) event["threadId"] = thread;
+        event["body"] = source;
     } else if (name == "output") {
         // {event:"output", category, text} — DAP names the field `output`.
+        // `source`/`line`/`column`（规范可选）让控制台能把一条输出变成可跳转的位置
+        // （编译错误的 `file:line` 链接，见 src/runIssues.ts 的同一种做法）。
         auto category = text_of(source, "category");
         if (category.empty()) category = "console";
         auto text = text_of(source, "output");
         if (text.empty()) text = text_of(source, "text");
         event["category"] = std::move(category);
         event["text"] = std::move(text);
+        if (source.contains("source") && source.at("source").is_object()) {
+            const auto path = text_of(source.at("source"), "path");
+            if (!path.empty()) event["rawPath"] = path;  // 统一在 handle() 里映射成工作区相对路径
+        }
+        const auto group = text_of(source, "group");
+        if (!group.empty()) event["group"] = group;
+        for (const char* key : {"line", "column"}) {
+            const auto number = int_of(source, key, 0);
+            if (number > 0) event[key] = number;
+        }
     } else if (name == "breakpoint") {
         // {event:"breakpoint", verified, line?, path?, id?}
         const Json& point =
@@ -161,49 +201,76 @@ Json shape_scopes(const Json& body) {
         for (const Json& scope : envelope.at("scopes")) {
             const Json& item = as_object(scope);
             const auto reference = int_of(item, "variablesReference", 0);
-            scopes.push_back({{"name", text_of(item, "name")},
-                              {"reference", reference},
-                              {"variablesReference", reference},
-                              {"expensive", bool_of(item, "expensive", false)}});
+            Json shaped{{"name", text_of(item, "name")},
+                        {"reference", reference},
+                        {"variablesReference", reference},
+                        {"expensive", bool_of(item, "expensive", false)}};
+            // `namedVariables`/`indexedVariables`（规范可选）：作用域里有多少具名/下标子项 ——
+            // UI 据此决定要不要分页取（大数组一次拉几千条会把桥堵住）。缺字段不写键。
+            for (const char* key : {"namedVariables", "indexedVariables"}) {
+                if (item.contains(key) && item.at(key).is_number_integer()) shaped[key] = item.at(key);
+            }
+            scopes.push_back(std::move(shaped));
         }
     return Json{{"scopes", std::move(scopes)}};
 }
 
-// `setVariable` / `setExpression` 的响应是同一条变量的新值（规范里没有 `variables` 数组），
-// 字段与 shape_variables 里的一条保持一致，前端才能用同一套渲染。
-Json shape_set_variable(const Json& body) {
-    const Json& item = as_object(body);
+// 一条变量的公共形状：`shape_variables` / `shape_set_variable` / `shape_evaluate` 三个
+// 消费点必须逐字段一致（前端用同一套渲染），所以只在这里写一次。
+// `namedVariables`/`indexedVariables`（规范可选）是分页依据：适配器靠它们说"这个引用下
+// 还有多少个具名/下标子项"，UI 据此决定要不要发 `variables{start,count}` 取下一页。
+namespace {
+Json shape_one_variable(const Json& value) {
+    const Json& item = as_object(value);
     const auto reference = int_of(item, "variablesReference", 0);
     Json shaped{{"name", text_of(item, "name")},
                 {"value", text_of(item, "value")},
                 {"reference", reference},
+                {"variablesReference", reference},
                 {"named", reference > 0 || int_of(item, "namedVariables", 0) > 0}};
     const auto type = text_of(item, "type");
     if (!type.empty()) shaped["type"] = type;
     const auto evaluate_as = text_of(item, "evaluateName");
     if (!evaluate_as.empty()) shaped["evaluateName"] = evaluate_as;
+    for (const char* key : {"namedVariables", "indexedVariables"}) {
+        if (item.contains(key) && item.at(key).is_number_integer()) shaped[key] = item.at(key);
+    }
     return shaped;
 }
+}  // namespace
 
 Json shape_variables(const Json& body) {
     Json variables = Json::array();
     const Json& envelope = as_object(body);
     if (envelope.contains("variables") && envelope.at("variables").is_array())
-        for (const Json& value : envelope.at("variables")) {
-            const Json& item = as_object(value);
-            const auto reference = int_of(item, "variablesReference", 0);
-            Json shaped{{"name", text_of(item, "name")},
-                        {"value", text_of(item, "value")},
-                        {"reference", reference},
-                        {"named", reference > 0 || int_of(item, "namedVariables", 0) > 0}};
-            const auto type = text_of(item, "type");
-            if (!type.empty()) shaped["type"] = type;
-            const auto evaluate_as = text_of(item, "evaluateName");
-            if (!evaluate_as.empty()) shaped["evaluateName"] = evaluate_as;
-            variables.push_back(std::move(shaped));
-        }
+        for (const Json& value : envelope.at("variables")) variables.push_back(shape_one_variable(value));
     return Json{{"variables", std::move(variables)}};
 }
+
+// `evaluate` -> {result, type?, reference, variablesReference, named, namedVariables?, indexedVariables?}。
+// 规范里 `result` 是必填；`variablesReference` 是"这个结果能不能展开"的句柄。
+// 前端已有的 `DapEvaluateResult`（src/bridge.ts）读 `result`/`type`/`variablesReference`，
+// 这里保留这三个键，同时补上变量那一套的 `reference`/`named`，让展开结果能直接用
+// `dap.variables` 的渲染与分页。
+Json shape_evaluate(const Json& body) {
+    const Json& item = as_object(body);
+    const auto reference = int_of(item, "variablesReference", 0);
+    Json shaped{{"result", text_of(item, "result")},
+                {"reference", reference},
+                {"variablesReference", reference},
+                {"named", reference > 0 || int_of(item, "namedVariables", 0) > 0}};
+    const auto type = text_of(item, "type");
+    if (!type.empty()) shaped["type"] = type;
+    for (const char* key : {"namedVariables", "indexedVariables"}) {
+        if (item.contains(key) && item.at(key).is_number_integer()) shaped[key] = item.at(key);
+    }
+    return shaped;
+}
+
+// `setVariable` / `setExpression` / `evaluate` 的响应都是"一条变量的新值"（规范里
+// setVariable/setExpression 没有 `variables` 数组，evaluate 是 result 字符串），
+// 字段与 shape_variables 里的一条保持一致，前端才能用同一套渲染。
+Json shape_set_variable(const Json& body) { return shape_one_variable(body); }
 
 // `exceptionInfo` 的可选 details。`innerException` 是 cause 链，规范允许递归嵌套，
 // 所以这个整形函数本身是递归的 —— 深度由适配器决定，这里只保证每一层的形状一致

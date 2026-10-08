@@ -73,7 +73,11 @@ test('四张表都是注册表派生出来的，不是另抄一份', () => {
 test('默认布局派生出上游 V1/V2 的那三行（defaultToolWindowlayoutProvider.kt:244-267）', () => {
   assert.deepEqual(DEFAULT_TOOL_ORDER.left, ['files', 'git', 'outline', 'bookmarks'])
   assert.deepEqual(DEFAULT_TOOL_ORDER.bottom, ['vcslog', 'search', 'todo', 'debug'])
-  assert.deepEqual(DEFAULT_TOOL_ORDER.right, ['gradle', 'notifications'])
+  // 右条纹那一行上游 V2 是 Notifications → AIAssistant → Database → Gradle → Maven
+  // （`defaultToolWindowlayoutProvider.kt:263-273`）。本仓只保留 Gradle + Notifications，
+  // 外加**对标 `AIAssistant` 那一格**的 Agent 对话窗口（`agent`，右锚、非 side tool）。
+  // 表里的次序是**画出来**的次序 ⇒ 前面那一组（gradle、agent）在前，side tool（notifications）末尾。
+  assert.deepEqual(DEFAULT_TOOL_ORDER.right, ['gradle', 'agent', 'notifications'])
 })
 
 test('助记符只给有 Activate 动作的窗口（注册表的 numbered）', () => {

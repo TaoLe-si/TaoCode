@@ -28,21 +28,27 @@
 //   解析不出来 ⇒ 返回空表（上游 `:82`/`:152`/`:87` 都是空表，绝不臆造位置）；
 //   旧格式与 `Outer$Inner` 嵌套类都兼容。
 // 消费点（实测，不是打算接）：`src/components/TestRunnerPanel.vue`
-//   :21 import `firstTestLocation` / `testIndexOf`；:246 用发现结果建索引；
-//   :247-250 `sourceOf()` 给节点标题与行号（模板 :496 的 tooltip、:491 的双击 `jump(node)`）；
-//   :400-408 「Navigate with Single Click / Scroll to running test」开着时用同一通道解析运行节点。
+//   :26 import `firstTestLocation` / `testIndexOf`；建索引在 `testIndex`（结果树的 `sourceOf()` 用它）；
+//   「Navigate with Single Click / Scroll to running test」开着时用同一通道解析运行节点；
+//   本轮（junit2）新增：失败节点的落点先问 `failureLocation()`（堆栈那一帧），详情区的 `file:` 片段用
+//   `resolveFrameFile()` 落到工作区路径后再 `emit('jump', …)`。
 // 面板解析出来后 `emit('jump', { path, line })`，**最后一段在宿主**：渲染面板的那一行
-// （订正 2026-10-06：原写 `src/App.vue:2254`，现树实测在 **`src/App.vue:2283`**，行号随并发漂移）
-// 没挂 `@jump`（`revealLocation` 是 0 基，本模块给的是 1 基行号 —— `locateTestFromStack` 的
-// `Math.max(1, …)`，:160/:185/:192），所以跳转目前停在面板里 ——
-// App.vue 是保留文件 ⇒ 已写进 `docs/wiring-requests-2026-10-06-bucket11c.md`（请求 W-B11c-1），
-// 待主代理粘的那一行逐字稿在 `docs/wiring-requests-2026-10-06-bucketW.md` 第一节。
+// （订正 2026-10-06：这里原先记的是「没挂 `@jump`、跳转停在面板里，已提 wiring-request W-B11c-1」，
+// 现树 `grep -n "@jump" src/App.vue` 实测**已经挂上**（TestRunnerPanel 那一行在 `src/App.vue:2265`，
+// 处理函数 `revealLocation` 是 0 基 ⇒ 面板给的要减一行，行号随并发漂移）⇒ 那条 wiring-request 已闭合，
+// 本模块不再欠宿主一段接线。`locateTestFromStack` 的 `Math.max(1, …)` 给的仍是 1 基行号。
 // `src/testImport.ts:144` 只把 metainfo 写成 hint 的形状交给这里的 `resolveTestLocation` 认，
 // 它本身不 import 本模块。判据 `tests/test-locator.test.mjs`。
 
 /** 上游 `JavaTestLocator.SUITE_PROTOCOL` / `TEST_PROTOCOL`（:45-46）。 */
 export const SUITE_PROTOCOL = 'java:suite'
 export const TEST_PROTOCOL = 'java:test'
+
+// 测试位置 EP（`com.intellij.testSrcLocator` 的 `TestLocationProvider`，上游
+// `TestLocationProvider.java:13-19`；EP 宿主在 `src/executionRunExtensionPoints.ts`）：
+// `resolveTestLocation` 是本仓的真实消费点 —— 自己的协议解析给不出落点时按上游那条
+// 「逐个问扩展」的链（`GradleTestLocator.kt:48-56`）问一遍。
+import { locationFromTestProviders, type TestLocationProject } from './executionRunExtensionPoints.ts'
 
 /** 一条位置 URL 拆出来的三段（上游 `:57-64`）。 */
 export interface TestUrl {
@@ -170,7 +176,7 @@ function plainFileTarget(location: string): TestLocation | null {
  * `metainfo` 是上游那个 5 参重载的第五个参数（`:40-46`，注释：加速查找但不用于识别）：
  * 类级命中时用它的行号覆盖节点自带行（`:106-121`）。也接受写在 hint 末尾的 `行:列`。
  */
-export function resolveTestLocation(location: string | null | undefined, index: TestIndex, metainfo?: string | null): TestLocation[] {
+export function resolveTestLocation(location: string | null | undefined, index: TestIndex, metainfo?: string | null, project: TestLocationProject = {}): TestLocation[] {
   if (!location) return []
   const plain = plainFileTarget(location)
   if (plain) return [plain]
@@ -179,7 +185,11 @@ export function resolveTestLocation(location: string | null | undefined, index: 
   const meta = (metainfo ?? (trailing ? trailing[1] : null)) ?? null
   const text = trailing && !metainfo ? location.trim().slice(0, -trailing[1].length).trim() : location
   const url = parseTestUrl(text)
-  if (!url) return []
+  // 本仓的协议解析给不出落点时，问 EP（`com.intellij.testSrcLocator` 的 `TestLocationProvider`）——
+  // 上游 `GradleTestLocator.kt:48-56` 的「逐个问扩展，第一个非空赢」那条链的等价物。
+  // 认不出协议（`url` 为空）也照样问一次：插件可以用自己的协议名贡献位置（locationData 给原文）。
+  // 无插件时这里恒为空表 ⇒ 与接线前逐字一致。
+  if (!url) return locationFromTestProviders('', text, project).map(hit => ({ ...hit, paramName: hit.paramName ?? null }))
   const located = locateTest(url, index)
   if (located.length) {
     const line = metaLine(meta)
@@ -189,6 +199,8 @@ export function resolveTestLocation(location: string | null | undefined, index: 
     }
     return located
   }
+  const contributed = locationFromTestProviders(url.protocol ?? '', url.path, project)
+  if (contributed.length) return contributed.map(hit => ({ ...hit, paramName: hit.paramName ?? url.paramName ?? null }))
   if (metaLine(meta) === null) return []
   const hits = index.filter(entry => classMatches(entry, splitTestPath(url.path).className))
   if (!hits.length) return []
@@ -201,8 +213,10 @@ function metaLine(meta: string | null): number | null {
 }
 
 /** 第一个可跳转位置（面板只跳一个）；没有就 null。 */
-export function firstTestLocation(location: string | null | undefined, index: TestIndex): TestLocation | null {
-  return resolveTestLocation(location, index)[0] ?? null
+export function firstTestLocation(
+  location: string | null | undefined, index: TestIndex, project: TestLocationProject = {},
+): TestLocation | null {
+  return resolveTestLocation(location, index, null, project)[0] ?? null
 }
 
 /** 由 `src/testRunner.ts` 的发现结果造索引：类条目 + 每个方法条目（限定名与短名各一条）。 */
@@ -213,4 +227,101 @@ export function testIndexOf(rows: readonly { suite: string; name: string; path: 
     if (row.suite.includes('.')) out.push({ className: shortNameOf(row.suite), method: row.name, path: row.path, line: row.line })
   }
   return out
+}
+
+// --- 失败堆栈的定位（上游 `SMStacktraceParser` / `TestStackTraceParser` 那一族）------------------
+//
+// 上游依据（本轮逐条自己开文件，行号按 `grep -n` 的实际输出）：
+//   · `platform/smRunner/src/com/intellij/execution/testframework/sm/SMStacktraceParser.java:29-38`
+//     —— 接口本体 `getErrorNavigatable(location, stacktrace)`，注释原文
+//     "Used for navigation from tests view to the editor if 'open failed line' option is selected"；
+//     `:36-38` 用 `proxy.getStacktrace()` 建 `TestStackTraceParser`。
+//   · `platform/smRunner/src/com/intellij/execution/testframework/sm/runner/SMTestProxy.java:406-421`
+//     —— 树上导航的取法：`getDescriptor` **先**问堆栈给出的 navigatable，给了就用它，
+//     否则退 `location.getNavigatable()`（声明位置）。⇒ 「堆栈优先、认不出退声明」是上游自己的形状。
+//   · `java/execution/impl/src/com/intellij/execution/testframework/JavaAwareTestConsoleProperties.java:84-121`
+//     —— `:84-87` 的注释 "//navigate to the first stack trace"；`:107-114` 逐帧比
+//     `methodName.equals(line.getMethodName()) && qualifiedName.equals(className)`，**命中即 break**；
+//     `:132-136` 的 `getQualifiedName` 只把帧里的 `$` 换成 `.`；落点文件 = 那个类的
+//     `containingFile`（`:118`），行号 = 那一帧自己报的 `File.java:行`（`:117`）。
+//   · `platform/smRunner/src/com/intellij/execution/testframework/sm/runner/ui/TestStackTraceParser.java:20-21`
+//     —— 两个正则（外层 `at 类.方法(参数)`、内层 `文件:行`）；`:79-82` 内层不成立就 `return`，
+//     也就是**中止整次解析**，不是跳过这一帧。
+//   · `platform/testRunner/src/com/intellij/execution/testframework/TestConsoleProperties.java:54`
+//     —— `openFailureLine` 默认 **true**；那条开关在工具栏上是真件（
+//     `platform/testRunner/src/com/intellij/execution/testframework/ToolbarPanel.java:187-189`），
+//     文案 `platform/execution/resources/messages/ExecutionBundle.properties:166-167`。
+//
+// 架构不等价（登记，不是省略）：
+//   · 上游 `:120-121` 还有一道 PSI 校验（行号必须落在该方法的 `TextRange` 内、且小于文档行数），
+//     本仓没有 PSI，也不去猜文件有多少行 —— 行号原样交给编辑器，真越界由宿主如实报错；
+//   · 类名比对沿用本模块 `classMatches` 的**同名放宽**（上游 `:132-136` 只做 `$`→`.`，不放宽短名）：
+//     本仓的发现器给不出包名（`src/testRunner.ts` 的 `discoverJunit` 把 suite 记成 `JUnit`），
+//     严格按限定名比就一帧也认不出。判据里钉着「别的类仍然不算命中」那一条，放宽只到短名为止。
+
+/** 上游 `TestConsoleProperties.java:54` 的默认值（`openFailureLine` 默认 true）。 */
+export const DEFAULT_OPEN_FAILURE_LINE = true
+/** 上游 `ExecutionBundle.properties:166`。 */
+export const OPEN_FAILURE_LINE_NAME = 'Open Source at Exception'
+/** 上游 `ExecutionBundle.properties:167`。 */
+export const OPEN_FAILURE_LINE_DESCRIPTION = 'Go to the line which caused an exception when opening a test source'
+
+/** 上游 `TestStackTraceParser.java:20` 的 outerPattern：`\tat 类.方法(参数)`。 */
+const FRAME_OUTER = /^\s*at\s+([\w.$]+)\.([\w$<>]+)\s*\(([^()]*)\)$/
+/** 上游 `:21` 的 innerPattern：`文件:行`。`(CompiledCode)` / `(Native Method)` 那两型不成立。 */
+const FRAME_INNER = /^(.*):(\d+)$/
+
+/** 一条栈帧拆出来的四段（上游 `TestStackTraceParser` 的 failedLine / failedMethodName 两个字段都在这里）。 */
+export interface FailureFrame { className: string; methodName: string; file: string | null; line: number | null }
+
+/** 一行栈帧 → 四段；不是栈帧 ⇒ null（上游那两个正则的 `matches()` 不成立就是不成）。 */
+export function parseStackFrame(text: string): FailureFrame | null {
+  const outer = FRAME_OUTER.exec(text)
+  if (!outer) return null
+  const argumentsPart = outer[3] ?? ''
+  const inner = FRAME_INNER.exec(argumentsPart)
+  if (!inner) return { className: outer[1]!, methodName: outer[2]!, file: argumentsPart ? argumentsPart : null, line: null }
+  return { className: outer[1]!, methodName: outer[2]!, file: inner[1]!, line: Number(inner[2]) }
+}
+
+/** 类名 → 那个类所在的文件（上游 `:118` 的 `containingFile` 在本仓的等价物 = 发现索引里的 path）。 */
+function classFilePath(index: TestIndex, className: string): string | null {
+  const hit = index.find(entry => classMatches(entry, className))
+  return hit ? hit.path : null
+}
+
+/**
+ * 栈帧里的**裸文件名**（`MathTest.java`）→ 发现索引里真实存在的工作区路径。
+ * 认不出 ⇒ null：与 `locateTest` 的「解析不出来返回空表」同一条口径，不给用户造一个打不开的路径。
+ */
+export function resolveFrameFile(file: string, line: number, index: TestIndex): TestLocation | null {
+  const normalized = file.trim().replace(/\\/g, '/')
+  if (!normalized) return null
+  const base = normalized.split('/').pop() ?? normalized
+  const hit = index.find(entry => entry.path === normalized)
+    ?? index.find(entry => entry.path === base || entry.path.endsWith(`/${base}`))
+  return hit ? { path: hit.path, line: Math.max(1, line), paramName: null } : null
+}
+
+/**
+ * 失败栈里「本类本方法」的那一帧 ⇒ 可跳转位置
+ * （`JavaAwareTestConsoleProperties.java:84-121` 的 `getErrorNavigatable`：逐帧比方法名与类名，
+ *  命中即停；文件取类所在的文件，行号取那一帧的）。
+ * `openFailureLine` 关着 ⇒ 直接 null（上游 `TestConsoleProperties.java:54`，关着时
+ * `SMTestProxy.java:406-421` 就只剩声明位置那条退路）。
+ * 认不出（没有匹配的帧 / 匹配的帧没报行号 ⇒ 中止 / 类落不到文件）⇒ null，**不臆造位置**。
+ */
+export function failureLocation(stacktrace: readonly string[], className: string, methodName: string,
+                                 index: TestIndex, openFailureLine: boolean = DEFAULT_OPEN_FAILURE_LINE): TestLocation | null {
+  if (!openFailureLine || !stacktrace.length) return null
+  for (const raw of stacktrace) {
+    const frame = parseStackFrame(raw)
+    if (!frame || frame.methodName !== methodName) continue
+    if (frame.className !== className && shortNameOf(frame.className) !== shortNameOf(className)) continue
+    if (frame.line === null) return null   // 上游 `TestStackTraceParser.java:79-82`：内层不成立就中止
+    const path = classFilePath(index, className) ?? resolveFrameFile(frame.file ?? '', frame.line, index)?.path ?? null
+    if (!path) return null
+    return { path, line: Math.max(1, frame.line), paramName: null }
+  }
+  return null
 }

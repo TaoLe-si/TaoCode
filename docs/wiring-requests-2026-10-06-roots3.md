@@ -118,3 +118,16 @@
   —— `src/App.vue:152-153` 已 import `HOST_FILE_TEMPLATE_KINDS`/`fileTemplatesState`/`createFileFromTemplate`，
   `:246` 是 `nameDialogTemplates` 计算属性，`:2489` 是 `v-for` 的那一条 option，`:1721` 走 `createFileFromTemplate`。
   W2/W3 的复核结论沿用 roots2（`native/settings_schema.cpp:261-263` 的白名单已放开；`src/main.ts:6,30` 已灌忽略清单）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **A1 已接线**：与 roots/roots2 同一条（`src/App.vue:1914` 的 `addRunConfiguration` 第三参 `env`）。
+- **A2（`file.stat`）** —— 目标 `native/main.cpp`（禁改）+ `src/bridge.ts`（前端接线 lane 独占）。跳过。
+- **A3** —— 登记。
+
+结论：A1 已接线；A2 转给 native/bridge owner。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「A1 已接线；A2 转给 native/bridge owner。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

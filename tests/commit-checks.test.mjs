@@ -206,10 +206,20 @@ test('落点：--only 只提交被选的那些路径，index 里其它暂存项�
   assert.match(native, /if \(scoped\) arguments\.push_back\(L"--only"\);/, '--only 只在有子集时加（整份暂存区那一档逐字沿用旧命令行）')
   assert.match(native, /if \(scoped\) \{ arguments\.push_back\(L"--"\); arguments\.insert\(arguments\.end\(\), specs\.begin\(\), specs\.end\(\)\); \}/,
     'pathspec 放在 `--` 之后：用户给的路径永远不会被 git 当选项读')
-  // 未跟踪的被选项：git 不认陌生 pathspec ⇒ 先只对这些路径 add（不碰其它暂存项）。
-  assert.match(native, /if \(scoped\) \{\s*std::vector<std::wstring> add\{L"add", L"--"\};/, '先 add 被选的那些，且 add 也带 `--`')
-  // 每个路径过 checked_path（与 file_history 同一道闸），非法路径在交给 git 之前就被挡下。
-  assert.match(native, /for \(const auto& path : paths\) specs\.push_back\(checked_path\(path\)\);/)
+  // 只对**未跟踪**的被选项先 add（带 `--`）：实测 `git add -- <已被 git mv 走的旧路径>` 直接
+  // `fatal: pathspec … did not match any files`（128，`--ignore-errors` 压不住），整批 add 会把
+  // 一次带重命名的子集提交一枪打死；而 `M `/`MM`/`A `/`D ` 四档不 add 也照样提交得动（`--only` 取工作区）。
+  assert.match(native, /if \(!to_add\.empty\(\)\) \{\s*std::vector<std::wstring> add\{L"add", L"--"\};/,
+    '先 add 的只有未跟踪那几条，且 add 也带 `--`')
+  assert.match(native, /if \(untracked\) to_add\.push_back\(utf8_to_wide\(path\)\);/,
+    '未跟踪才进 to_add')
+  assert.match(native, /if \(!matched\) throw WorkspaceError\("INVALID_REQUEST", "这个路径没有可提交的变更："/,
+    '陌生 pathspec 在调 git 之前拒（上游对 `NOT_CHANGED` 那条动作压根不启用）')
+  assert.match(native, /"重命名要成对提交："/, '单边重命名被拒（上游一条 ChangedPath 两朵路径）')
+  // 每个路径过提交面那道更严的闸（`checked_pathspec`，2026-10-06 partialcommit 起它比
+  // `file_history` 用的 `checked_path` 多三条：控制字符 / 绝对路径 / 反斜杠），
+  // 非法路径在交给 git 之前就被挡下。
+  assert.match(native, /for \(const auto& path : paths\) specs\.push_back\(checked_pathspec\(path\)\);/)
   assert.match(read('native/git.hpp'), /const std::vector<std::string>& paths = std::vector<std::string>\(\)\);/,
     '头里的 paths 是**带默认值**的尾参：既有六参调用点一个字都不用改')
 })
@@ -218,20 +228,38 @@ test('面板只用一条通道发提交：整份暂存区与被选子集都走 c
   const panel = read('src/components/SourceControl.vue')
   assert.equal((panel.match(/request\('git\.commit'/g) ?? []).length, 1, 'git.commit 在面板里只有一个调用点')
   assert.match(panel, /await request\('git\.commit', commitRequestParams\(\{/, '请求体由 commitRequestParams 一处生成')
-  assert.match(panel, /paths: props\.commitPaths,/, '被选子集来自宿主的可选 prop')
-  assert.match(panel, /commitPaths\?: readonly string\[\]/, '可选：宿主没接这一档时界面上没有对应的假控件')
+  // 子集不再是"只有宿主能给"的那一条：面板自己的右键菜单（`commitFile`）就是选择来源，
+  // 宿主的可选 prop 与它汇在同一个 `commitPathsToCommit` 上，再一起交给请求体。
+  assert.match(panel, /paths: commitPathsToCommit\.value, changes: changes\.value,/,
+    '被选子集与变更列表一起交给 commitRequestParams（重命名对补齐 + 非法/被忽略判断都要吃列表）')
+  assert.match(panel, /const commitPathsToCommit = computed<string\[\]>\(\n\s*\(\) => \(commitSelection\.value \? expandCommitSelection\(commitSelection\.value, changes\.value\) : \[\]\)\)/,
+    '子集的唯一来源：选择过 expandCommitSelection（面板自己点的与宿主 prop 都走这一条）')
+  assert.match(panel, /commitPaths\?: readonly string\[\]/, '宿主的可选 prop 仍然保留（项目视图多选那一档待接）')
+  assert.match(panel, /case 'commitFile': return setCommitScope\(path\)/,
+    '右键菜单那一行接的是真动作：设范围，不立刻提交（上游 CheckinFiles 也只是 setCommitState）')
+  // 2026-10-06：范围层（选择态 + 一次性收回）整段搬进了 `src/commitScopeSection.ts`，
+  // 面板那一头只剩 `clearCommitScope()`（提交成功后调用）。两处都要钉：面板真的调了它，
+  // section 里真的把 `scoped.value` 收回 null —— 少任何一半都会「下一次静默沿用上轮的子集」。
+  assert.match(panel, /clearCommitScope\(\)/, '范围是一次性的：提交完收回（面板调 clearCommitScope）')
+  assert.match(read('src/commitScopeSection.ts'), /clear: \(\) => \{ scoped\.value = null \}/,
+    '收回动作的实现在 commitScopeSection：把 scoped 置 null，下一次不静默沿用上轮的子集')
   assert.doesNotMatch(panel, /<button[^>]*>\s*[^<]*提交文件/, '没有把「提交文件…」做成点了没反应的按钮')
 })
 
 // ── R1 补完（commit2）：非法 / 被忽略 / 未跟踪的被选项，与 amend、noisy 档共处 ──────
 // 四条口径的上游出处写在 src/commitChecks.ts 的注释里（本文件只写落点）：
-//   · 单条路径的合法性 = native 那道闸（`native/git.cpp:259-265` 的 `checked_path()`）先在前端跑一遍；
-//   · 目录与其子项同时选中**不并掉**：`DescindingFilesFilter.java:36-39` 先问 `allowsNestedRoots`，
-//     而 `GitVcs.java:260-263` 对 git 答 true；
-//   · 被忽略（noisy）的被选项 ⇒ 拒绝：`CommonCheckinFilesAction.kt:74-78` 的 `isActionEnabled`
-//     要 `status != FileStatus.IGNORED`；
-//   · 未跟踪的被选项 ⇒ 明确纳入：`CheckinActionUtil.kt:104-105` + 同文件 `:159-167`
-//     把 `selectedUnversioned` 并进"这次包含的变更"。
+// 坐标 2026-10-06 partialcommit 逐条重开上游核过（原写 `native/git.cpp:259-265`、
+// `CommonCheckinFilesAction.kt:74-78`、`CheckinActionUtil.kt:159-167` 三处是抄虚的，见下面的订正）：
+//   · 单条路径的合法性 = native 那道闸先在前端跑一遍（提交面用更严的 `checked_pathspec`，
+//     它 = `checked_path` 那五道 + "仓库相对的 POSIX 写法"，三条新增各有实测）；
+//   · 目录与其子项同时选中**不并掉**：`DescindingFilesFilter.java:27-69` 在 `:36-39` 先问
+//     `allowsNestedRoots`，而 `GitVcs.java:260-263` 对 git 答 true；
+//   · 被忽略（noisy）的被选项 ⇒ 拒绝：`CommonCheckinFilesAction.kt:75-78`（`isActionEnabled` 的
+//     函数头在 `:75`，`:74` 是 `@ApiStatus.Internal`）要 `status != FileStatus.IGNORED`；
+//   · 未跟踪的被选项 ⇒ 明确纳入：`CheckinActionUtil.kt:104-105` + 同文件 `getIncludedChanges`
+//     整体 `:153-167`（原写 `:159-167` 少看了函数头）把 `selectedUnversioned` 并进"这次包含的变更"；
+//   · 重命名对 ⇒ 两朵路径一起给：`GitCheckinEnvironment.kt:403-404` 一条 `ChangedPath` 同时产出
+//     toCommitAdded（afterPath）与 toCommitRemoved（beforePath）。
 
 const rowOf = (path, extra = {}) => ({ path, untracked: false, ...extra })
 
@@ -254,8 +282,16 @@ test('非法的被选项在交给宿主之前就拒掉：- 前缀 / .. / 换行 
   assert.match(gate, /if \(path\.empty\(\) \|\| path\.size\(\) > 512 \|\| path\.front\(\) == '-' \|\|\n/)
   assert.match(gate, /path\.find\("\.\."\)/, '含 .. 的那一条（native 写成字面量 ".."）')
   assert.match(gate, /throw WorkspaceError\("INVALID_REQUEST", "文件路径不合法。"\);/, '同一道闸、同一个错误码')
-  assert.match(gate, /for \(const auto& path : paths\) specs\.push_back\(checked_path\(path\)\);/,
+  // 提交面用的是**更严的那一道**（`checked_pathspec` = `checked_path` 之上再加"仓库相对的 POSIX 写法"）：
+  // 三条新增各自对应一条实测（仓内绝对路径能被 git 接受、`sub\x.txt` 只会报"没有这个文件"、
+  // NUL 到 git 那一头把 argv 截断）。`file_history` 那一条仍走宽的 `checked_path`。
+  assert.match(gate, /for \(const auto& path : paths\) specs\.push_back\(checked_pathspec\(path\)\);/,
     '被选的每一条路径都过这道闸')
+  assert.match(gate, /static_cast<unsigned char>\(character\) < 0x20 \|\| character == '\\\\'\)/,
+    '控制字符与反斜杠在这一道被拒')
+  assert.match(gate, /if \(path\.front\(\) == '\/'\) throw WorkspaceError\("INVALID_REQUEST", "提交路径不能是绝对路径。"\);/,
+    '绝对路径在这一道被拒')
+  assert.match(gate, /path\[1\] == ':'/, '带盘符的路径在这一道被拒')
 })
 
 test('被忽略（noisy）的被选项：明确拒绝；宿主没给变更列表时不误拒（形状与本批之前逐字一致）', () => {

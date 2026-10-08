@@ -697,3 +697,44 @@ export function compileSwitches(state: MatcherSwitchState): { wholeWords: boolea
   return { wholeWords: state.wholeWords }
 }
 
+
+// ── 语法树级作用域（上游 `PatternContext` 的等价物，本仓由符号模型承接） ─────────────────────
+// 上游 `within`/`contains` 判的是**语法树节点**的祖先关系（`WithinPredicate.java:30` 的
+// `PsiTreeUtil.isAncestor(result.getMatch(), matchedNode, false)`）；本仓上面那一支按**同一行的
+// 字符区间**判（`withinHolds`），跨行/跨符号的作用域表达不了 —— 那正是判词 `ss/matcher` 里
+// 「`within`/`contains` 的语法树级作用域（本仓按模板文本与括号层逼近）」这一条。
+//
+// 本批补**第二档**：命中区间落在哪个 `documentSymbol` 节点里（`src/symbolModel.ts` 的
+// `rangeWithinSymbol`）。它不替换上面那条正则路径（那条仍管同一行内的范围子模板），
+// 而是给「匹配范围」加一个**语法档**：调用方可以把「只在某个类/方法里搜」写成 kind 收窄，
+// 由符号树判。没有符号树（语言服务没回 `documentSymbol`）时这一档不生效、不误杀 —— 与
+// `symbolModel` 的 `source: 'lexical'` 同一口径。
+
+import { buildSymbolTree, rangeWithinSymbol, type SymbolNode } from './symbolModel.ts'
+
+/** 「匹配范围」的语法档（上游 `PatternContext` 里「限定在某类 PSI 节点内」那一半）。 */
+export interface GrammarScope {
+  /** 允许的 LSP `SymbolKind`（空 = 任意符号都算）。 */
+  kinds: readonly number[]
+  /** 是否取反（命中**不在**这些节点里才算）—— 上游 `PatternCompiler` 的 NotPredicate 同义。 */
+  invert: boolean
+}
+
+export const NO_GRAMMAR_SCOPE: GrammarScope = { kinds: [], invert: false }
+
+/**
+ * 命中区间是否落在允许的语法节点里（`PatternContext` 的等价物）。
+ * `symbols` 是语言服务的 `documentSymbol` 扁平清单；空清单 ⇒ 这一档**放行**
+ * （没有符号树就没有依据去否决一条命中 —— 不误杀是本仓的纪律）。
+ */
+export function grammarScopeHolds(
+  scope: GrammarScope | null,
+  symbols: readonly SymbolNode[] | null | undefined,
+  range: { startLine: number; startChar: number; endLine: number; endChar: number },
+): { ok: boolean; node: SymbolNode | null; available: boolean } {
+  if (!scope || (!scope.kinds.length && !scope.invert)) return { ok: true, node: null, available: false }
+  if (!symbols?.length) return { ok: true, node: null, available: false }
+  const node = rangeWithinSymbol(buildSymbolTree(symbols), range, scope.kinds)
+  const inside = node !== null
+  return { ok: scope.invert ? !inside : inside, node, available: true }
+}

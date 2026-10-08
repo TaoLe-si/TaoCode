@@ -88,12 +88,15 @@ test('四档计数自洽，且与表尾那句一致', () => {
   // 2026-10-04 本轮：CommitChecksProgressIndicatorTooltip 从 [~] 改判 [x]；VCS lane 再把
   // CommitOptions/CommitOptionsPanel/CommitChecks/PostCommitChecksHandler 四条改判 [x]
   // （选项存档层 + 慢检查推后开关 + 提交后检查，判据 tests/commit-options.test.mjs）。
-  assert.equal(count('[x]'), 18)
-  assert.equal(count('[~]'), 43)
+  // 2026-10-06（b1b7verdict lane）：AbstractCommitChangesAction [~] → [x]（两条动作都已落并已接），
+  // 同批落 checkinHandlerFactory / vcsCheckinHandlerFactory / localCommitExecutor 三条 EP
+  // （src/checkinHandlers.ts，提交前闸接进 src/sourceControlCommitChecks.ts），四档 18/43 → 19/42。
+  assert.equal(count('[x]'), 19)
+  assert.equal(count('[~]'), 42)
   assert.equal(count('[ ]'), 0)
   assert.equal(count('[-]'), 17)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 78)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 18 \+ `\[~\]` 43 \+ `\[ \]` 0 \+ `\[-\]` 17 = 78/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 19 \+ `\[~\]` 42 \+ `\[ \]` 0 \+ `\[-\]` 17 = 78/,
     '表尾的和数要与逐条表一致')
 })
 

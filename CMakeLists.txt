@@ -27,12 +27,12 @@ endif()
 
 # window_state（全屏等窗口态）放在这个库里：它同样只依赖 Win32 + json，
 # 而且 workspace_test 要能直接测它（加在可执行目标上就链接不到）。
-add_library(taocode_workspace native/workspace.cpp native/workspace_tree_ops.cpp native/window_state.cpp native/dialogs.cpp native/export_file.cpp native/file_queries.cpp)
+add_library(taocode_workspace native/workspace.cpp native/workspace_tree_ops.cpp native/workspace_templates.cpp native/window_state.cpp native/dialogs.cpp native/export_file.cpp native/file_queries.cpp)
 target_include_directories(taocode_workspace PUBLIC native)
 target_link_libraries(taocode_workspace PUBLIC nlohmann_json::nlohmann_json bcrypt)
 
-add_library(taocode_projects native/projects.cpp native/java_lsp_paths.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/folding_state_schema.cpp native/trusted_paths.cpp native/git_clone.cpp native/git.cpp
-                             native/settings_transfer.cpp native/git_log.cpp native/git_worktree.cpp)
+add_library(taocode_projects native/projects.cpp native/java_lsp_paths.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/settings_project_schema.cpp native/folding_state_schema.cpp native/trusted_paths.cpp native/git_clone.cpp native/git.cpp
+                             native/settings_transfer.cpp native/git_log.cpp native/git_worktree.cpp native/git_hunks.cpp)
 target_link_libraries(taocode_projects PUBLIC taocode_workspace taocode_history xmllite shlwapi ole32)
 
 add_library(taocode_lsp native/lsp.cpp native/lsp_host.cpp native/lsp_session.cpp
@@ -53,18 +53,21 @@ target_link_libraries(taocode_search PUBLIC taocode_workspace)
 # 按职责拆文件（三个都是同一个道理：一个文件一个职责域，见 tests/module-size.test.mjs）：
 #   dap.cpp          —— 会话 / 管道 / reader / 请求的构造与发信
 #   dap_inspect.cpp  —— 「清单重取 / 反向调试 / 内存与反汇编」这一族请求
+#   dap_values.cpp   —— 「取值 / 补全 / 断点位置 / 数据与函数断点 / source」这一族请求
 #   dap_shaping.cpp  —— 响应整形（事件 / 栈帧 / 作用域 / 变量 / 异常 / 断点 / 补全 / 运行到光标处）
 #   dap_routes.cpp   —— 桥接层的 `dap.*` 分派（从 main.cpp 抽出，那边有 2000 行硬上限）
-add_library(taocode_dap native/dap.cpp native/dap_inspect.cpp native/dap_shaping.cpp native/dap_routes.cpp)
+add_library(taocode_dap native/dap.cpp native/dap_inspect.cpp native/dap_values.cpp native/dap_shaping.cpp native/dap_routes.cpp)
 target_link_libraries(taocode_dap PUBLIC taocode_workspace)
 
-add_library(taocode_terminal native/terminal.cpp)
+add_library(taocode_terminal native/terminal.cpp native/terminal_bell.cpp)
 target_link_libraries(taocode_terminal PUBLIC taocode_workspace)
 
 # history.cpp 管本地历史的快照落盘/版本索引/指纹；history_diff.cpp 管「行级 unified diff 脚本」
 # （切行 → 出脚本 → 渲染 @@ 块），它不碰目录、句柄与索引，是一个独立的算法域
 # （2026-10-05 拆出，history.cpp 贴着 1050 行机检上限；见 tests/module-size.test.mjs）。
-add_library(taocode_history native/history.cpp native/history_diff.cpp)
+# history_sides.cpp 管「并排差异」（脚本 → 左右对齐行 + 词级标注），同样只吃 Row 与 split_lines
+# （2026-10-06 拆出：history.cpp 加「按天过期」后回到 934 行，又贴着 910 上限）。
+add_library(taocode_history native/history.cpp native/history_diff.cpp native/history_sides.cpp)
 target_link_libraries(taocode_history PUBLIC taocode_workspace)
 
 add_library(taocode_session native/session.cpp)
@@ -81,8 +84,10 @@ target_link_libraries(taocode_plugins PUBLIC taocode_workspace)
 add_library(taocode_jdk native/jdk.cpp)
 target_link_libraries(taocode_jdk PUBLIC taocode_workspace)
 
-# diagnostics（日志文件 / 特殊目录 / 排障信息）—— IDEA `com.intellij.diagnostic` 的对应物。
-add_library(taocode_diagnostics native/diagnostics.cpp native/zipstore.cpp native/crash_log.cpp)
+# diagnostics（日志文件 / 特殊目录 / 排障信息 / 崩溃现场 / 线程转储）—— IDEA `com.intellij.diagnostic` 的对应物。
+# thread_dump.cpp 是"进程活着时按需抓全部线程的栈"（StackWalk64），与 crash_log.cpp 的
+# "崩溃那一刻的现场"（terminate/SEH 钩子 + minidump）触发时机与用途都不同，故分两个文件。
+add_library(taocode_diagnostics native/diagnostics.cpp native/zipstore.cpp native/crash_log.cpp native/thread_dump.cpp)
 target_include_directories(taocode_diagnostics PUBLIC native)
 target_link_libraries(taocode_diagnostics PUBLIC taocode_workspace taocode_jdk shell32 ole32)
 # settings_transfer（在 taocode_projects 里）要用 zipstore 打包设置归档。写在 diagnostics 定义**之后**：
@@ -97,19 +102,37 @@ target_link_libraries(taocode_events PUBLIC taocode_workspace)
 add_library(taocode_gradle native/gradle.cpp)
 target_link_libraries(taocode_gradle PUBLIC taocode_workspace taocode_runner)
 
-add_executable(TaoCode WIN32 native/main.cpp)
+add_executable(TaoCode WIN32 native/main.cpp native/git_routes.cpp native/embedded_browser_profile.cpp native/agent_skills.cpp native/agent_memory.cpp native/mcp_client.cpp native/system_date_format.cpp native/app-icon.rc)
+# 图标这一条**必须显式声明额外依赖**：`.rc` 里写的是 `ICON "app-icon.ico"`，
+# 而生成器 `scripts/gen-app-icon.mjs` 写的是 `native/app-icon.ico`（它不在任何源文件列表里）。
+# CMake 不知道这条隐式依赖 ⇒ 改了 `src/assets/app-icon.png` 重新生成 `.ico` 之后，
+# ninja 看 `.rc` 没动就不重跑 rc.exe，链接出来的 exe **继续嵌旧图标**。
+# 这不是假想：本仓 2026-10-07 出现过「设计好了花体 T，exe 上还是旧图标」，
+# 当时的绕过办法是手工 `touch native/app-icon.rc` —— 那是治标，这里改成治本。
+# OBJECT_DEPENDS 是 CMake 给「源文件依赖了一个它看不见的文件」的正规做法。
+set_source_files_properties(native/app-icon.rc PROPERTIES OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/native/app-icon.ico")
 target_include_directories(TaoCode PRIVATE "${WEBVIEW2_SDK}/build/native/include")
-target_link_libraries(TaoCode PRIVATE taocode_projects taocode_lsp taocode_runner taocode_search taocode_dap taocode_terminal taocode_history taocode_session taocode_watcher taocode_plugins taocode_jdk taocode_diagnostics taocode_events taocode_gradle "${WEBVIEW2_SDK}/build/native/x64/WebView2LoaderStatic.lib" ole32 oleaut32 user32 shell32 shlwapi version dwmapi)
+target_link_libraries(TaoCode PRIVATE taocode_projects taocode_lsp taocode_runner taocode_search taocode_dap taocode_terminal taocode_history taocode_session taocode_watcher taocode_plugins taocode_jdk taocode_diagnostics taocode_events taocode_gradle taocode_http "${WEBVIEW2_SDK}/build/native/x64/WebView2LoaderStatic.lib" ole32 oleaut32 user32 shell32 shlwapi version dwmapi)
 target_link_options(TaoCode PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_SOURCE_DIR}/native/app.manifest")
 add_custom_target(taocode_ui ALL
   COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:TaoCode>/ui"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/dist" "$<TARGET_FILE_DIR:TaoCode>/ui")
 add_dependencies(taocode_ui TaoCode)
 
+add_library(taocode_http native/http_client.cpp)
+# winhttp：系统自带的 HTTP 服务型 API（超时四档可分别设、不继承 IE 缓存）。
+# 只依赖 workspace.hpp 的 Json/WorkspaceError，不碰 VFS 也不碰 git。
+target_link_libraries(taocode_http PUBLIC taocode_workspace winhttp)
+
 enable_testing()
 add_executable(workspace_test native/workspace_test.cpp)
 target_link_libraries(workspace_test PRIVATE taocode_workspace)
 add_test(NAME workspace_safety COMMAND workspace_test)
+# HTTP GET 通道的边界回归（协议白名单 / 参数校验 / 网络失败如实回 reason）。不联网：
+# 见 native/http_client_test.cpp 的文件头。
+add_executable(http_client_test native/http_client_test.cpp)
+target_link_libraries(http_client_test PRIVATE taocode_http)
+add_test(NAME http_client_contract COMMAND http_client_test)
 add_executable(projects_test native/projects_test.cpp)
 target_link_libraries(projects_test PRIVATE taocode_projects)
 add_test(NAME projects_lifecycle COMMAND projects_test)
@@ -192,9 +215,19 @@ add_executable(dap_test native/dap_test.cpp)
 target_link_libraries(dap_test PRIVATE taocode_dap)
 add_dependencies(dap_test dap_fake_adapter)
 add_test(NAME dap_client COMMAND dap_test)
+# 取值族（分页/求值）与第二批协议请求族（数据断点/函数断点/source）的判据单独成文件：
+# dap_test.cpp 贴着 tests/module-size.test.mjs 的 1300 行测试上限（2026-10-06 拆出）。
+add_executable(dap_values_test native/dap_values_test.cpp)
+target_link_libraries(dap_values_test PRIVATE taocode_dap)
+add_dependencies(dap_values_test dap_fake_adapter)
+add_test(NAME dap_values COMMAND dap_values_test)
 add_executable(terminal_test native/terminal_test.cpp)
 target_link_libraries(terminal_test PRIVATE taocode_terminal)
 add_test(NAME terminal_conpty COMMAND terminal_test)
+# 响铃扫描器是纯字节状态机，不碰 ConPTY，所以判据也不碰 shell（时间、机器、ConPTY
+# 可用性都不该是"响铃有没有被认出来"的变量）。
+add_executable(terminal_bell_test native/terminal_bell_test.cpp native/terminal_bell.cpp)
+add_test(NAME terminal_bell_scan COMMAND terminal_bell_test)
 add_executable(history_test native/history_test.cpp)
 target_link_libraries(history_test PRIVATE taocode_history)
 add_test(NAME local_history COMMAND history_test)
@@ -229,6 +262,15 @@ add_executable(settings_transfer_test native/settings_transfer_test.cpp)
 target_link_libraries(settings_transfer_test PRIVATE taocode_projects)
 add_test(NAME settings_export_import COMMAND settings_transfer_test)
 
+# 编辑器设置里**非布尔那几键**的校验分支（native/settings_editor_keys.hpp）：Code Vision 的两个组集合
+# 与每锚点条数的界。桌面上真正的闸在这里（src/previewSettings.ts 只是预览态的第二道关卡），
+# 而判据不能只留在 JS：右键「隐藏这一组」直接写运行时表、不查白名单，白名单少列一组会让整本
+# 编辑器设置在读盘时被判 INVALID_SETTINGS。链接的库与上面那条同一份（settings_schema.cpp 在
+# taocode_projects 里）。
+add_executable(settings_editor_keys_test native/settings_editor_keys_test.cpp)
+target_link_libraries(settings_editor_keys_test PRIVATE taocode_projects)
+add_test(NAME settings_editor_key_bounds COMMAND settings_editor_keys_test)
+
 add_executable(export_file_test native/export_file_test.cpp)
 target_link_libraries(export_file_test PRIVATE taocode_workspace)
 add_test(NAME export_file_write COMMAND export_file_test)
@@ -260,3 +302,19 @@ add_test(NAME library_sources COMMAND library_sources_test)
 add_executable(jdtls_test native/jdtls_test.cpp)
 target_link_libraries(jdtls_test PRIVATE taocode_lsp)
 add_test(NAME jdtls_launch_spec COMMAND jdtls_test)
+
+# ---- batch-2026-10-06-mcpserver：TaoCode MCP 服务端（追加段：本段只新增 target 与测试注册，未动任何既有项）----
+# taocode_mcp.exe：stdio JSON-RPC 2.0 的 MCP 服务端，工具全部复用宿主能力
+# （Workspace / git / ProjectStore / run_host / Runner —— 见 native/mcp_server.hpp 头注释）。
+# 不开网络端口；默认权限档 = src/agent.ts 的 defaultAgentPermissions（write/run 需 --allow-* 显式升档）。
+add_library(taocode_mcp_core native/mcp_server.cpp)
+target_include_directories(taocode_mcp_core PUBLIC native)
+target_link_libraries(taocode_mcp_core PUBLIC taocode_workspace taocode_projects taocode_runner shell32 ole32)
+add_executable(taocode_mcp native/mcp_main.cpp)
+target_link_libraries(taocode_mcp PRIVATE taocode_mcp_core)
+# 离线自测（这是第 39 条测试注册）：管道喂 JSON-RPC 帧验握手→tools/list→只读→权限拒→路径闸→argv 数组化。
+# 传 taocode_mcp.exe 的路径给测试：run.start 拿自身 --echo-argv 当 program，证明参数不被 shell 解释。
+add_executable(mcp_server_test native/mcp_server_test.cpp)
+target_link_libraries(mcp_server_test PRIVATE taocode_mcp_core)
+add_dependencies(mcp_server_test taocode_mcp)
+add_test(NAME mcp_server_stdio COMMAND mcp_server_test $<TARGET_FILE:taocode_mcp>)

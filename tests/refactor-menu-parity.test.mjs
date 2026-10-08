@@ -55,14 +55,16 @@ const refactor = code('src/menus/refactorMenu.ts', 'createRefactorMenuRows')
 const navigate = code('src/menus/navigateMenu.ts', 'createNavigateMenuRows')
 
 /**
- * 这五条的落点已就绪、宿主也已接上（2026-10-06 接线，报告见
- * `docs/batch-2026-10-06-wiring1.md`）。下面用「最小上下文」跑一遍，守的是
+ * 这七条的落点已就绪、宿主也已接上（2026-10-06 接线，报告见
+ * `docs/batch-2026-10-06-wiring1.md`；`refactor.extractInterface`/`refactor.extractSuperclass`
+ * 是本批补的 `src/refactorExtractSuper.ts`）。下面用「最小上下文」跑一遍，守的是
  * `src/menus/refactorMenu.ts` 的 `hosted(ctx.openX)` **契约本身**：宿主没给处理函数就不许出现
  * —— 那是「不放假控件」这条铁律在组件侧的形态，不因为宿主接上了就失效。
  * 「宿主到底接没接」由文件末尾那条测试正面机检，两边合起来才是完整判据。
  */
 const PENDING_HOST_ROWS = ['refactor.changeSignature', 'refactor.safeDelete', 'refactor.pullMembers',
-  'refactor.pushMembers', 'refactor.introduceParameterObject']
+  'refactor.pushMembers', 'refactor.introduceParameterObject',
+  'refactor.extractInterface', 'refactor.extractSuperclass']
 
 /** `App.vue` 现在真的传了哪些 ctx 成员，这里就给一个最小的同形上下文（值 import 必须带 `.ts`）。 */
 function hostContext(extra = {}) {
@@ -92,9 +94,10 @@ test('提取/引入是真子菜单，不是拍平的几行', () => {
   assert.match(refactor, /id: 'refactor\.introduce', title: '提取\/引入', keywords: '[^']*', children: \[/,
     'IntroduceActionsGroup 是一行带 children 的子菜单')
   const body = refactor.slice(refactor.indexOf("id: 'refactor.introduce'"), refactor.indexOf("id: 'refactor.inline'"))
-  // 成员都在 children 里，次序照 :361 → :364 → :372 → :373。
+  // 成员都在 children 里，次序照 :361 → :364 → :372 → :373 → :380 → :381。
   assert.deepEqual(childIds(body, 'refactor.introduce'),
-    ['refactor.extractVariable', 'refactor.ExtractConstant', 'refactor.introduceParameterObject', 'refactor.ExtractMethod'])
+    ['refactor.extractVariable', 'refactor.ExtractConstant', 'refactor.introduceParameterObject', 'refactor.ExtractMethod',
+     'refactor.extractInterface', 'refactor.extractSuperclass'])
   // 顶层 rows 里不再出现这些（拍平时代的残留）。
   const top = rowIds(refactor.slice(0, refactor.indexOf("id: 'refactor.introduce'")))
   assert.deepEqual(top, ['refactor.this', 'rename', 'refactor.changeSignature', 'refactor.rule1'])
@@ -113,6 +116,8 @@ test('重构菜单的成员次序照 LangActions.xml:356-392', () => {
     'refactor.ExtractConstant',
     'refactor.introduceParameterObject',
     'refactor.ExtractMethod',
+    'refactor.extractInterface',
+    'refactor.extractSuperclass',
     'refactor.inline',        // :384 Inline
     'refactor.rule2',         // :385 <separator/>
     'refactor.moveFile',      // :386 Move
@@ -148,8 +153,10 @@ test('重构菜单不再挂「重新格式化代码」—— 它属于代码菜�
 //   3) 每一行都必须带 run / semantic / children / rule 之一（原判据，原样保留）。
 test('无后端的重构条目不渲染（不放假控件）', () => {
   const rendered = idsOf(createRefactorMenuRows(hostContext()))
+  // `ExtractInterface`/`ExtractSuperclass` 已在本批补上落点（`src/refactorExtractSuper.ts`），
+  // 从「没有后端」那一列移走 —— 它们现在归 `PENDING_HOST_ROWS`（宿主没接就不渲染）。
   for (const absent of ['InvertBoolean', 'IntroduceField', 'IntroduceParameter', 'ExtractClass',
-    'ExtractInclude', 'ExtractInterface', 'ExtractSuperclass', 'ExtractModule', 'memberInvertBoolean']) {
+    'ExtractInclude', 'ExtractModule', 'memberInvertBoolean']) {
     assert.ok(!rendered.some(id => id.toLowerCase().endsWith(absent.toLowerCase())),
       `${absent} 没有后端，不该出现菜单行`)
   }
@@ -162,6 +169,7 @@ test('无后端的重构条目不渲染（不放假控件）', () => {
   const wired = hostContext({
     openChangeSignature: () => {}, openSafeDelete: () => {}, openPullUp: () => {},
     openPushDown: () => {}, openIntroduceParameterObject: () => {},
+    openExtractSuperclass: () => {}, openExtractInterface: () => {},
   })
   for (const context of [hostContext(), wired]) {
     for (const row of idsOfRows(createRefactorMenuRows(context))) {
@@ -174,20 +182,23 @@ test('无后端的重构条目不渲染（不放假控件）', () => {
     assert.ok(produced.has(id), `${id} 在源文本里，但全接上时也产不出这一行`)
 })
 
-// 新落点的五条必须**真的**把点击转交给宿主处理函数，并且是「接上了才出现」。
+// 新落点的七条必须**真的**把点击转交给宿主处理函数，并且是「接上了才出现」。
 // （旧判据里 `read('src/App.vue').includes(member)` 那一半不能留：App.vue 是保留文件，
 // 桶 1 只读，写它 = 越权；接线面改为按 `batches` §4 交请求。这里断言的是**接线面**本身。）
-test('更改签名 / 安全删除 / 成员上移下移的菜单行接到真实实现', () => {
-  for (const member of ['openChangeSignature', 'openSafeDelete', 'openPullUp', 'openPushDown', 'openIntroduceParameterObject'])
+test('更改签名 / 安全删除 / 成员上移下移 / 提取超类接口的菜单行接到真实实现', () => {
+  for (const member of ['openChangeSignature', 'openSafeDelete', 'openPullUp', 'openPushDown',
+    'openIntroduceParameterObject', 'openExtractSuperclass', 'openExtractInterface'])
     assert.ok(refactor.includes(`ctx.${member}`), `菜单上下文要暴露 ${member}`)
   const called = []
   const handlers = Object.fromEntries(['openChangeSignature', 'openSafeDelete', 'openPullUp', 'openPushDown',
-    'openIntroduceParameterObject'].map(member => [member, () => called.push(member)]))
+    'openIntroduceParameterObject', 'openExtractSuperclass', 'openExtractInterface'].map(member => [member, () => called.push(member)]))
   const rows = idsOfRows(createRefactorMenuRows(hostContext(handlers)))
-  // 接上了就必须出现，且次序照 LangActions.xml:358/:372/:388/:391/:392。
+  // 接上了就必须出现，且次序照 LangActions.xml:358/:372/:380/:381/:388/:391/:392。
   assert.deepEqual(rows.map(row => row.id).filter(id => PENDING_HOST_ROWS.includes(id)), [
     'refactor.changeSignature',            // :358
     'refactor.introduceParameterObject',   // :372
+    'refactor.extractInterface',           // :380
+    'refactor.extractSuperclass',          // :381
     'refactor.safeDelete',                 // :388
     'refactor.pullMembers',                // :391
     'refactor.pushMembers',                // :392
@@ -198,6 +209,8 @@ test('更改签名 / 安全删除 / 成员上移下移的菜单行接到真实�
     ['refactor.pullMembers', 'openPullUp'],
     ['refactor.pushMembers', 'openPushDown'],
     ['refactor.introduceParameterObject', 'openIntroduceParameterObject'],
+    ['refactor.extractInterface', 'openExtractInterface'],
+    ['refactor.extractSuperclass', 'openExtractSuperclass'],
   ]) {
     const row = rows.find(item => item.id === id)
     assert.equal(typeof row.run, 'function', `${id} 没有 run 就是假控件`)
@@ -211,6 +224,7 @@ test('更改签名 / 安全删除 / 成员上移下移的菜单行接到真实�
     ['src/safeDelete.ts', 'safeDeletePrompt'],
     ['src/refactorMemberMove.ts', 'memberMoveEdits'],
     ['src/refactorIntroduceParameterObject.ts', 'parameterObjectEdits'],
+    ['src/refactorExtractSuper.ts', 'extractSuperEdits'],
   ]) assert.match(read(file), new RegExp(`export function ${entry}\\(`), `${file} 缺出口 ${entry}`)
   // 对话框真的消费模型（挂载点在保留文件 App.vue，见接线请求）。
   assert.match(read('src/components/RefactorSignatureDialog.vue'), /from '\.\.\/refactorSignature\.ts'/)

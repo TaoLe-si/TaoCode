@@ -55,10 +55,12 @@ function patchAccounts(patch) {
 
 test('props.unified 有两处消费者：工具带的复制补丁与无行表时的那块 pre', () => {
   // 原来只有后面这一处，且它落在 `effectiveRows.length === 0` 的分支里 ⇒ 前端生成补丁的三处永远看不到。
-  assert.match(view, /<pre v-else class="diff-body">\{\{ unified \|\| '（无差异）' \}\}<\/pre>/,
-    '无行表时的补丁文本兜底必须还在（宿主侧只给文本的场合）')
-  assert.match(view, /const patchText = computed\(\(\) => \(props\.unified\.trim\(\) \? props\.unified : ''\)\)/,
-    '补丁文本 = props.unified 本身（不是重新生成一份，避免两侧口径打架）')
+  assert.match(view, /<pre v-else class="diff-body">\{\{ fileUnified \|\| '（无差异）' \}\}<\/pre>/,
+    '无行表时的补丁文本兜底必须还在（宿主侧只给文本的场合）；合成档下取当前文件那一份')
+  assert.match(view, /const patchText = computed\(\(\) => \(fileUnified\.value\.trim\(\) \? fileUnified\.value : ''\)\)/,
+    '补丁文本 = 父级给的那一份本身（不是重新生成一份，避免两侧口径打架）；合成档下 = 当前文件那一份')
+  assert.match(view, /const fileUnified = computed<string>\(\(\) => \(inCombined\.value \? activeFile\.value\?\.unified \?\? '' : props\.unified\)\)/,
+    '单文件档逐字用 props.unified（既有六个调用方零改动）')
   assert.match(view, /const canCopyPatch = computed\(\(\) => patchText\.value !== ''\)/,
     '可见性谓词：没有补丁文本就没有那颗按钮（上游 setEnabledAndVisible）')
 })
@@ -70,9 +72,9 @@ test('复制补丁走剪贴板中央入口，复制的就是 props.unified 那�
     '文案与变更视图那两条同源（同一个上游动作 id），不在组件里另抄一份')
   // 函数体逐行钉住：空补丁不动剪贴板 → await 复制 → 才给那句成功提示。
   assert.match(view, /async function copyPatch\(\) \{\n\s*const text = patchText\.value\n\s*\/\/ 空补丁不动剪贴板[^\n]*\n\s*if \(!text\) return\n\s*await copyToClipboard\(text\)\n\s*patchCopied\.value = true\n\s*\}/,
-    'copyPatch 必须把 patchText（= props.unified）整份交给 copyToClipboard')
-  assert.match(view, /watch\(\(\) => props\.unified, \(\) => \{ patchCopied\.value = false \}\)/,
-    '换了补丁就把上一句提示作废')
+    'copyPatch 必须把 patchText 整份交给 copyToClipboard')
+  assert.match(view, /watch\(\(\) => \[props\.unified, combinedActive\.value\], \(\) => \{ patchCopied\.value = false \}\)/,
+    '换了补丁（或合成档里换了一个文件）就把上一句提示作废')
 })
 
 test('工具带那颗按钮的形状：纯图标件必须有 title 与 aria-label（playbook §5.3）', () => {

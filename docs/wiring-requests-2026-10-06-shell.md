@@ -117,3 +117,15 @@ bucket7b A5.3 记的是 `src/customFoldingProviders.ts(48,103): error TS1002: Un
 ## W-4（给主代理 · ic/dialogs ① / ⑤ 的宿主，非本桶能收口）
 - `ic/dialogs` 缺 ①：`Messages`/`MessagesService` 的**统一消息宿主**。模型侧 `src/messageDialog.ts`（本桶名下）齐（`MessageDialogBuilder` + `DoNotAskOption` + `MessageType` + `ExitActionType`，现被 `TrustedProjectDialog.vue` 逐处消费），缺的是 App 上的全局门面宿主（`src/App.vue`，保留文件）。= bucket7b A3，本桶维持登记、未自接。
 - `ic/dialogs` 缺 ⑤：步骤式列表弹层（`src/popupSteps.ts` 的 `listStepRows`/`isClosableOnExecute`/`isFinalStepValue`/`shouldBeShowing`/`listSeparator`）仍是**零生产消费方**，宿主组件在桶 8（`AnchoredMenu.vue`/`EditorPopupMenu.vue`/`SearchEverywhereDialog.vue`）。= bucket7b A1，本桶维持登记、未自接。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1（本机级设置 RoamingType.DISABLED）** —— `src/settingsModel.ts` + native，非本 lane。
+- **W-2 / W-3 / W-4** —— 治理/别人 owner。零接线。
+
+结论：零接线。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

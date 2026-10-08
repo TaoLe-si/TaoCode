@@ -40,12 +40,16 @@ test('提示文案逐模式不同，失败时不谎报成功', () => {
 
 const panel = readFileSync('src/components/DebugPanel.vue', 'utf8')
 const rowMenu = readFileSync('src/components/DebugRowMenu.vue', 'utf8')
+// 监视列表的行在 2026-10-06 抽到 `src/components/DebugWatchesPane.vue`（面板贴着 900 行上限，
+// 本批补四个监视动作时拆出去）：监视行的动作按钮在那里，面板把它接到 openCopy。
+const watchesPane = readFileSync('src/components/DebugWatchesPane.vue', 'utf8')
 
 test('变量行与监视行都有行动作入口，弹层有「值/名称」两条目', () => {
   // 条目清单已抽到 `src/debugRowActions.ts`（DebugPanel 顶到 900 行上限）；面板留接线与分派。
   const actions = readFileSync('src/debugRowActions.ts', 'utf8')
   assert.match(panel, /openCopy\(rowMenuTarget\(row\), \$event\)/, '变量行动作按钮')
-  assert.match(panel, /openCopy\(\{ row: \{ name: watch\.text, value: watch\.value \}, expression: watch\.text, reference: 0, isValue: true, value: watch\.value, arrayView: false, canArray: false \}, \$event\)/, '监视行动作按钮')
+  assert.match(watchesPane, /emit\('copy', \{ text: watch\.text, value: watch\.value, event: \$event \}\)/, '监视行动作按钮')
+  assert.match(panel, /@copy="\$event => openCopy\(\{ row: \{ name: \$event\.text, value: \$event\.value \}/, '面板把监视行的复制入口接到 openCopy')
   assert.match(rowMenu, /class="debug-menu" role="menu"/, '行动作弹层')
   assert.match(actions, /label: '复制值'/, '弹层的「复制值」条目')
   assert.match(actions, /label: '复制名称'/, '弹层的「复制名称」条目')

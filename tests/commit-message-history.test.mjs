@@ -66,9 +66,16 @@ test('预览行：多行压一行、按右边距截断（:85-88）', () => {
 })
 
 test('面板接线：提交成功存 MRU、弹层行有预览与点选', () => {
+  // 2026-10-06（大组件对标批）：弹层的状态与三件事的次序搬进
+  // `src/commitMessageHistorySection.ts`（SourceControl 贴着 900 行上限），判据跟着搬 ——
+  // 断言的仍是同一批行为，只是分在面板（调用点）与 section（实现）两处。
   const panel = read('src/components/SourceControl.vue')
-  assert.match(panel, /saveRecentMessage\(recentMessages\.value, text\)/, '两条提交路径都要存')
-  assert.match(panel, /loadMessageHistory\(/, '弹层数据走模块')
-  assert.match(panel, /previewHistory\(subject\)/, '悬停预览（ShowMessageHistoryAction:90-96）')
-  assert.match(panel, /pickHistory\(subject\)/, '点选后收起')
+  const section = read('src/commitMessageHistorySection.ts')
+  assert.match(panel, /messageHistory\.remember\(text\)/, '提交成功后记进 MRU（两条提交路径都过 runCommit）')
+  assert.match(section, /saveRecentMessage\(recent\.value, text\)/, 'MRU 走纯模块的 saveRecentMessage')
+  assert.match(section, /loadMessageHistory\(deps\.fetchSubjects, recent\.value\)/, '弹层数据走模块')
+  assert.match(section, /function preview\(subject: string\)/, '悬停预览（ShowMessageHistoryAction:90-96）')
+  assert.match(panel, /messageHistory\.preview\(subject\)/, '弹层行真的接了悬停预览')
+  assert.match(section, /function pick\(subject: string\)/, '点选后收起')
+  assert.match(panel, /messageHistory\.pick\(subject\)/, '弹层行真的接了点击落定')
 })

@@ -42,6 +42,9 @@ const HEAD = { name: 'HEAD', type: 'head' }
 const chain = [commit('h1', ['h2']), commit('h2', ['h3']), commit('h3', ['h4']), commit('h4', [])]
 /** a1 的两条出边里 a9 那条跨 3 行 ⇒ 中间两行是"穿行行"（长边开档必须上下两段都画）。 */
 const long = [commit('a1', ['a2', 'a9']), commit('a2', ['a3']), commit('a3', ['a9']), commit('a9', [])]
+/** 同一条形状，但 a9 挪到第 31 行 ⇒ a1→a9 才够上游那条"长边"的分界（关档才截，PrintElementGeneratorImpl.kt:277-278）。 */
+const far = [commit('a1', ['a2', 'a9']), commit('a2', ['f0']),
+  ...Array.from({ length: 29 }, (_, i) => commit(`f${i}`, [i === 28 ? 'a9' : `f${i + 1}`])), commit('a9', [])]
 const edges = units => units.filter(unit => unit.kind === 'edge')
 const nodes = units => units.filter(unit => unit.kind === 'node')
 const renderTable = (commits, props = {}) => renderToString(createSSRApp({
@@ -130,8 +133,8 @@ test('竖线 / 弯线 / 终端箭头的几何与上游一致', () => {
   assert.equal(painted.marks.length, 1, '行 0 一个节点')
   assert.equal(painted.marks[0].r, GRAPH_NODE_RADIUS)
   assert.equal(GRAPH_LINE_WIDTH, 1.5, '线宽 = PaintParameters.java:11 的 THICK_LINE')
-  // 关掉长边：起点那一行的竖线换成**终端单元**（两列同值 + 有箭头 + 留出箭头缺口）。
-  const closed = buildLogGraph(long, { showLongEdges: false })
+  // 关掉长边：**够 30 行**的那条边在起点那一行换成终端单元（两列同值 + 有箭头 + 留出箭头缺口）。
+  const closed = buildLogGraph(far, { showLongEdges: false })
   const terminal = paintGraphRow(closed.units[0])
   const main = terminal.strokes.filter(stroke => stroke.y1 === ROW_H / 2)
   assert.equal(main.length, 2, '起点这一行：一条相邻边的竖线 + 那条长边的终端竖线')
@@ -147,19 +150,42 @@ test('竖线 / 弯线 / 终端箭头的几何与上游一致', () => {
   }
   assert.equal(terminal.strokes.filter(stroke => stroke.y1 === ROW_H / 2 && stroke.y2 > ROW_H).length, 0,
     '关档后行 0 不再有画到格外的那一条（长边被换成终端竖线）')
+  // 上游两头都留一段（`getArrowType` 的 `upOffset == visiblePartSize` ⇒ DOWN、`downOffset == …` ⇒ UP，
+  // platform/vcs-log/graph/src/com/intellij/vcs/log/graph/impl/print/PrintElementGeneratorImpl.kt:219-226）
+  // ⇒ 目标行那一格多一个是**朝上**的终端单元，收口在离顶边同样一个箭头缺口处。
+  const bottomUnits = edges(closed.units[31])
+  const bottomArrow = bottomUnits.find(unit => unit.hasArrow)
+  assert.ok(bottomArrow, '目标行有那条朝上的终端单元')
+  assert.equal(bottomArrow.direction, 'up')
+  assert.equal(bottomArrow.otherPosition, bottomArrow.position, '终端单元两列同值（TerminalEdgePrintElement.java:16）')
+  assert.equal(bottomUnits.filter(unit => unit.hasArrow).length, 1, '只补一条，不给同一头画两个箭头')
+  const bottom = paintGraphRow(closed.units[31])
+  const upStrokes = bottom.strokes.filter(stroke => stroke.y1 === ROW_H / 2 && stroke.x1 === stroke.x2 && stroke.y2 < ROW_H / 2)
+  assert.equal(upStrokes.length, 2, '目标行那一列上有两段朝上的竖线：相邻边整段 + 被截长边的终端段（上游也是两头都画）')
+  const arrowStub = upStrokes.find(stroke => stroke.y2 === GRAPH_NODE_RADIUS / 2 + 1)
+  assert.ok(arrowStub, '终端段收在**顶边**的箭头缺口（paintEdge :161-162 的 gap 档）')
+  assert.ok(upStrokes.some(stroke => stroke.y2 === 0), '相邻那条边整段到顶：非终端 ⇒ 不留缺口')
+  assert.equal(bottom.strokes.filter(stroke => stroke.y1 === arrowStub.y2 && stroke.x1 === arrowStub.x2).length, 2,
+    '终端段那一头上也有一对箭翅（与起点那一头同一套几何）')
+  assert.equal(bottom.strokes.filter(stroke => stroke.y1 === ROW_H / 2 && stroke.y2 > ROW_H).length, 0,
+    '关档后目标行不再有画到格外向下的那一段（a9 自己没有出边）')
 })
 
 test('虚线的跨度边即使被关成终端竖线也照上游用实笔（isUsual || hasArrow）', () => {
-  // 折叠跨度**跨两行**（中间还留着别的行）+ 关掉长边 ⇒ 起点那一行只能给终端竖线，而它的线型仍是 DASHED。
-  const page = [commit('c1', ['c2']), commit('c2', ['gone']), commit('c3', [])]
+  // 折叠跨度**跨满 30 行以上**（中间那些行不属于这条链）+ 关掉长边 ⇒ 起点那一行只能给终端竖线，
+  // 而它的线型仍是 DASHED（线型是数据的属性，笔是画的属性 —— 上游两句分开写）。
+  const page = [commit('c1', ['gone']),
+    ...Array.from({ length: 30 }, (_, i) => commit(`k${i}`, [])), commit('c3', [])]
+  assert.equal(page.findIndex(c => c.hash === 'c3'), 31, '跨度要够长才会被截（PrintElementGeneratorImpl.kt:242-243）')
   const stubbed = buildLogGraph(page, { collapsedSpans: [{ from: 'c1', to: 'c3' }], showLongEdges: false })
   assert.equal(stubbed.rows[0].stub.length, 1, '跨度边在关档下落到起点那一行的竖线')
   assert.equal(stubbed.rows[0].stub[0].style, 'dashed', '单元本身仍记着 DASHED（线型是数据的属性）')
+  assert.equal(stubbed.rows[31].stub[0].direction, 'up', '目标行那头的终端段朝上')
   const painted = paintGraphRow(stubbed.units[0])
   assert.ok(painted.strokes.some(stroke => stroke.y2 === ROW_H - (GRAPH_NODE_RADIUS / 2 + 1)), '画出来的是带箭头的终端段')
   assert.ok(painted.strokes.every(stroke => stroke.dash === undefined),
     '画出来全是实笔：上游 paintLine 对 hasArrow 那一档走 ordinaryStroke（SimpleGraphCellPainter.kt:127-129）')
-  const shown = buildLogGraph(page, { collapsedSpans: [{ from: 'c1', to: 'c3' }] })
+  const shown = buildLogGraph(page, { collapsedSpans: [{ from: 'c1', to: 'c3' }], showLongEdges: true })
   assert.equal(shown.rows[0].down.filter(edge => edge.style === 'dashed').length, 1, '开档时同一条跨度边走弯线')
   assert.ok(paintGraphRow(shown.units[0]).strokes.some(stroke => stroke.dash === '15 11' || Number(stroke.dash?.split(' ')[0]) > 0),
     '开档时它是虚的（终端那一档才转实笔）')

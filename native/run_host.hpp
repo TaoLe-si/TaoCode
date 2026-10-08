@@ -91,9 +91,12 @@ public:
 
     /**
      * 正在运行/刚结束的实例清单（IDEA 的 Run 工具窗口按它开标签）：
-     * 每项 `{id, label, running, pid, children, tree}` —— `pid` 是该实例当前子进程的 OS pid
-     * （0 = 没在跑或已回收），`children` 是它下面活着的后代 pid，`tree` 是同一批后代的
+     * 每项 `{id, label, running, pid, children, tree, ports, exitCode, aborted}` —— `pid` 是该实例当前子进程的
+     * OS pid（0 = 没在跑或已回收），`children` 是它下面活着的后代 pid，`tree` 是同一批后代的
      * 结构 `{pid, parent, name}`（前序：先父后子），Run 控制台据此显示带进程名的进程树。
+     * `exitCode` 是**最后一段**子进程的退出码（在跑时是 null）；`aborted` 表示它是不是被
+     * `stop`/同名重启结束掉的（不是自己跑完的）—— 上游 `ProcessAdapter.processTerminated` /
+     * `ExecutionListener.processTerminated` 把这两件事分开报，UI 才能区分"跑完退出 1"与"被停止"。
      */
     Json instances() const;
 

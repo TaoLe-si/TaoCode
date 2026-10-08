@@ -4,7 +4,7 @@
 
 四档（同 B1–B5）：`[x]` 已移植 · `[~]` 部分 · `[ ]` 未移植（TODO）· `[-]` 不适用（附理由）
 
-> **本文档对 317 类逐条给判决**：§A 讲已移植的 13 条，§B 讲部分移植 39 条，§C 讲未移植 2 条，§D 讲不适用 263 条，§G 是**逐条总表**（317 行，机检对齐）。四档合计 13 + 39 + 2 + 263 = 317。
+> **本文档对 317 类逐条给判决**：§A 讲已移植的 15 条，§B 讲部分移植 39 条，§C 讲未移植 0 条，§D 讲不适用 263 条，§G 是**逐条总表**（317 行，机检对齐）。四档合计 15 + 39 + 0 + 263 = 317。
 >
 > 本域是 `openapi/actionSystem`（171 类）+ `ide/actions/searcheverywhere`（146 类）两个包的合集。
 > 判决按「**行为是否落地**」给，不按类名 —— 落地形态可以不含类名（例：`ActionPlaces` 判 `[x]`，
@@ -30,7 +30,7 @@
 > 既有判 `[~]` 的（`AnAction`、`Presentation`、`ActionGroup` —— 行为落了但名字只出现在注释里），
 > 也有判 `[-]` 的（`ActionMenu`、`MacOtherAction`）。§G 每一行都写明依据落在哪个真实文件。
 
-## A. 已移植（`[x]`，13 类）
+## A. 已移植（`[x]`，15 类）
 
 ### A-1 动作系统的三个骨架类（3）
 
@@ -188,12 +188,14 @@
 | `FileSearchEverywhereContributor` | `src/searchEverywhereHost.ts` 的文件供给者（`workspace.files`）+ 文件档打分；本批起可切 Smith-Waterman 档（`src/fuzzyMatch.ts` 的 `fuzzyMatchPath`，对齐 `SmithWatermanMatcher.kt:58-70`） | 按项目过滤、非索引文件处理 |
 | `RunConfigurationsSEContributor` | `src/searchEverywhereHost.ts` 的 `allRunConfigNames`（用户配置 + 自动发现候选） | 按最近使用排序、配置类型图标 |
 
-## C. 未移植（`[ ]`，2 类）—— 有真行为、本仓还没有
+## C. 未移植（`[ ]`，0 类）—— 本轮清空
 
-| 类 | 差在哪 | 下一批的判据 |
-|---|---|---|
-| `ClassSearchEverywhereContributor` | 本仓符号档走 LSP `workspace/symbol`（类与成员同一路），没有独立的「按类名搜」这一档 | 需要 LSP 侧区分 kind 之后才谈得上拆档 |
-| `ClassSearchEverywhereNavigationHandler` | 打开符号即跳到文件，没有「类/方法」两级区分 | 同上 |
+**2026-10-06（b1b7verdict lane）**：原表两条 `[ ]`（`ClassSearchEverywhereContributor` /
+`ClassSearchEverywhereNavigationHandler`）逐条开过磁盘后**改判 `[x]`** —— 两者都已落并已接：
+Classes 档（`src/searchEverywhere.ts` 的 `classesOnly: true` 档 + `src/searchEverywhereClasses.ts`
+的 `isSearchEverywhereClass` kind 白名单）与两级导航（`src/searchEverywhereHost.ts` 的
+`openSymbolEntry` + `classMemberTarget` 的直接成员挑选），判据 `tests/search-everywhere-classes.test.mjs`。
+逐条依据见 §G。本域 `[ ]` 归零。
 
 **第九十一批之后的三条已落地**（§G 里已是 `[~]`，本表此处原先漏改）：`SearchEverywhereEmptyTextProvider`
 （`src/searchEverywhereEmpty.ts`）、`ScopeChooserAction`（`src/searchEverywhereScope.ts`）、`PreviewAction`
@@ -340,8 +342,8 @@
 | `AutoCompletionProvider` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/AutoCompletionProvider.java` | `[-]` | 补全渲染器（JList + 自绘高亮）：补全弹窗的上游渲染器，本仓补全是 `src/completionUi.ts` 的补全浮层，不属本域 |
 | `CalculatorSEContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CalculatorSEContributor.kt` | `[-]` | 计算器贡献器（输入算式求值）：纯附加功能，非 IDE 核心 ⇒ 不做 |
 | `CheckBoxSearchEverywhereToggleAction` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CheckBoxSearchEverywhereToggleAction.java` | `[-]` | 复选框式的贡献者开关：`SearchEverywhereFiltersAction` 的同类，不做 |
-| `ClassSearchEverywhereContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereContributor.kt` | `[ ]` | 类贡献者：本仓符号档走 LSP `workspace/symbol`（类与成员同一路），没有独立的「按类名搜」这一档。**要做得先有**一个只回类符号的语言服务请求（LSP 没有"只要 type"的参数），或对 `workspace/symbol` 的结果按 `SymbolKind` 客户端过滤 —— 后者会把"类"的定义交给服务器返回的 kind，服务器不保证给，所以暂不做。 |
-| `ClassSearchEverywhereNavigationHandler` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereNavigationHandler.kt` | `[ ]` | 类的导航（跳到文件并定位）：本仓的符号档是 LSP 符号，打开即跳到文件，没有「先跳类名再跳成员」的两级区分。同 `ClassSearchEverywhereContributor` 的前置条件。 |
+| `ClassSearchEverywhereContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereContributor.kt` | `[x]` | **2026-10-06 b1b7verdict lane 复算升档**（原判 `[ ]`，理由「暂不做客户端按 SymbolKind 过滤」已过时）：Classes 档已落并已接 —— `src/searchEverywhere.ts` 的 `SEARCH_EVERYWHERE_TABS` 里那条 `{ id: 'classes', label: 'Classes', priority: 950, sources: ['symbols'], classesOnly: true }`（`SeClassesTab.kt:47` 的 950 档），漏斗在 `src/searchEverywhereClasses.ts` 的 `isSearchEverywhereClass`（只认 LSP kind 5 类/11 接口/10 枚举/23 结构体，**不按名字猜**，`ClassSearchEverywhereContributor.kt:78-87`），`src/searchEverywhere.ts` 的 `onlyClasses` 用它过滤符号行，`Foo#bar` 的类名段由 `src/searchEverywhereClasses.ts` 的 `classSearchPattern` 切出（`symbolNeedle`）；对话框档表由 `src/components/SearchEverywhereDialog.vue` 的 `visibleEverywhereTabs` 渲染。判据 `tests/search-everywhere-classes.test.mjs`（kind 白名单四个真、六个假 + `Foo#bar` 切法）。 |
+| `ClassSearchEverywhereNavigationHandler` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereNavigationHandler.kt` | `[x]` | **同批复算升档**（原判 `[ ]` 的「没有类/方法两级区分」已过时）：打开 `Foo#bar` 时按上游 `ClassSearchEverywhereNavigationHandler.kt:53-80` 走两级 —— `src/searchEverywhereHost.ts` 的 `openSymbolEntry` 先判 `isSearchEverywhereClass(entry.kind)` 且 `classSearchPattern(raw).member !== null`，再取 LSP `documentSymbol`（本仓 = 结构视图），在**直接成员**里用 `src/searchEverywhereClasses.ts` 的 `classMemberTarget` 挑最匹配的一个（`scoreCommand` 子序列 + 词首加权，只认直接子节点：排除被别的成员包住的孙节点），找不到退回类本身（`jumpSymbol(classMemberTarget(...))`，取结构失败时同样退回类）。判据 `tests/search-everywhere-classes.test.mjs` 的 `classMemberTarget` 用例。 |
 | `ContributorDefinedTabsCustomizationStrategy` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ContributorDefinedTabsCustomizationStrategy.kt` | `[-]` | 由贡献者定义 tab 的策略：四个 tab 是硬编码的 ⇒ 无对应物 |
 | `CorrectionWrapper` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CorrectionWrapper.kt` | `[-]` | 同 `SearchEverywhereSpellingCorrector` |
 | `FileSearchEverywhereContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/FileSearchEverywhereContributor.kt` | `[~]` | `src/searchEverywhereHost.ts` 的文件供给者（`workspace.files`）+ `src/searchEverywhere.ts` 的文件档打分；本批起可切 Smith-Waterman 档（`src/fuzzyMatch.ts` 的 `fuzzyMatchPath`，对齐 `SmithWatermanMatcher.kt:58-70` 的「文件名归一分 > 0.7 否则整条路径」）；还差上游的按项目过滤与非索引文件处理 |
@@ -571,7 +573,11 @@
 | `ActionSystemScope` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/util/ActionSystemScope.kt` | `[-]` | 动作系统的 coroutine scope：无协程层 |
 | `package-info` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/util/package-info.java` | `[-]` | 包说明文件：非类，无行为 |
 
-> **四档合计**：`[x]` 13 + `[~]` 39 + `[ ]` 2 + `[-]` 263 = **317**
+> **四档合计**：`[x]` 15 + `[~]` 39 + `[ ]` 0 + `[-]` 263 = **317**
+>
+> **2026-10-06（b1b7verdict lane）**：`ClassSearchEverywhereContributor` / `ClassSearchEverywhereNavigationHandler`
+> 两条 `[ ]` → `[x]`（Classes 档与两级导航已落并已接，见 §C 与 §G），四档从 13 + 39 + 2 + 263 变成
+> 15 + 39 + 0 + 263。
 >
 > **第九十一批的变化**：`[ ]` → `[~]` 四类（`ScopeChooserAction` / `ScopeSupporting` / `PreviewAction` /
 > `SearchEverywhereEmptyTextProvider`）；`[ ]` → `[-]` 一类（`SearchEverywhereReorderingService` ——

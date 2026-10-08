@@ -11,6 +11,9 @@
 
 export type TestFramework = 'ctest' | 'npm' | 'junit' | 'pytest'
 
+// TestNG 的发现器与注解表在 `src/testng.ts`（上游 `plugins/testng` 的可移植子集）。
+import { TESTNG_FRAMEWORK_NAME, discoverTestngTests, isTestngSource } from './testng.ts'
+
 export interface DiscoveredTest { id: string; name: string; suite: string; line: number }
 
 // --- discovery -------------------------------------------------------------
@@ -67,7 +70,16 @@ export function discoverJunit(text: string): DiscoveredTest[] {
 
 export function discover(path: string, text: string): DiscoveredTest[] {
   if (/CMakeLists\.txt$/i.test(path)) return discoverCtest(text)
-  if (/\.(java|kt)$/i.test(path)) return discoverJunit(text)
+  // Java/Kotlin：先按注解选框架（TestNG 有 `org.testng.annotations.*` 全限定名可判，优先），
+  // 否则按 JUnit。TestNG 的用例方法不要求 `public void`，所以走它自己的发现器。
+  if (/\.(java|kt)$/i.test(path)) {
+    if (isTestngSource(text)) {
+      return discoverTestngTests(text).map(found => ({
+        id: `testng:${found.name}`, name: found.name, suite: TESTNG_FRAMEWORK_NAME, line: found.line,
+      }))
+    }
+    return discoverJunit(text)
+  }
   if (/\.(test|spec)\.[cm]?[jt]sx?$|\.test\.mjs$/i.test(path) || /(^|\/)tests?\//i.test(path) && /\.[cm]?[jt]s$/i.test(path))
     return discoverNodeTests(text)
   return []

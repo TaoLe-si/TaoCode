@@ -60,11 +60,13 @@
 //     并用 `templateMacroOfExpression()` 拆「表达式 / 默认值」、用 `unknownMacroCall()` 警告没注册的名字；
 //   · 单测 `tests/template-macros.test.mjs`（行为）+ 门禁 `tests/template-macro-registry.test.mjs`（对账 + 消费锚点）。
 //
-// 上游 33 条里本模块只装**有求值原料的 21 条**；另外 12 条登记在 `DEFERRED_TEMPLATE_MACROS` 里
-// 并写明为什么接不上 —— 那份清单的消费方是上面那条门禁（逐条要求有具体理由、且宏表里查不到这个名字），
-// 设置页**不渲染**它们。缺的挂点写在 `docs/wiring-requests-2026-10-06-fix-macros.md`。
+// 上游 33 条里本模块只装**有求值原料的 25 条**（含 comment 一族 4 条：原料 = 文件扩展名，走
+// `src/commentStyles.ts` 那张纯数据表，与 `filePath` 宏同一条「从 `context.path` 取料」的路数）；
+// 另外 8 条登记在 `DEFERRED_TEMPLATE_MACROS` 里并写明为什么接不上 —— 那份清单的消费方是上面那条门禁
+// （逐条要求有具体理由、且宏表里查不到这个名字），设置页**不渲染**它们。
+// 缺的挂点写在 `docs/wiring-requests-2026-10-06-fix-macros.md`。
 
-import { fileNameStem } from './fileTemplateVars.ts'
+import { commentStyleFor } from './commentStyles.ts'
 
 /** 一次展开可供宏读取的环境 —— 字段都是展开点已经拿得到的东西。 */
 export interface TemplateMacroContext {
@@ -412,11 +414,41 @@ const camelCaseOf = (words: readonly string[]): string => {
 /** 文件路径类宏（`FilePathMacroBase.java:34-73`）。 */
 const filePathMacro = (mode: 'name' | 'stem' | 'full') => (parameters: MacroParameters, context: TemplateMacroContext): string => {
   const path = context.path.replace(/\\/g, '/')
-  if (mode === 'stem') return fileNameStem(path)
+  // `fileNameWithoutExtension` 那条链是 `FilePathMacroBase.java:46-47` → `VirtualFile.java:196-198`
+  // → `FileUtilRt.java:439-441`：`lastIndexOf('.')`，**只有找不到点（i<0）才留原名**，
+  // i=0 也照砍 ⇒ `.gitignore` 的词干在上游是**空串**。`src/fileTemplateVars.ts:49` 的 `fileNameStem`
+  // 判的是 `dot > 0`（文件模板 `${NAME}` 的档，与本宏不同口径、另有消费方），所以这里不能借它。
+  if (mode === 'stem') { const name = path.split('/').pop() ?? ''; const dot = name.lastIndexOf('.')
+    return dot < 0 ? name : name.slice(0, dot) }
   if (mode === 'name') return path.split('/').pop() ?? ''
   // 上游 `:71` 走 FileUtil.toSystemDependentName；本仓内部路径一律 `/`（`src/fileTemplateVars.ts:101`
   // 的同一口径），这里不做平台改写。
   return path
+}
+
+/**
+ * 捕获组个数 = `RegExMacro.java:44-45` 那条 `IndexOutOfBoundsException` 的上界（组号 > 组数才抛）。
+ * 判据对 `java.util.regex.Pattern` 与 ECMA-262 是**同一条**，所以不依赖任何记不准的 JDK 细节：
+ * `(` 后面不是 `?` 就是捕获组；`(?<name>…)` 也是（命名组照样占一个编号，正因如此 Java 里 `$1` 才指得到它）；
+ * `(?:` `(?=` `(?!` `(?>` `(?<=` `(?<!` `(?i:` `(?#` 都不是；`\(` 是转义的字面括号、`[(]` 在字符类里，
+ * 两处都不是组的开头。转义项与整个 `[...]` 逐码元跳过。
+ * 原来那份 `/\((?!\?)/g` 两头都错：**少算命名组**（`(?<` 被 `(?!\?)` 一并排除），于是
+ * `regularExpression(v,"(?<y>[0-9]{4})-([0-9]{2})","$1/$2")` 的 `$1` 被误判越界、整条宏回落成 marker `"a"`；
+ * **多算字符类里的括号**（`[(]`、`[a-z(]`），反过来又放过本该越界的 `$1`。实测对照见报告 §2。
+ */
+function captureGroupCount(pattern: string): number {
+  let count = 0
+  let inClass = false
+  for (let index = 0; index < pattern.length; index++) {
+    const char = pattern[index]!
+    if (char === '\\') { index++; continue }
+    if (inClass) { if (char === ']') inClass = false; continue }
+    if (char === '[') { inClass = true; continue }
+    if (char !== '(') continue
+    if (pattern[index + 1] !== '?') { count++; continue }
+    if (pattern[index + 2] === '<' && pattern[index + 3] !== '=' && pattern[index + 3] !== '!') count++
+  }
+  return count
 }
 
 export const LIVE_TEMPLATE_MACROS: readonly TemplateMacro[] = [
@@ -480,13 +512,13 @@ export const LIVE_TEMPLATE_MACROS: readonly TemplateMacro[] = [
   { name: 'regularExpression', presentableName: 'regularExpression(String, Pattern, Replacement)', defaultValue: 'a',
     upstream: 'RegExMacro',
     // `RegExMacro.java:26-50`：三个实参、坏正则或组引用越界（`IndexOutOfBoundsException`，`:44-45`）
-    // 都是「记一条 warn 然后返回 null」。
+    // 都是「记一条 warn 然后返回 null」。越界上界用 `captureGroupCount()` 数，不是数括号。
     calculate: parameters => { if (parameters.length !== 3) return null
       const [value, pattern, replacement] = parameters
       if (value === null || pattern === null || replacement === null) return null
       try {
         const expression = new RegExp(pattern, 'g')
-        const groups = expression.source.match(/\((?!\?)/g)?.length ?? 0
+        const groups = captureGroupCount(pattern)
         for (const reference of replacement.match(/\$\{?(\d+)\}?/g) ?? []) {
           if (Number(reference.replace(/\D/g, '')) > groups) return null
         }
@@ -495,22 +527,47 @@ export const LIVE_TEMPLATE_MACROS: readonly TemplateMacro[] = [
   { name: 'enum', presentableName: 'enum(...)', defaultValue: '', upstream: 'EnumMacro',
     // `EnumMacro.java:42-45`：取**第一个**实参的结果；候选列表那条（`:54-65`）需要槽位上的 lookup，本仓还没有那条链路。
     calculate: parameters => (parameters.length === 0 ? null : parameters[0]) },
+  // ── comment 一族（`CommentMacro.java:38-64`）：原料 = 文件扩展名查 `src/commentStyles.ts` 那张纯数据表。
+  //    上游从 editor 的 PSI 语言取 `Commenter`（`CommentMacro.java:31-33`），本仓没有 PSI，按 `context.path`
+  //    认扩展名（与 `filePath` 宏同一条取料路数）；认不出扩展名 / 该语言没有对应标记 = 上游「没有 Commenter」
+  //    的同一档，一律返回 null（收尾时落成这条宏的 `getDefaultValue()`，`MacroBase.java:47-49` 的 `"a"`）。
+  { name: 'lineCommentStart', presentableName: 'lineCommentStart()', defaultValue: 'a',
+    upstream: 'CommentMacro$LineCommentStart',
+    // `CommentMacro.java:38-41` + `:34-35`：行注释前缀，`.trim()`；css/html 这类没有行注释的语言 → null。
+    calculate: (_parameters, context) => { const style = commentStyleFor(undefined, context.path)
+      return style?.line != null ? style.line.trim() : null } },
+  { name: 'blockCommentStart', presentableName: 'blockCommentStart()', defaultValue: 'a',
+    upstream: 'CommentMacro$BlockCommentStart',
+    // `CommentMacro.java:44-47`：块注释开标记；只有行注释的语言（py/sh/yml…）→ null。
+    calculate: (_parameters, context) => { const style = commentStyleFor(undefined, context.path)
+      return style?.block ? style.block[0].trim() : null } },
+  { name: 'blockCommentEnd', presentableName: 'blockCommentEnd()', defaultValue: 'a',
+    upstream: 'CommentMacro$BlockCommentEnd',
+    // `CommentMacro.java:50-53`：块注释闭标记。
+    calculate: (_parameters, context) => { const style = commentStyleFor(undefined, context.path)
+      return style?.block ? style.block[1].trim() : null } },
+  { name: 'commentStart', presentableName: 'commentStart()', defaultValue: 'a',
+    upstream: 'CommentMacro$AnyCommentStart',
+    // `CommentMacro.java:56-64`：有行注释取行前缀，否则取块开标记（`StringUtil.isNotEmpty` 的判据）。
+    calculate: (_parameters, context) => { const style = commentStyleFor(undefined, context.path)
+      if (!style) return null
+      const open = style.line ? style.line : style.block?.[0]
+      return open != null ? open.trim() : null } },
 ]
 
 /** 上游注册了、本批**没有**装进表的宏；`reason` 就是报告的「做不到」清单内容。 */
 export const DEFERRED_TEMPLATE_MACROS: readonly DeferredTemplateMacro[] = [
-  { name: 'user', upstream: 'CurrentUserMacro', reason: '上游取 SystemProperties.getUserName()，本仓 Web 侧没有同步的 OS 用户名通道' },
+  { name: 'user', upstream: 'CurrentUserMacro', reason: '上游取 SystemProperties.getUserName()，本仓 Web 侧没有同步的 OS 用户名通道；文件模板那侧的 `user: \'tao\'`（src/components/FileTemplatesSettingsPage.vue:50/:150）是写死的字面量，接它等于往模板里放假用户名' },
   { name: 'clipboard', upstream: 'ClipboardMacro', reason: '上游同步读系统剪贴板；本仓剪贴板是异步通道（src/clipboard.ts 的 readClipboardText），同步求值路径上拿不到' },
   { name: 'lineNumber', upstream: 'LineNumberMacro', reason: '上游 offsetToLogicalPosition(展开点偏移)；模板展开处只把**行内**文本交给 render()' },
   { name: 'fileRelativePath', upstream: 'FilePathMacroBase$FileRelativePathMacro', reason: '上游要项目与源根（FqnUtil.getVirtualFileFqn）；expand() 只有文件路径' },
   { name: 'complete', upstream: 'CompleteMacro', reason: 'InvokeActionResult：要在编辑器里再拉起一次补全并等选中项（BaseCompleteMacro.java:65-90），展开点没有那个能力' },
   { name: 'completeSmart', upstream: 'CompleteSmartMacro', reason: '同 complete，且要智能补全档' },
   { name: 'showParameterInfo', upstream: 'ShowParameterInfoMacro', reason: '要先 finishTemplate 再拉起参数信息浮层（ShowParameterInfoMacro.java:36-43）' },
-  { name: 'lineCommentStart', upstream: 'CommentMacro$LineCommentStart', reason: '注释标记表在 src/commentToggle.ts，该模块 value-import 了 @codemirror/state；拉进 templates.ts 的依赖图会破掉「模板规则不依赖 CodeMirror、可独立单测」的既有契约' },
-  { name: 'blockCommentStart', upstream: 'CommentMacro$BlockCommentStart', reason: '同 lineCommentStart' },
-  { name: 'blockCommentEnd', upstream: 'CommentMacro$BlockCommentEnd', reason: '同 lineCommentStart' },
-  { name: 'commentStart', upstream: 'CommentMacro$AnyCommentStart', reason: '同 lineCommentStart' },
-  { name: 'commentEnd', upstream: 'CommentMacro$AnyCommentEnd', reason: '同 lineCommentStart' },
+  // comment 一族的 lineCommentStart/blockCommentStart/blockCommentEnd/commentStart 已随本批落地
+  // （见上面 LIVE_TEMPLATE_MACROS：原料是文件扩展名，走纯数据表 src/commentStyles.ts，不再受
+  // 「commentToggle.ts 依赖 CodeMirror」那条旧理由牵制）。commentEnd 仍接不上，理由独立：
+  { name: 'commentEnd', upstream: 'CommentMacro$AnyCommentEnd', reason: '上游 AnyCommentEnd（CommentMacro.java:65-72）对行注释语言返回合法的空串 TextResult("")，而本仓把表达式与默认值压进 `$NAME:那一段$` 同一格、空结果一律回落成宏的 marker（resolveTemplateSlotValues 与 TemplateState.recalcSegment:795 的两列差）——单格语法表达不出「合法的空收尾」，强接会让 Java 模板里的 commentEnd 显示成回退标记而非留空' },
 ]
 
 const macroIndex = new Map<string, TemplateMacro>(LIVE_TEMPLATE_MACROS.map(macro => [macro.name, macro] as const))

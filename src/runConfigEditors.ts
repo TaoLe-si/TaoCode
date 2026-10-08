@@ -5,7 +5,10 @@
 //   platform/execution-impl/.../ConfigurationSettingsEditor.java:59-88
 //       标签宿主：per-type 编辑器决定标签页集合 —— 编辑器本身是 `SettingsEditorGroup` 就一个
 //       编辑器一页签(:79-84)，否则只有一个内建页签，标题取
-//       `run.configuration.configuration.tab.title`（:86-87，zh 文案「配置」）。
+//       `run.configuration.configuration.tab.title`（`ExecutionBundle.properties:58` = `Configuration`）。
+//       **本地树里没有中文本地化包**（`find -name "*_zh*.properties"` 0 命中）⇒ 本仓那一格显示的
+//       是英文原文的直译，不是上游中文文案（原写「zh 文案『配置』」是假坐标，订正见
+//       docs/batch-2026-10-06-runcfg4.md §0）。
 //       ⇒ **页签集合由配置类型决定**，不是一张通用表单。
 //   platform/execution/src/com/intellij/execution/configurations/RunConfiguration.java:156-167
 //       `checkConfiguration()` 的三档严重级别：RuntimeConfigurationWarning（提醒）/
@@ -14,7 +17,8 @@
 //   platform/execution-impl/.../compound/CompoundRunConfiguration.kt:113-123
 //       每类型一套编辑器的落点 `getConfigurationEditor()`；`checkConfiguration()` 两条：
 //       成员为空 ⇒ 「There is nothing to run」；没有可用目标 ⇒ 「No suitable targets to run on…」
-//       （两条的中文文案见 ExecutionBundle.properties:19/:20 的 zh 包）。
+//       （两条英文原文在 `ExecutionBundle.properties:19` = `nothing.to.run.error.message` 与
+//       `:20` = `no.suitable.targets.to.run.error.message`；**没有 zh 包**，下面用的是直译）。
 //   platform/execution-impl/.../compound/CompoundRunConfigurationSettingsEditor.java:57-76/92-96
 //       成员表的环检测（含嵌套复合与「运行前任务里引用别的配置」），违例文案
 //       `{0} ''{1}'' causes dependency cycle and cannot be added`（zh：会导致依赖关系循环，无法添加）。

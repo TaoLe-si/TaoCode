@@ -112,3 +112,19 @@ test('接线：层级视图的每一行都带本模块算出的 row（渲染端�
   assert.ok(view.includes("import { hierarchyRowModel } from './hierarchyRenderer.ts'"), '视图没有引入呈现模块')
   assert.ok(view.includes('row: hierarchyRowModel(entry.node)'), 'hierRows 没有为每行组装呈现模型')
 })
+
+test('接线：层级行的判定交给 row（模板里不再自己拼 name/detail/位置）', () => {
+  const app = readFileSync('src/App.vue', 'utf8')
+  assert.match(app, /v-for="\(\{ node, depth, row(?:, id)? \}, index\) in hierRows"/,
+    '行必须解构出 row —— 丢掉它等于 hierarchyRenderer 的判定形同虚设（`id` 见 hierlevel H-2）')
+  assert.match(app, /:title="row\.toggleLabel" :aria-label="row\.toggleLabel"/,
+    '展开按钮的文案走 row（纯图标按钮 title 与 aria-label 都要有）')
+  assert.match(app, /<component :is="row\.icon" v-if="row\.icon"/,
+    '按 kind 的图标（上游 HierarchyNodeRenderer.java:32-43 的 setIcon）；认不出 kind 就不占位')
+  assert.match(app, /v-for="\(seg, si\) in row\.segments"/,
+    '分段文本走 row.segments（含 " : detail" 次要色段与 [失效] 前缀去重）')
+  assert.match(app, /v-if="row\.position" class="call-pos">\{\{ row\.position \}\}/,
+    '位置串由模块算，模板里不再写 +1 的三元式')
+  assert.equal(/node\.loading \? '查询中…' : node\.recursive/.test(app), false,
+    '四条尾巴三元式必须收进 hierarchyTrailingText，不留第二份')
+})

@@ -59,3 +59,11 @@
     `CommandProcessor.executeCommand` 命令里）、`platform/platform-impl/src/com/intellij/openapi/command/impl/UndoManagerImpl.java:43`
     （43 = `public class UndoManagerImpl extends UndoManager implements Disposable`，397 行；**citefix 订正**：原写 `platform/ide-impl/...` 参考树里没有该模块路径）
     （同一命令组里的所有 `UndoableAction` 一起撤 —— 本仓缺的就是「引用改写」那一步）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1 已接线**：`src/App.vue:2556-2558` 已有「将目录标记为」子菜单（`markRootMenu(treeMenu.entry)` + `treeSubmenu === 'markroot'` + `applyMarkRoot`），解构在 `:1440`。
+- **W2 已接线**：`src/App.vue:1442` 的 `createTreeActions` deps 已传 `refreshTree`。
+- **W3（移动/重命名的引用改写进同一条 CommandStep）跳过** —— 属重构域（桶 1）的活，`src/explorerActions.ts:107` 的注释已把指针订正到本文件；本 lane 不越界改重构域命令模型。需重构域 owner 处理。
+
+结论：零待接（W1/W2 早已接线），未改任何文件。

@@ -17,11 +17,17 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?:
   const changesError = ref('')
   const busy = ref(false)
   const navigating = ref(false)
+  const currentBranch = ref('')
+  const branchTrackInfos = ref<NonNullable<GitStatus['branchTrackInfos']>>([])
+  const isOnBranch = ref<boolean | undefined>(undefined)
+  const branchNames = ref<string[]>([])
+  const tagNames = ref<string[]>([])
   const selectedCommit = computed(() => commits.value.find(c => c.hash === selected.value) ?? null)
   let generation = 0
   let logToken = 0
   let selectionToken = 0
   let navigationToken = 0
+  let gitStatusToken = 0
   let offset = 0
   interface Location { query: GitLogQuery; selected: string; commits: GitFullCommit[]; offset: number; hasMore: boolean; loaded: boolean }
   const back = ref<Location[]>([]), forward = ref<Location[]>([])
@@ -53,13 +59,50 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?:
     try { return restore ? restore() : {} } catch { return {} }
   }
   function scope() { const current = generation; return () => current === generation }
+  let gitStatusRoot = ''
+  let gitStatusValue: GitStatus | null = null
+  let gitStatusPending: { root: string; promise: Promise<GitStatus> } | undefined
+  async function loadGitStatus(force = false): Promise<GitStatus | null> {
+    if (!isDesktop || !root.value) return null
+    const requestedRoot = root.value
+    if (!force && gitStatusRoot === requestedRoot && gitStatusValue) return gitStatusValue
+    if (!force && gitStatusPending?.root === requestedRoot) return gitStatusPending.promise
+    const current = scope()
+    const token = ++gitStatusToken
+    let pending!: Promise<GitStatus>
+    pending = request<GitStatus>('git.status', {}).then(data => {
+      if (current() && root.value === requestedRoot && token === gitStatusToken) {
+        gitStatusRoot = requestedRoot
+        gitStatusValue = data
+        currentBranch.value = data.available ? data.head ?? '' : ''
+        branchTrackInfos.value = data.available ? data.branchTrackInfos ?? [] : []
+        isOnBranch.value = data.available ? data.isOnBranch : undefined
+        branchNames.value = data.branches ?? []
+      }
+      return data
+    }).catch(caught => {
+      if (current() && root.value === requestedRoot && token === gitStatusToken) {
+        gitStatusRoot = requestedRoot
+        gitStatusValue = null
+        currentBranch.value = ''
+        branchTrackInfos.value = []
+        isOnBranch.value = undefined
+        branchNames.value = []
+      }
+      throw caught
+    }).finally(() => {
+      if (gitStatusPending?.promise === pending) gitStatusPending = undefined
+    })
+    gitStatusPending = { root: requestedRoot, promise: pending }
+    return pending
+  }
   async function load(more = false): Promise<boolean> {
     if (!isDesktop || !root.value || (more && (loading.value || !hasMore.value))) return false
     const token = ++logToken
     const current = scope()
     loading.value = true
     error.value = ''
-    if (!more) { offset = 0; hasMore.value = false }
+    if (!more) { offset = 0; hasMore.value = false; void loadGitStatus(true).catch(() => {}) }
     try {
       const data = await request<GitFullLog>('git.logFull', { ...query.value, limit: 200, offset: more ? offset : 0 })
       if (!current() || token !== logToken) return false
@@ -182,18 +225,15 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?:
   // （`GoToHashOrRefAction.java:44`），类型是 `VcsLogAggregatedStoredRefs`（`VcsLogDataPack.java:29`），
   // 含义是"所有根上的**全部** stored refs"（`VcsLogAggregatedStoredRefs.kt:24`）—— 不是已加载那一页的引用；
   // 两批的划分在 `VcsRefCompletionProvider.java:26-38`（`collectSync` = 分支，`collectAsync` = 非分支引用）。
-  // 本仓的对应物：分支 = `git.status` 的 `branches`（`native/main.cpp:1135` 那句 `taocode::git::branches`），
-  // 标签 = `git.tags`（`native/git.hpp:102`）。两条都是**取一次、缓存着**（同一仓库根的 refs 不会自己变），
+  // 本仓的对应物：分支与当前分支名来自 `git.status`（`native/main.cpp:1274-1288`），标签来自
+  // `git.tags`（`native/git.hpp:102`）。status 在首屏/刷新时更新，分支列表复用这份快照；标签按需缓存。
   // 换仓库根就作废（见下面 `watch(root)`），否则切项目还在补上一个项目的分支。
-  const branchNames = ref<string[]>([])
-  const tagNames = ref<string[]>([])
   async function loadBranchNames(): Promise<string[]> {
     if (!isDesktop || !root.value) return []
     if (branchNames.value.length) return branchNames.value
-    const current = scope()
-    const data = await request<GitStatus>('git.status', {})
+    const data = await loadGitStatus()
+    if (!data) return []
     const names = data.branches ?? []
-    if (current() && root.value) branchNames.value = names
     return names
   }
   async function loadTagNames(): Promise<string[]> {
@@ -215,6 +255,8 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?:
     commits.value = []; selected.value = ''; query.value = restoredQuery(); error.value = ''
     details.value = null; changes.value = null; detailsError.value = ''; changesError.value = ''
     detailsLoading.value = false; changesLoading.value = false
+    gitStatusToken++; gitStatusRoot = ''; gitStatusValue = null; gitStatusPending = undefined; currentBranch.value = ''
+    branchTrackInfos.value = []; isOnBranch.value = undefined
     branchNames.value = []; tagNames.value = []
     if (active.value) void load()
   }, { flush: 'sync' })
@@ -224,5 +266,5 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?:
   onBeforeUnmount(() => { generation++; logToken++; selectionToken++; navigationToken++ })
   return { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,
     canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick, loadSelection, scope,
-    resetTo, uncommit, createTagOn, deleteTag, loadBranchNames, loadTagNames }
+    resetTo, uncommit, createTagOn, deleteTag, loadBranchNames, loadTagNames, currentBranch, branchTrackInfos, isOnBranch }
 }

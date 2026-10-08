@@ -85,3 +85,10 @@ b89 的处理是把这条漂移**逐条登记 + 机械钉死**在 `tests/b9-verd
 `B7=[x] / B9=[~]`、B9 行必须仍写着「继承 B7 判决」、五条本仓 `文件:行号` 与两条上游 `路径:行号` 每次跑门
 都要仍在那一行上（符号不在 ⇒ 红）、漂移修好后条目不删 ⇒ 红。交叉核对的范围没缩（仍 630 条逐条、
 `declared + justified + registered == shared.length`、`declared >= 300` 一条没松）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1 跳过** —— 四步全部落在 `docs/inventory/verdict-settings-run.md` 与 `tests/b9-verdict.test.mjs`，本 lane **禁改** `docs/inventory/**`，`tests/**` 也不属本 lane。需 settings-run lane 处理（请求原文已给出逐字可照抄的四步）。
+- **W-2 已留痕** —— 请求原文自己写明「已由该 lane 自行同步」，本轮复核 `docs/inventory/verdict-settings-run.md` 为 `M` 状态，无需再动。
+
+结论：**零接线**，未改任何文件（本份是 verdict 文档 lane 的交接单，不含 UI 挂载点）。

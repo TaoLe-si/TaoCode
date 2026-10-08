@@ -6,8 +6,10 @@ import { errorMessage } from './errors.ts'
 import { cloneRunConfig, discoverRunTargets, filesNeedingContent, rememberTemporary, runTargetConfiguration, stableRunConfig,
   type RunTarget, type RuntimeRunConfig } from './runTargets.ts'
 import { runtimeOutputPaths } from './projectBuild.ts'
-import { runConfigClosure, runConfigReferrers } from './runConfigTree.ts'
+import { applyRunConfigSave, runConfigClosure, runConfigReferrers, type RunConfigSaveOrigin } from './runConfigTree.ts'
 import { normalizeRunConfigurations } from './runConfigurationSchema.ts'
+// 那两个「启动时打开/聚焦运行面板」开关的上游默认（缺键补默认走的也是同一个入口，见 src/runStartupFocus.ts）。
+import { ACTIVATE_TOOL_WINDOW_DEFAULT, FOCUS_TOOL_WINDOW_DEFAULT, runStartupFocusFlagsOf } from './runStartupFocus.ts'
 import { matchLibraryGlob } from './buildHost.ts'
 import { configIndexIn, orderRunConfigNames, rememberRecentConfiguration } from './runToolbar.ts'
 
@@ -100,6 +102,13 @@ export function createRunConfigurations(deps: RunConfigurationsDeps) {
   const runConfigBefore = ref<Array<{ name: string; command: string }>>([])
   const runConfigFolder = ref('')
   const runConfigParallel = ref(false)
+  // 「启动时打开运行面板」/「启动时把焦点移到运行面板」——这两个值的**存放处是配置记录本身**
+  // （上游 `RunnerAndConfigurationSettings.java:242`/`:256`，判据 tests/run-startup-focus.test.mjs 的「唯一真源」两条）。
+  // 这里带着它们走一遍草稿：可编辑的那格在运行配置对话框（`src/components/RunConfigurationsDialog.vue`，
+  // 对应上游 Before launch 那两格），但内联草稿也会整份重建记录 ⇒ 不在这里 passthrough 就等于
+  // 「从内联面板存一次就把用户的开关悄悄清回默认」，那是第二个 bug，不是第二处真源。
+  const runConfigActivateToolWindow = ref(ACTIVATE_TOOL_WINDOW_DEFAULT)
+  const runConfigFocusToolWindow = ref(FOCUS_TOOL_WINDOW_DEFAULT)
   const selectedMetadata = ref<Pick<RuntimeRunConfig, 'temporary' | 'sourceTarget'>>({})
   const runConfigEditorOpen = ref(false)
   const runConfigDebug = ref(false)
@@ -120,6 +129,12 @@ export function createRunConfigurations(deps: RunConfigurationsDeps) {
         ? [...originalEnv.value] : runConfigEnv.value.split(/\r?\n/).filter(line => line.trim()),
       beforeLaunch: runConfigBefore.value.map(step => ({ ...step })),
       folder: runConfigFolder.value.trim(), allowRunningInParallel: runConfigParallel.value,
+      // 只把**非默认**值写进记录（上游写档 `RunnerAndConfigurationSettingsImpl.kt:317-321` 同一条规则），
+      // 所以「从没动过开关」的配置记录形状与改造前逐字相同。
+      ...(runConfigActivateToolWindow.value !== ACTIVATE_TOOL_WINDOW_DEFAULT
+        ? { activateToolWindowBeforeRun: runConfigActivateToolWindow.value } : {}),
+      ...(runConfigFocusToolWindow.value !== FOCUS_TOOL_WINDOW_DEFAULT
+        ? { focusToolWindowBeforeRun: runConfigFocusToolWindow.value } : {}),
       ...(runConfigType.value === 'compound' ? { configurations: [...runConfigMembers.value] } : {}),
       ...(selectedMetadata.value.temporary ? { temporary: true } : {}),
       ...(selectedMetadata.value.sourceTarget ? { sourceTarget: { ...selectedMetadata.value.sourceTarget } } : {}),
@@ -137,6 +152,10 @@ export function createRunConfigurations(deps: RunConfigurationsDeps) {
     runConfigBefore.value = (config?.beforeLaunch ?? []).map(step => ({ ...step }))
     runConfigFolder.value = config?.folder ?? ''
     runConfigParallel.value = config?.allowRunningInParallel === true
+    // 读档语义照上游两行（`RunnerAndConfigurationSettingsImpl.kt:243-244`）：
+    // 记录里缺 `activate` 键 ⇒ **true**、缺 `focus` 键 ⇒ false，缺键不是坏记录。
+    runConfigActivateToolWindow.value = runStartupFocusFlagsOf(config).activateToolWindowBeforeRun
+    runConfigFocusToolWindow.value = runStartupFocusFlagsOf(config).focusToolWindowBeforeRun
     runConfigDebugAdapter.value = config?.adapter || (config?.sourceTarget?.kind === 'java' ? 'java' : config?.sourceTarget?.kind === 'python' ? 'debugpy' : 'cppvsdbg')
     runConfigDebug.value = runConfigType.value === 'debug'
     selectedMetadata.value = config?.temporary ? { temporary: true, sourceTarget: config.sourceTarget } : {}
@@ -174,13 +193,16 @@ export function createRunConfigurations(deps: RunConfigurationsDeps) {
       return true
     } catch (error) { if (current(root, generation)) notify(errorMessage(error), true); return false }
   }
-  async function saveRunConfigFromDialog(config: RunConfig) {
+  async function saveRunConfigFromDialog(config: RunConfig, origin?: RunConfigSaveOrigin) {
     const stable = stableRunConfig(config)
-    const next = stableConfigs.value.filter(item => item.name !== stable.name)
-    const index = stableConfigs.value.findIndex(item => item.name === stable.name)
-    next.splice(index < 0 ? next.length : index, 0, stable)
-    if (!await persistRunConfigs(next, `已保存运行配置「${stable.name}」`)) return
-    temporaryConfigs.value = temporaryConfigs.value.filter(item => item.name !== stable.name)
+    // 就地改名 / 副本插位 / 复合成员引用回写这三件事的规则（含与上游的差异）写在
+    // `src/runConfigTree.ts` 的 `applyRunConfigSave`，判据 tests/run-config-rename.test.mjs。
+    const { configs, renamed, previous } = applyRunConfigSave(stableConfigs.value, stable, origin)
+    if (!await persistRunConfigs(configs, renamed
+      ? `已重命名运行配置「${previous}」为「${stable.name}」`
+      : `已保存运行配置「${stable.name}」`)) return
+    // 临时那一份：改名的话旧名那条也要一起摘掉，否则它会以旧名字继续挂在树里。
+    temporaryConfigs.value = temporaryConfigs.value.filter(entry => entry.name !== stable.name && entry.name !== previous)
     loadRunConfigDraft(stable.name)
   }
   async function removeRunConfigFromDialog(name: string) {

@@ -19,6 +19,18 @@ import { runExitAnnouncement } from './processTerminated.ts'
 import { parseProcessTree, type RunProcessEntry } from './processTree.ts'
 import { createConsoleDecoder, readConsoleEncoding, writeConsoleEncoding } from './consoleEncoding.ts'
 import type { CoverageSummary } from './coverageReport.ts'
+import { executionEnvironmentOf, executionListeners, type ExecutionProcessHandler } from './executionListeners.ts'
+// 实例的执行器显示名走 `com.intellij.executor` 注册表（上游 `Executor.getActionName()`）——
+// 注册表在 `src/executors.ts`（只 import extensionPoints，不带 vue/DOM，纯数据层）。
+import { executorById } from './executors.ts'
+import { decideRunStartupFocus, type RunStartupFocusDecision, type RunStartupFocusFlags } from './runStartupFocus.ts'
+// 执行域那两条 EP 的宿主（id 逐字见 `src/executionRunExtensionPoints.ts` 文件头）：
+//   · `com.intellij.execution.processHandlerPidProvider` —— 插件自报 pid，宿主快照是兜底；
+//   · `com.intellij.execution.consolePauseStateProvider` —— 运行控制台的暂停位在这里作为
+//     **bundled 贡献**登记（上游那一格是 `XDebuggerConsolePauseStateProvider`）。
+import {
+  consolePausedByProviders, pidFromProcessHandlerProviders, registerBundledConsolePauseStateProvider,
+} from './executionRunExtensionPoints.ts'
 
 /** 输出保留的行数上限（与单实例时代一致，防止刷屏吃内存）。 */
 export const RUN_OUTPUT_LIMIT = 4000
@@ -63,6 +75,18 @@ export interface RunInstanceRecord {
    * `record()` 叫醒成一个"复活"的标签。已结束才关的（`running === false`）当场就删。
    */
   closed: boolean
+  /**
+   * 这一段（或这条链）**不是自己跑完的** —— 被 `run.stop` 停掉、或 Before launch 链因为
+   * 上一步非 0 退出而中止（`native/run_host.cpp:313-330` 的 `advance` / `:306-326` 的
+   * `stop_instance`，两处都置 `aborted` 并回 `run.exit{aborted:true}`）。
+   *
+   * 为什么要有这个字段（而不是只看 `exit === -1`）：`-1` 是宿主在"被停止"时用的**哨兵**，
+   * 而链中止那条报的是上一步**真实的**非 0 退出码 —— 只看数字会把"跑完退出 1"与
+   * "被停止/链中止"混成一档（上游 `ProcessAdapter.processTerminated` 与
+   * `ExecutionListener.processTerminated` 正是把这两件事分开报的）。快照
+   * （`run.instances` 的 `aborted`）也会带上它，所以 UI 重取清单时不靠事件流也能知道。
+   */
+  aborted: boolean
 }
 
 export const runInstances = reactive(new Map<number, RunInstanceRecord>())
@@ -72,6 +96,16 @@ export const activeRunInstance = ref(0)
 export const runOutput = reactive<string[]>([])
 /** 聚合状态：还有实例在跑 / 当前实例的退出码。 */
 export const runState = reactive<{ running: boolean; exit: number | null }>({ running: false, exit: null })
+
+/**
+ * 「解释器」那一档的可用性（上游 `ConsoleExecuteActionHandler` 的 `myUseProcessStdIn == false`，
+ * `platform/lang-impl/src/com/intellij/execution/console/ConsoleExecuteAction.java:118-152`）。
+ * 判定与命令拼装在 `src/consoleExecute.ts`；这里只存**这条实例有没有解释器命令**（启动时由
+ * `src/runActions.ts` 按当前运行配置记下），RunConsole 据此决定那一行显不显示。
+ * 与上游的如实差异：上游解释器来自运行配置里的 `GeneralCommandLine`，本仓没有那层模型，
+ * 用「这条配置的可执行程序」当解释器（没有可执行程序的 shell 配置就没有这一档）。
+ */
+export const runInterpreterCommand = ref('')
 
 // 输出按字节流解码：子进程用自己的代码页，分块边界可能切开一个多字节字符。
 // 字符集可切换（上游的组合框在 **Editor › General › Console** 设置页，不是每个控制台一个：
@@ -140,6 +174,73 @@ export function setRunOutputPaused(paused: boolean): void {
   }
 }
 
+/** 运行控制台在 EP 里的 id（`ConsoleRef.id`，上游 `ExecutionConsole` 的可移植面）。 */
+export const RUN_CONSOLE_ID = 'run'
+
+// 运行控制台的暂停位作为 `com.intellij.execution.consolePauseStateProvider` 的 **bundled 贡献**登记：
+// 上游那一格是 `XDebuggerConsolePauseStateProvider`（调试会话暂停 ⇔ 控制台算暂停），本仓的同类
+// 事实来源就是这里的 `runOutputPaused`（宿主 `native/run_host.cpp` 只管输出，暂停是前端视图态）。
+registerBundledConsolePauseStateProvider({
+  id: 'RunConsolePauseStateProvider',
+  isPaused: console => console.id === RUN_CONSOLE_ID && runOutputPaused.value,
+})
+
+/**
+ * 这个控制台算不算暂停（上游 `TestConsoleProperties.isPaused`：逐个问 EP、任一为真即为真）+ 本仓自己的
+ * 暂停位。消费点 `src/components/RunConsole.vue` 的暂停按钮/提示行与 `setRunOutputPaused` 的两侧。
+ * 无插件时 = `runOutputPaused.value`（bundled 那条就是它）⇒ 与接线前逐字一致。
+ */
+export function runOutputPausedState(): boolean {
+  return runOutputPaused.value || consolePausedByProviders({ id: RUN_CONSOLE_ID })
+}
+
+/**
+ * 运行实例 → 执行器/配置类型（用于 ExecutionListener 的 env；宿主只回 label，这两格由
+ * `src/runActions.ts` 在发起运行时登记）。不响应式：只喂 `src/executionListeners.ts` 的事件。
+ * 见 `exec/run-instances` 判词：`ExecutionListener` 主题已落（`src/executionListeners.ts`）。
+ */
+const instanceExecutors = new Map<number, { executorId: string; runProfileType?: string }>()
+
+/** 登记某实例的执行器与配置类型（`runActions` 起跑后调用）。 */
+export function setRunInstanceExecutor(id: number, executorId: string, runProfileType?: string): void {
+  if (typeof id !== 'number' || id <= 0) return
+  instanceExecutors.set(id, { executorId, runProfileType })
+}
+
+/**
+ * 这条实例的执行器显示名（`Executor.getActionName()`，`com.intellij.executor` 表里的那条）。
+ * 注册表把这个 id 认不出来时回落到 id 本身 —— 上游 `RunContentManager` 找不到执行器时也不会
+ * 把内容藏起来（它只是拿不到图标/工具窗口），所以这里同样不返回空串。
+ */
+export function runInstanceExecutorName(id: number): string {
+  const bound = instanceExecutors.get(id)
+  if (!bound) return ''
+  return executorById(bound.executorId)?.getActionName() ?? bound.executorId
+}
+
+function executorTitleFor(id: number): string {
+  const bound = instanceExecutors.get(id)
+  return bound ? runInstanceExecutorName(id) : ''
+}
+
+/** 为一条记录合成 ExecutionListener 的 env（上游 `ExecutionManagerImpl` 拿 `ExecutionEnvironment` 发信）。 */
+function executionEnvFor(target: RunInstanceRecord, id: number) {
+  const bound = instanceExecutors.get(id)
+  return executionEnvironmentOf(id, target.label, bound?.executorId ?? 'Run', bound?.runProfileType)
+}
+
+/** 为一条记录合成 `ProcessHandler` 只读快照（见 src/executionListeners.ts 文件头差异 ②）。 */
+function executionHandlerFor(target: RunInstanceRecord, id: number): ExecutionProcessHandler {
+  return {
+    instanceId: id,
+    label: target.label,
+    pid: target.pid,
+    isRunning: target.running,
+    isProcessTerminating: target.stopping,
+    exitCode: target.exit,
+  }
+}
+
 function record(id: number): RunInstanceRecord {
   const found = runInstances.get(id)
   if (found) return found
@@ -147,7 +248,7 @@ function record(id: number): RunInstanceRecord {
   // 可能复用同一个 id，留着上一轮的残段会把半个字拼进新一轮的输出里。
   instanceDecoders.delete(id)
   // 事件可能比 `run.start` 的回包先到（两者是两条独立消息），所以这里要能"先建后填"。
-  const created: RunInstanceRecord = { id, label: '', running: true, exit: null, startedAt: Date.now(), output: [], pid: 0, children: [], tree: [], ports: [], coverage: null, stopping: false, closed: false }
+  const created: RunInstanceRecord = { id, label: '', running: true, exit: null, startedAt: Date.now(), output: [], pid: 0, children: [], tree: [], ports: [], coverage: null, stopping: false, closed: false, aborted: false }
   runInstances.set(id, created)
   return created
 }
@@ -166,6 +267,7 @@ export function runInstanceList(): RunInstanceRecord[] {
 function forget(id: number): void {
   runInstances.delete(id)
   instanceDecoders.delete(id)
+  instanceExecutors.delete(id)
   if (activeRunInstance.value !== id) return
   const next = runInstanceList()[0]
   activeRunInstance.value = next?.id ?? 0
@@ -211,13 +313,74 @@ export function clearRunOutput(): void {
   runOutput.splice(0, runOutput.length)
 }
 
+/**
+ * 「启动一个运行实例时把键盘焦点移进运行面板」的**宿主回调**（exec2 R3）。
+ *
+ * 上游链路：`ExecutionManagerImpl.kt:290-293` 把配置上的 activate/focus 合成 descriptor 的
+ * `isActivateToolWindowWhenAdded`/`isAutoFocusContent` → `RunContentManagerImpl.kt:432-435` 选中新 Content、
+ * `:439-441` 不看面板就 return、`:450-457` 决定是否 `focus`、`:458` 交给 `activate(callback, focus, focus)`。
+ * 判定本身是纯函数（`src/runStartupFocus.ts` 的 `decideRunStartupFocus`）；本模块只知道事件，
+ * 所以要宿主补两件本层拿不到的事实：**这条配置的开关**与**当前有没有焦点所有者**，
+ * 以及那一步真正的键盘焦点动作（`src/App.vue` 的 `focusToolWindowContent('run')`）。
+ * 宿主未注入时 `applyRunStartupFocus` 什么都不做（不影响原有行为）。
+ */
+export interface RunStartupFocusHost {
+  /** 这条实例对应的运行配置上那两个开关（上游 `RunnerAndConfigurationSettings.java:242`/`:256`，每条配置一份）。 */
+  flagsFor: (instance: RunInstanceRecord) => RunStartupFocusFlags
+  /** 把键盘焦点移进运行工具窗口（`RunContentManagerImpl.kt:458` 的 `activate(…, focus, focus)`）。 */
+  focusRunToolWindow: () => void
+  /** 此刻整个应用没有焦点所有者（`RunContentManagerImpl.kt:451-457` 那一档）。 */
+  focusOwnerMissing?: () => boolean
+}
+
+let runStartupFocusHost: RunStartupFocusHost | null = null
+
+/** 注入/清除宿主回调（宿主 bootstrap 时调；判据也用它）。 */
+export function setRunStartupFocusHost(host: RunStartupFocusHost | null): void { runStartupFocusHost = host }
+
+/** 当前宿主回调（排查用）。 */
+export function runStartupFocusHostOf(): RunStartupFocusHost | null { return runStartupFocusHost }
+
+/**
+ * 新实例选中之后的那一步：按上游那三档算 `takeFocus`，为真就调宿主的夺焦动作。
+ * `existingView` = 同一条配置原来那一格（`RunContentManagerImpl.kt:788-826` 的「复用还是新开」）；
+ * 传 null 表示这条配置没有已有视图。返回判定结果（宿主没注入 ⇒ null，什么都没做）。
+ */
+export function applyRunStartupFocus(
+  instance: RunInstanceRecord, existingView: RunInstanceRecord | null = null,
+): RunStartupFocusDecision | null {
+  const host = runStartupFocusHost
+  if (!host) return null
+  let flags: RunStartupFocusFlags
+  try { flags = host.flagsFor(instance) } catch { return null }
+  const decision = decideRunStartupFocus({
+    ...flags,
+    existingView: existingView
+      ? { running: existingView.running, selected: existingView.id === activeRunInstance.value }
+      : null,
+    // `:451-457`：焦点原本就在被换掉的那块视图里 ⇒ 强制夺焦。宿主拿不到 document 时为 false。
+    focusOwnerMissing: host.focusOwnerMissing?.() === true,
+  })
+  if (decision.takeFocus) host.focusRunToolWindow()
+  return decision
+}
+
 /** 宿主报告新实例（`run.started`）。 */
 export function handleRunStarted(data: { instance?: number; label?: string }): boolean {  if (typeof data.instance !== 'number') return false
+  const label = typeof data.label === 'string' ? data.label : undefined
+  // `existingView` 要在新实例建记录**之前**取：它指的是「同一条配置原来那一格」（按 label 找）。
+  const sameName = label === undefined
+    ? null
+    : runInstanceList().find(instance => instance.id !== data.instance && instance.label === label) ?? null
   const created = record(data.instance)
-  if (typeof data.label === 'string') created.label = data.label
+  if (label !== undefined) created.label = label
   // 宿主事件与 run.start 回包可能先后到达；相同 id 只确认，不重置已收到的输出/退出。
   focusRunInstance(data.instance)   // IDEA 打开新 Content 时会选中它
   refreshAggregate()
+  // ExecutionListener 主题：`ExecutionManagerImpl.kt:384` 在 `startNotify()` 之后发 processStarted。
+  executionListeners.processStarted(executionEnvFor(created, data.instance), executionHandlerFor(created, data.instance))
+  // R3：选中之后按上游那三档决定要不要把键盘焦点移进面板（宿主回调未注入 ⇒ 无副作用）。
+  applyRunStartupFocus(created, sameName)
   return true
 }
 
@@ -269,7 +432,14 @@ export function handleRunExit(data: { instance?: number; code?: number; remainin
   if (id) {
     const target = record(id)
     target.exit = data.code
+    // `aborted` 与 `run.exit` 一起到（`native/run_host.cpp:306-326`）：它区分"自己跑完退出 N"
+    // 与"被停止/链中止"。链中止时报的是上一步真实的非 0 码，所以这一位不能只看 `code === -1`。
+    if (data.aborted === true) target.aborted = true
     if (remaining === 0) { target.running = false; target.stopping = false }
+    // ExecutionListener 主题：`ExecutionManagerImpl.kt:1198` 发 processTerminated（带退出码）。
+    // `aborted` 那条（被停止/链中止）上游同样走 processTerminated，只是退出码是哨兵/中止码。
+    // 发在"关闭视图即 forget"之前：视图关掉不等于监听器不该知道它结束了。
+    executionListeners.processTerminated(executionEnvFor(target, id), executionHandlerFor(target, id), data.code)
     // 关闭的视图：这条退出是宿主对 `run.stop` 的收尾（native/run_host.cpp:306-310），整条链走完
     // 才真正把记录删掉 —— 中间还有 before-launch 后续步骤时继续收（`remaining > 0`）。
     if (remaining === 0 && target.closed) { forget(id); return true }
@@ -319,7 +489,11 @@ export function endRun(instance?: number): void {
  */
 export function markRunInstanceStopping(id: number): void {
   const target = runInstances.get(id)
-  if (target && target.running) target.stopping = true
+  if (target && target.running) {
+    target.stopping = true
+    // ExecutionListener 主题：`ExecutionManagerImpl.kt:1216` 发 processTerminating。
+    executionListeners.processTerminating(executionEnvFor(target, id), executionHandlerFor(target, id))
+  }
 }
 
 /**
@@ -365,16 +539,27 @@ export function applyRunInstanceSnapshot(rows: readonly unknown[]): number {
   let claimed = 0
   for (const raw of rows) {
     if (!raw || typeof raw !== 'object') continue
-    const row = raw as { id?: unknown; pid?: unknown; children?: unknown; tree?: unknown; ports?: unknown }
+    const row = raw as { id?: unknown; pid?: unknown; children?: unknown; tree?: unknown; ports?: unknown; exitCode?: unknown; aborted?: unknown }
     if (typeof row.id !== 'number') continue
     const target = runInstances.get(row.id)
     if (!target) continue
-    if (typeof row.pid === 'number' && Number.isFinite(row.pid) && row.pid >= 0) target.pid = row.pid
+    // pid：先问 EP（`com.intellij.execution.processHandlerPidProvider`，上游 `getPid(handler)` 逐个问、
+    // 第一个非 null 的赢）—— 语言后端自报的 pid 比快照更权威；没有插件（上游平台内也没有内建贡献）
+    // 时回落到宿主快照那一格，行为与接线前逐字一致。
+    const providerPid = pidFromProcessHandlerProviders(executionHandlerFor(target, row.id))
+    if (providerPid !== null) target.pid = providerPid
+    else if (typeof row.pid === 'number' && Number.isFinite(row.pid) && row.pid >= 0) target.pid = row.pid
     if (Array.isArray(row.children)) target.children = row.children.filter((pid): pid is number => typeof pid === 'number')
     // `tree` 比 children 多出父子关系与进程名；老宿主没有这个字段时保留上一次的树。
     if (Array.isArray(row.tree)) target.tree = parseProcessTree(row.tree)
     // 监听端口（宿主 IpHelper 快照；老宿主没有这个字段时保留上一次的结果）。
     if (Array.isArray(row.ports)) target.ports = [...new Set(row.ports.filter((port): port is number => typeof port === 'number' && port > 0 && port < 65536))]
+    // 退出码与 `aborted` 也**只作补充**（`native/run_host.cpp:488-492` 快照带的这两位）：
+    // 它们只在事件流还没到达时才填得上（`target.exit === null`），一旦 `run.exit` 报过就
+    // 以事件流为准 —— 否则一条迟到的快照会把已经报过的退出码/归因改回去（同 `running` 的取舍）。
+    // `exitCode` 为 `null` 表示宿主那边还在跑 ⇒ 不写（不能把"还没结束"当成"退出码 0"）。
+    if (target.exit === null && typeof row.exitCode === 'number' && Number.isFinite(row.exitCode)) target.exit = Math.trunc(row.exitCode)
+    if (row.aborted === true) target.aborted = true
     claimed++
   }
   return claimed
@@ -548,12 +733,35 @@ export interface RunInstanceRow {
   bufferLimitChars: number
   /** 缓冲是否已经截过头（行数上限或字符上限任一命中）。 */
   truncated: boolean
+  /**
+   * 这一段/这条链不是自己跑完的（宿主 `aborted`：被停止或 Before launch 链中止）。
+   * 与 `state === 'stopped'` 不同源：`stopped` 也包含「宿主记了 -1 但没报 aborted」的旧形状
+   * （`endRun` 的兜底），这一位只有宿主明确报过 `aborted` 才为真。
+   */
+  aborted: boolean
+  /**
+   * 这条实例挂在哪条执行器上（上游 `RunContentDescriptor` 一族由 `RunContentManager` 按
+   * `Executor` 配对；本仓由 `src/runActions.ts` 起跑时登记）。值是执行器的
+   * `Executor.getActionName()`（`Run` / `Debug`；第三方执行器按它自报的名字），
+   * 认不出执行器时回落到 id。运行/调试两条通道并存时，控制台与仪表盘靠这一格分辨。
+   */
+  executor: string
 }
 
-/** 退出码四档（与 `src/runDashboard.ts:69-75` 一致；被 `endRun` 记为 -1 的那些算 stopped）。 */
-export function runInstanceState(running: boolean, exit: number | null): RunInstanceRowState {
+/**
+ * 退出码四档（与 `src/runDashboard.ts:69-75` 一致；被 `endRun` 记为 -1 的那些算 stopped）。
+ *
+ * 第三个参数是本轮补的**归因**位：`aborted === true` 表示这一段/这条链不是自己跑完的
+ * （被 `run.stop` 停掉，或 Before launch 链因上一步非 0 退出而中止）。上游
+ * `RunDashboardRunConfigurationStatus.getStatus` 的判据正是
+ * `exitCode == 0 || TERMINATION_REQUESTED ⇒ STOPPED`（`:71-73`）—— 所以「被停止/链中止」
+ * 应当落 `stopped`，**不管**它报的退出码是 0 还是别的（链中止报的是上一步真实的非 0 码，
+ * 只看数字会把它当成程序自己失败）。缺省 `false` 时行为与拆分前逐字一致。
+ */
+export function runInstanceState(running: boolean, exit: number | null, aborted = false): RunInstanceRowState {
   if (running) return 'running'
   if (exit === null) return 'running'
+  if (aborted) return 'stopped'
   if (exit === 0) return 'ok'
   if (exit === -1) return 'stopped'
   return 'failed'
@@ -580,9 +788,18 @@ export function runInstanceTabDescription(instance: Pick<RunInstanceRecord, 'run
   return `进程 ID：${instance.pid}`
 }
 
-/** 标签上的退出码徽标（保持 `RunConsole.vue:119-121` 今天的形状，宿主只是换成读模型）。 */
-export function runInstanceExitText(instance: Pick<RunInstanceRecord, 'running' | 'exit'>): string {
-  return instance.running || instance.exit === null ? '' : `exit ${instance.exit}`
+/**
+ * 标签上的退出码徽标（保持 `RunConsole.vue:119-121` 今天的形状，宿主只是换成读模型）。
+ *
+ * `aborted` 的那一档**不写数字**：`-1` 是宿主在"被停止"时用的哨兵（`native/run_host.cpp`
+ * 的 `stop_instance`），把它当退出码显示是编造一个进程没报过的数字。被停止/链中止那两条
+ * 已经在控制台里有各自的整句（宿主写「链已中止…」、`src/processTerminated.ts` 写状态栏），
+ * 徽标这一格只留 `已停止` 这一档词 —— 与 `runInstanceStatusText` 的 `stopped` 同一条措辞。
+ */
+export function runInstanceExitText(instance: Pick<RunInstanceRecord, 'running' | 'exit' | 'aborted'>): string {
+  if (instance.running || instance.exit === null) return ''
+  if (instance.aborted) return '已停止'
+  return `exit ${instance.exit}`
 }
 
 /** 一格的可停性（`StopAction.java:310-315`）。 */
@@ -612,7 +829,7 @@ export function runInstanceRows(activeId: number = activeRunInstance.value): Run
   const titleCounts = new Map<string, number>()
   for (const title of titles) titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1)
   return ordered.map((instance, index) => {
-    const state = runInstanceState(instance.running, instance.exit)
+    const state = runInstanceState(instance.running, instance.exit, instance.aborted)
     const bufferChars = consoleBufferChars(instance.output)
     return {
       id: instance.id,
@@ -632,238 +849,17 @@ export function runInstanceRows(activeId: number = activeRunInstance.value): Run
       bufferChars,
       bufferLimitChars: RUN_CONSOLE_BUFFER_LIMIT_CHARS,
       truncated: instance.output.length >= RUN_OUTPUT_LIMIT || bufferChars > RUN_CONSOLE_BUFFER_LIMIT_CHARS,
+      aborted: instance.aborted,
+      executor: executorTitleFor(instance.id),
     }
   })
 }
 
-// ── 多实例并存时「停止」这一格到底停谁（上游 `StopAction` 的装配） ───────────────────────
-//
-// 上游坐标（`platform/execution-impl/src/com/intellij/execution/actions/StopAction.java`）：
-//   · `:73-128` `update()`：全局位置（主菜单/主工具栏/运行工具条…，判定在 `:59-65`）时
-//     `enable = stopCount >= 1`（`:79-81`）；`stopCount == 0` 且位置是新 UI 运行工具条 ⇒ **整格不可见**
-//     （`:83-86`）；`stopCount > 1` ⇒ 文案加 `...`（`:88-89`）+ 图标上叠一个计数（`:90-92`，
-//     计数文本在 `platform/execution-impl/src/com/intellij/execution/ui/RunToolbarPopup.kt:752-758`：
-//     新 UI 工具条且 >9 就写 `9+`）；`stopCount == 1` ⇒ 文案换成 `stop.configuration.action.name`
-//     （`:93-97`；`ExecutionBundle.properties:208` = `Stop ''{0}''`）；
-//     非全局位置（工具窗口里那一格）时 `:99-111`：只有「没结束」才可点，正在结束的那档换成 Kill process。
-//   · `:134-229` `actionPerformed`：只有一条 ⇒ **直接停它、不弹层**（`:141-143`）；多条 ⇒ 弹一个选择器
-//     （`:152-181`），末尾追加一条「Stop All (…)」（`:158-168` 与 `:177-179`；文案
-//     `ExecutionBundle.properties:209` = `Stop All ({0})`，`{0}` 是 `KeymapUtil.getFirstKeyboardShortcutText("Stop")`，
-//     `:159`）；**弹层还开着时再点一次 = 停全部并收起**（`:169-174`）；标题：只有一项时
-//     `confirm.process.stop`、否则 `stop.process`（`:199`；`ExecutionBundle.properties:491-492`）；
-//     预选中的是那一条「最近打开的视图」（`:213-215` + `:279-290` 的 `getRecentlyStartedContentDescriptor`）。
-//   · 清单本身：`platform/execution-impl/src/com/intellij/execution/StoppableRunDescriptors.kt:17-63`
-//     —— 已结束的不进（`:24-26`），顺序是 `getAllDescriptors().asReversed()`（`:19`，**新起的那条在最前**），
-//     一个执行环境（= 同一个运行配置的多个 descriptor）只出**一条代表**（`:51-62`，代表由
-//     `DisplayDescriptorChooser` 扩展点选，本仓没有 EP 宿主 ⇒ 一个实例一条，如实登记）。
-
-export const STOP_LABELS = {
-  /** `ActionsBundle.properties:941`（`action.Stop.text=Stop`）。 */
-  base: '停止',
-  /** `ActionsBundle.properties:942`（`action.Stop.description=Stop the process`）。 */
-  description: '停止进程',
-  /** `ExecutionBundle.properties:208`（`stop.configuration.action.name=Stop ''{0}''`）。 */
-  one: (name: string) => `停止『${name}』`,
-  /** `StopAction.java:89` 的 `getText() + "..."`。 */
-  many: '停止…',
-  /** `ExecutionBundle.properties:209`（`stop.all=Stop All ({0})`），`{0}` 由宿主传键位文本。 */
-  all: (shortcut: string) => (shortcut ? `停止全部（${shortcut}）` : '停止全部'),
-  /** `ExecutionBundle.properties:491`（`stop.process=Stop Process`）。 */
-  popupTitle: '停止进程',
-  /** `ExecutionBundle.properties:492`（`confirm.process.stop=Confirm Process Stop`）。 */
-  popupTitleSingle: '确认停止进程',
-  /** `ExecutionBundle.properties:203` 与 `:529`（都是 `Kill process`）。 */
-  kill: '杀死进程',
-  /** `ExecutionBundle.properties:202`（`terminating.process.progress.title=Terminating ''{0}''`）。 */
-  terminating: (name: string) => `正在结束『${name}』`,
-} as const
-
-/** 停止按钮所在的位置（`StopAction.java:59-65` 的 `isPlaceGlobal` 的两档 + 新 UI 运行工具条）。 */
-export type StopActionPlace = 'global' | 'newUiRunToolbar' | 'local'
-
-export interface StopActionState {
-  enabled: boolean
-  visible: boolean
-  text: string
-  description: string
-  /** 图标上叠的计数文本（`StopAction.java:90-92`；没有就不叠）。 */
-  badge: string
-  /** 点击是弹选择器还是直接停（`:141-150`）。 */
-  popup: boolean
-  /** 目标那一条正在结束途中 ⇒ 图标/文案换成 Kill process（`:106-110`）。 */
-  kill: boolean
-  /** 可停的实例 id（选择器停全部时要用）。 */
-  stoppableIds: number[]
-}
-
-export interface StopCandidate {
-  id: number
-  title: string
-  stoppable: boolean
-  kill?: boolean
-}
-
-/** 停止判定要吃的那几列（`runInstanceRows()` 的产物结构上就满足它）。 */
-export interface StopRowInput {
-  id: number
-  title: string
-  running: boolean
-  stoppable: boolean
-  kill?: boolean
-}
-
-/** 可停清单：过滤已结束（`StoppableRunDescriptors.kt:24-26`），**新起在前**（`:19` 的 `asReversed()`）。 */
-export function stoppableCandidates(rows: readonly StopRowInput[]): StopCandidate[] {
-  return rows.filter(row => row.stoppable && row.running)
-    .map(row => ({ id: row.id, title: row.title, stoppable: true, kill: row.kill }))
-    .reverse()
-}
-
-/** 计数文本（`RunToolbarPopup.kt:752-758`：新 UI 工具条且 >9 才收成 `9+`）。 */
-export function stopCounterText(count: number, place: StopActionPlace): string {
-  if (count <= 0) return ''
-  if (place === 'newUiRunToolbar' && count > 9) return '9+'
-  return String(count)
-}
-
-/**
- * 「停止」那一格的状态（`StopAction.update()` 的 `:73-128`）。
- * `rows` 传 `runInstanceRows()` 的产物即可；`selectedId` 是本地位置的当前实例
- * （上游非全局位置读的是数据键 `RUN_CONTENT_DESCRIPTOR`，拿不到就退回 `getSelectedContent()`，`:99-101`+`:279-290`）。
- */
-export function stopActionState(
-  rows: readonly StopRowInput[],
-  place: StopActionPlace = 'global',
-  selectedId: number = 0,
-): StopActionState {
-  const candidates = stoppableCandidates(rows)
-  const count = candidates.length
-  if (place === 'local') {
-    const target = candidates.find(candidate => candidate.id === selectedId) ?? candidates[0]
-    return {
-      enabled: count > 0,
-      visible: true,
-      // `:117-122`：只要有一个描述符/配置，文案就是 `Stop ''{0}''`（不可点时也带着）。
-      text: target ? STOP_LABELS.one(target.title) : STOP_LABELS.base,
-      description: target?.kill ? STOP_LABELS.kill : STOP_LABELS.description,
-      badge: '',
-      popup: false,
-      kill: target?.kill === true,
-      stoppableIds: candidates.map(candidate => candidate.id),
-    }
-  }
-  if (count === 0) {
-    // `:83-86`：新 UI 运行工具条那一格在一条都没有时整格不见；其它全局位置只是不可点（`:125`）。
-    return {
-      enabled: false,
-      visible: place !== 'newUiRunToolbar',
-      text: STOP_LABELS.base,
-      description: STOP_LABELS.description,
-      badge: '',
-      popup: false,
-      kill: false,
-      stoppableIds: [],
-    }
-  }
-  if (count === 1) {
-    return {
-      enabled: true,
-      visible: true,
-      text: STOP_LABELS.one(candidates[0].title),
-      description: candidates[0].kill ? STOP_LABELS.kill : STOP_LABELS.description,
-      badge: '',
-      popup: false,
-      kill: candidates[0].kill === true,
-      stoppableIds: candidates.map(candidate => candidate.id),
-    }
-  }
-  return {
-    enabled: true,
-    visible: true,
-    text: `${STOP_LABELS.base}…`,
-    description: STOP_LABELS.description,
-    badge: stopCounterText(count, place),
-    popup: true,
-    kill: false,
-    stoppableIds: candidates.map(candidate => candidate.id),
-  }
-}
-
-export interface StopChooserItem {
-  id: number
-  /** `stopAll` 那一条停的是**所有**行（`StopAction.java:158-168`）。 */
-  kind: 'instance' | 'stopAll'
-  text: string
-  selected: boolean
-}
-
-export interface StopChooser {
-  items: StopChooserItem[]
-  title: string
-}
-
-/**
- * 停止选择器的条目（`StopAction.java:152-181` + `:199` + `:213-215`）。
- * `shortcutText` 由宿主从键位表取（`KeymapUtil.getFirstKeyboardShortcutText("Stop")`，`:159`）——
- * `src/keymap.ts` 是保留文件，这里不写死键位。
- */
-export function stopChooserItems(candidates: readonly StopCandidate[], selectedId: number, shortcutText = ''): StopChooser {
-  const items: StopChooserItem[] = candidates.map(candidate => ({
-    id: candidate.id,
-    kind: 'instance' as const,
-    text: STOP_LABELS.one(candidate.title),
-    selected: candidate.id === selectedId,
-  }))
-  if (candidates.length > 1) items.push({ id: 0, kind: 'stopAll', text: STOP_LABELS.all(shortcutText), selected: false })
-  return { items, title: items.length === 1 ? STOP_LABELS.popupTitleSingle : STOP_LABELS.popupTitle }
-}
-
-/**
- * 点击「停止」时要停哪几条（`:141-174`）：
- *   · 只有一条 ⇒ 直接停它（`{popup:false, ids:[that]}`）；
- *   · 多条且**没有**打开的选择器 ⇒ 弹层（`{popup:true, ids:[]}`，停谁由用户点选决定）；
- *   · 多条且弹层**还开着** ⇒ 停全部并收起（`:169-174`）。
- */
-export function resolveStopActionTargets(
-  rows: readonly StopRowInput[],
-  popupOpen: boolean,
-): { popup: boolean; ids: number[] } {
-  const candidates = stoppableCandidates(rows)
-  if (candidates.length === 0) return { popup: false, ids: [] }
-  if (candidates.length === 1) return { popup: false, ids: [candidates[0].id] }
-  if (popupOpen) return { popup: false, ids: candidates.map(candidate => candidate.id) }
-  return { popup: true, ids: [] }
-}
-
-/**
- * 「同名已结束的那一格要不要被复用」（上游 `chooseReuseContentForDescriptor`，
- * `RunContentManagerImpl.kt:788-826`：名字匹配优先 `:810-813`+`:839-846`，其次第一个「好」的 `:848-851`；
- * 条件在 `canReuseContent`（`:854-856`）：**没钉住** + **进程已结束** + 不是同一次执行；
- * 选中的那一格先查（`:834-838`））。
- *
- * 本仓**没有**自动接上：标签条是扁平的、按起跑顺序排，复用要「原地换内容」才能和上游一样
- * （`RunContentManagerImpl.kt:298-308` 保留 content、把 component 换成新 descriptor 的），
- * 摘掉旧格再排到末尾就不是同一件事了 ⇒ 判定先落成纯函数并测住，挂载与顺序方案见
- * docs/wiring-requests-2026-10-06-runinst.md R3。
- */
-export function chooseReuseInstance(
-  candidates: readonly { id: number; title: string; running: boolean; pinned?: boolean }[],
-  title: string,
-  executionId: number,
-  selectedId: number = 0,
-): number | null {
-  const reusable = (candidate: { id: number; running: boolean; pinned?: boolean }) =>
-    candidate.pinned !== true && !candidate.running && candidate.id !== executionId
-  const ordered = [...candidates]
-  const selected = ordered.find(candidate => candidate.id === selectedId)
-  if (selected) {
-    const index = ordered.indexOf(selected)
-    ordered.splice(index, 1)
-    ordered.unshift(selected)
-  }
-  const byName = ordered.find(candidate => reusable(candidate) && candidate.title === title)
-  if (byName) return byName.id
-  const firstGood = ordered.find(candidate => reusable(candidate))
-  return firstGood?.id ?? null
-}
-
+// ── 停止动作的装配（`StopAction`）已拆到 `src/runStopAction.ts`（纯函数，本文件贴 900 行上限）──
+// 名字在这里原样再导出：调用方（RunConsole/MainToolbar/判据）一行没改。
+export {
+  STOP_LABELS, chooseReuseInstance, resolveStopActionTargets, stopActionState, stopChooserItems,
+  stopCounterText, stoppableCandidates,
+  type StopActionPlace, type StopActionState, type StopCandidate, type StopChooser,
+  type StopChooserItem, type StopRowInput,
+} from './runStopAction.ts'

@@ -78,15 +78,22 @@ test('brace.match 进了 editingCommands，编辑菜单用同一个名字', () =
   const menu = read('src/menus/editMenu.ts')
   assert.match(menu, /ctx\.editable\('brace\.match', '移动到配对的括号', 'Ctrl Shift M',/,
     '菜单行与命令表不同名，或键位栏与真实绑定不一致')
-  // 键位栏不留空了：主代理把 Ctrl+Shift+M 绑进了编辑器的 keymap
+  // 键位栏不留空了：Ctrl+Shift+M 绑在编辑器的常驻 keymap 上
   // （上游 `EditorMatchBrace` = `$default.xml:1146-1148`，Mac 那份 `:642` 同样是 shift control M）。
-  const view = read('src/components/CodeEditor.vue')
-  assert.match(view, /key: 'Ctrl-Shift-m', preventDefault: true, run: editingCommands\['brace\.match'\]!/,
+  // 那张表 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限，拆一次降一次）；
+  // 判据跟着搬到新落点，并确认宿主真的把这张表装进编辑器。
+  const keymap = read('src/editorKeymap.ts')
+  assert.match(keymap, /key: 'Ctrl-Shift-m', preventDefault: true, run: editingCommands\['brace\.match'\]!/,
     '菜单写了 Ctrl Shift M 但编辑器没绑 ⇒ 又变成「有行无动作」')
+  const view = read('src/components/CodeEditor.vue')
+  assert.ok(view.includes('keymap.of(editorKeymap)'), '常驻 keymap 要真的装进编辑器')
 })
 
 test('语言 id 是编辑器状态里的 facet（没挂上时 Java 的 <> 那一档自动不接管）', () => {
   const source = read('src/editorMatchBrace.ts')
   assert.match(source, /export const editorLanguageId = Facet\.define/, 'facet 被搬走了')
-  assert.match(source, /hasAngleBraces\(state\.facet\(editorLanguageId\)\)/, '命令没读 facet 里的语言')
+  // 语言 id 从 facet 取出来存进 `language`，再喂给 `hasAngleBraces` —— 命令读的就是状态里挂的
+  // 那门语言（没挂时 undefined ⇒ Java 的 `<>` 档不接管）。
+  assert.match(source, /const language = state\.facet\(editorLanguageId\)/, '命令没读 facet 里的语言')
+  assert.match(source, /hasAngleBraces\(language\)/, '语言没喂进 hasAngleBraces（Java 的 <> 档就不接管了）')
 })

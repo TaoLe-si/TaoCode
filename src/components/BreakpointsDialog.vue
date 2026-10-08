@@ -26,7 +26,7 @@
 // 而树按"规则下标 = 层级"从外向内建（`BreakpointItemsTreeController.java:117-132`），
 // 所以本对话框把**用户组画在最外层，组里再按文件**，未分组的断点直接按文件挂在下面。
 // 规则与状态全在 `src/breakpointGroups.ts`（纯函数 + 模块单例 + 按项目根持久化）。
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { Folder, X } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
 import { dapBreakpoints } from '../bridge'
@@ -107,6 +107,54 @@ const treeRows = computed<TreeRow[]>(() => {
 })
 const rowKey = (row: TreeRow) => row.kind === 'item' ? `item:${row.item.id}` : row.kind === 'group' ? `group:${row.node.name}` : `file:${row.inGroup ? 'g' : 'u'}:${row.group.path}`
 const isDefaultGroup = (name: string) => name === breakpointGroupState.defaultGroup
+
+type NewGroupTarget = { kind: 'item'; ref: string } | { kind: 'group'; node: BreakpointGroupNode }
+const newGroupTarget = ref<NewGroupTarget | null>(null)
+const newGroupName = ref('')
+const newGroupInput = ref<HTMLInputElement | null>(null)
+const newGroupDialog = ref<HTMLElement | null>(null)
+let newGroupReturnFocus: HTMLElement | null = null
+function openNewGroup(target: NewGroupTarget) {
+  newGroupReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  newGroupTarget.value = target
+  newGroupName.value = ''
+  void nextTick(() => newGroupInput.value?.focus())
+}
+function closeNewGroup() {
+  newGroupTarget.value = null
+  const target = newGroupReturnFocus
+  newGroupReturnFocus = null
+  void nextTick(() => target?.focus())
+}
+function onNewGroupKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeNewGroup()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const focusable = [...(newGroupDialog.value?.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled)') ?? [])]
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (!first || !last) { event.preventDefault(); newGroupDialog.value?.focus(); return }
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+}
+function submitNewGroup() {
+  const target = newGroupTarget.value
+  if (!target) return
+  const name = resolveNewGroupName(newGroupName.value)
+  closeNewGroup()
+  if (name === null) return
+  if (target.kind === 'item') assignBreakpointsToGroup([target.ref], name)
+  else {
+    const moved = moveGroupContents(allRefs.value, target.node.name, name || null)
+    if (moved.length) saveGroupState(storage, props.root ?? '')
+    return
+  }
+  saveGroupState(storage, props.root ?? '')
+}
 // 取消勾选 = 该断点不再发给适配器（上游 `XBreakpoint.java:23-25` `isEnabled`/`setEnabled` 的等价物），
 // 所以要重发它所在文件；「移至组」只改本地的组织方式，不动适配器那份清单 —— 上游也是这么分的（组不进 DAP）。
 //
@@ -141,11 +189,8 @@ function toggleGroup(node: BreakpointGroupNode) {
 }
 function moveToGroup(ref: string, value: string) {
   if (value === NEW_GROUP) {
-    const name = resolveNewGroupName(window.prompt('新建组名称', ''))
-    // 上游 `MoveToGroupAction` 的 `if (groupName == null) return`（`:547-549`）：取消 ⇒ 一条都不动；
-    // 空名按了确定则是 `<无组>`（`XBreakpointCustomGroupingRule.kt:24` 的 takeIf{isNotEmpty}）。
-    if (name === null) return
-    assignBreakpointsToGroup([ref], name)
+    openNewGroup({ kind: 'item', ref })
+    return
   } else assignBreakpointsToGroup([ref], value === NO_GROUP ? null : value)
   saveGroupState(storage, props.root ?? '')
 }
@@ -162,10 +207,8 @@ function moveWholeGroup(node: BreakpointGroupNode, value: string) {
   if (value === MOVE_GROUP) return
   let target: string
   if (value === NEW_GROUP) {
-    const name = resolveNewGroupName(window.prompt('新建组名称', ''))
-    // 上游 `:547-549`：取消 = 一条都不动。原来这里把取消折成空串 ⇒ 按一次 Esc 就把整组搬去「无组」。
-    if (name === null) return
-    target = name
+    openNewGroup({ kind: 'group', node })
+    return
   } else target = value === NO_GROUP ? '' : value
   const moved = moveGroupContents(allRefs.value, node.name, target || null)
   if (moved.length) saveGroupState(storage, props.root ?? '')
@@ -217,7 +260,9 @@ function open() { if (selected.value) emit('open', selected.value) }
                 <!-- 上游 SetAsDefaultGroupAction：默认组只影响**新**断点，不搬动已有的（BreakpointsDialog.java:561-576）。 -->
                 <button class="chip-x" :title="isDefaultGroup(row.node.name) ? '取消设置为默认' : '设为默认组'" :aria-label="isDefaultGroup(row.node.name) ? '取消设置为默认组' : '设为默认组'" @click="setDefaultGroup(row.node.name)">默认</button>
                 <!-- 整组「移至组」（上游组节点右键里的同一个子菜单，差别只在它遍历的是整个子树）：
-                     顺序照上游 —— `<无组>` 在最前（`:332`），然后现有组名（distinct+sorted，`:336-341`），最后「新建…」（`:338`）。 -->
+                     顺序照上游 —— `<无组>` 在最前（`:324`；**留痕**：这里原写 `:332`、现有组名那段原写 `:336-341`，
+                     dap4 逐行数过参考树：`:332` 是那条 stream 的 `.sorted()`、子菜单现有组名是 `:326-335`，
+                     与 `:155` 那段和 `src/breakpointGroups.ts` 的同一处订正对齐），最后「新建…」（`:338`）。 -->
                 <select class="breakpoints-group-select" :value="MOVE_GROUP" :aria-label="`把组 ${row.node.name} 整体移至`" @change="moveWholeGroup(row.node, ($event.target as HTMLSelectElement).value)">
                   <option :value="MOVE_GROUP">移至组…</option>
                   <option :value="NO_GROUP">&lt;无组&gt;</option>
@@ -251,11 +296,23 @@ function open() { if (selected.value) emit('open', selected.value) }
       </div>
       <p v-if="sendError" class="breakpoints-error">{{ sendError }}</p>
     </section>
+    <div v-if="newGroupTarget" class="modal-backdrop breakpoints-group-backdrop" @click.self="closeNewGroup">
+      <section ref="newGroupDialog" class="help-dialog rename-dialog breakpoints-group-dialog" role="dialog" aria-modal="true" aria-labelledby="breakpoints-group-title" tabindex="-1" @keydown="onNewGroupKeydown">
+        <h2 id="breakpoints-group-title">新建组名称</h2>
+        <input ref="newGroupInput" v-model="newGroupName" class="rename-input" aria-label="组名称" spellcheck="false" @keydown.enter.prevent="submitNewGroup" />
+        <div class="dialog-actions">
+          <button class="primary-button" @click="submitNewGroup">确定</button>
+          <button class="subtle-button" @click="closeNewGroup">取消</button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .breakpoints-dialog { width: min(860px, calc(100vw - 32px)); }
+.breakpoints-group-backdrop { z-index: 60; }
+.breakpoints-group-dialog { width: 360px; }
 .breakpoints-heading { color: var(--bright); }
 /* 左列表 + 右详情（上游 `BreakpointsDialog` 的 master-detail 布局）。 */
 .breakpoints-body { display: grid; grid-template-columns: minmax(180px, 38%) 1fr; min-height: 0; max-height: min(60vh, 520px); }
@@ -266,14 +323,14 @@ function open() { if (selected.value) emit('open', selected.value) }
 .breakpoints-row.off { color: var(--muted); text-decoration: line-through; }
 /* 分组（上游的 `BreakpointsGroupNode`）：组头是灰色的类型/文件行，子项缩进。 */
 .breakpoints-group { list-style: none; }
-.breakpoints-group-head { display: flex; align-items: center; gap: 4px; padding: 4px var(--space-2) 2px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.breakpoints-group-head { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2) 2px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .breakpoints-group-line { color: var(--text); text-transform: none; letter-spacing: 0; font-size: 11px; }
 .breakpoints-group-name { overflow: hidden; text-overflow: ellipsis; }
 .breakpoints-group-count { color: var(--muted); font-size: 10px; }
 .breakpoints-group-items { margin: 0; padding: 0; list-style: none; }
-.breakpoints-exception { display: flex; align-items: center; gap: 4px; padding: 2px var(--space-2); font-size: 11px; color: var(--text); }
+.breakpoints-exception { display: flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); font-size: 11px; color: var(--text); }
 /* 断点行：勾选框 + 行本体（选中/打开）+ 所属组下拉。 */
-.breakpoints-item { display: flex; align-items: center; gap: 4px; padding: 0 var(--space-2); }
+.breakpoints-item { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); }
 .breakpoints-item.indented, .breakpoints-group.indented { padding-left: var(--space-3); }
 .breakpoints-check { display: inline-flex; align-items: center; flex-shrink: 0; }
 .breakpoints-group-select { flex: 0 1 84px; min-width: 0; padding: 0 2px; color: var(--muted); background: var(--editor); border: 1px solid var(--line); border-radius: var(--radius-xs); font: 10px var(--font-mono); }

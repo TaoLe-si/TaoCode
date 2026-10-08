@@ -6,7 +6,7 @@
 // 分组、类目、搜索语法这些**规则**都在 `src/pluginGroups.ts`（纯函数 + 单测），
 // 这里只负责把它们画出来。
 import { computed, nextTick, ref, watch } from 'vue'
-import { FileArchive, FolderPlus, Loader2, RefreshCw, Search, Trash2, X } from 'lucide-vue-next'
+import { Blocks, FileArchive, FolderPlus, Loader2, RefreshCw, Search, Trash2, X } from 'lucide-vue-next'
 import PluginMarketPanel from './PluginMarketPanel.vue'
 import type { PluginInfo } from '../bridge'
 import {
@@ -79,6 +79,12 @@ const emit = defineEmits<{
   (event: 'uninstall', id: string): void
   (event: 'refresh'): void
   (event: 'close'): void
+  /**
+   * 有可用更新 —— 市场页的更新检查（`src/pluginUpdateCheck.ts`）算出来一条通知，原样上报给宿主。
+   * 上游是 `StandalonePluginUpdateChecker.notifyPluginUpdateAvailable`（`:174-196`）自己弹通知；
+   * 本仓通知的宿主在 App.vue，插件页只做转发。
+   */
+  (event: 'updateAvailable', notice: { message: string; actionLabel: string; pluginId: string }): void
 }>()
 
 const query = ref('')
@@ -316,17 +322,6 @@ function toggleFilter(option: SupportedSearchOption) {
   void nextTick(() => { searchRef.value?.focus(); syncSuggestCaret() })
 }
 
-// 与 IDEA RecentProjectIconHelper 同一套观感：首字母 + 稳定色调的圆形图标。
-function initial(plugin: PluginInfo) {
-  return (plugin.name || plugin.id).trim().slice(0, 1).toUpperCase() || '?'
-}
-function tone(plugin: PluginInfo) {
-  const source = plugin.id || plugin.name || '?'
-  let hash = 0
-  for (const ch of source) hash = (hash * 31 + ch.charCodeAt(0)) % 360
-  return hash
-}
-
 function clearQuery() {
   query.value = ''
   void nextTick(() => { searchRef.value?.focus(); syncSuggestCaret() })
@@ -444,7 +439,7 @@ const fileTypeKindLabel = (bean: PluginFileType) => (bean.implementationClass ? 
               <ul class="plugin-list" role="listbox" :aria-label="group.title">
                 <li v-for="plugin in group.plugins" :key="plugin.id">
                   <button type="button" class="plugin-row" role="option" :aria-selected="selected?.id === plugin.id" :class="{ 'is-selected': selected?.id === plugin.id }" @click="selectedId = plugin.id">
-                    <span class="plugin-avatar" :style="{ background: `linear-gradient(135deg, hsl(${tone(plugin)} 62% 52%), hsl(${(tone(plugin) + 40) % 360} 62% 44%))` }" aria-hidden="true">{{ initial(plugin) }}</span>
+                    <span class="plugin-avatar" aria-hidden="true"><Blocks :size="iconSize.control" /></span>
                     <span class="plugin-main">
                       <span class="plugin-name">{{ plugin.name || plugin.id }}<span class="plugin-version">v{{ plugin.version || '0' }}</span></span>
                       <span class="plugin-desc">{{ plugin.error ? `清单无法读取：${plugin.error}` : (plugin.broken ? `依赖不满足：${plugin.broken}` : (plugin.description || '没有描述。')) }}</span>
@@ -489,6 +484,11 @@ const fileTypeKindLabel = (bean: PluginFileType) => (bean.implementationClass ? 
             <div><dt>路径</dt><dd><code>{{ selected.path }}</code></dd></div>
           </dl>
           <p class="plugin-detail-desc">{{ selected.description || '没有描述。' }}</p>
+          <!-- 变更说明（上游清单的 `<change-notes>`：元素名 `PluginXmlConst.kt:42`、读取面
+               `XmlReader.kt:193`、getter `IdeaPluginDescriptorImpl.kt:195`）。展示点在
+               `PluginDetailsPageComponent.kt:1394` 的 `changeNotesPanel!!.show(getChangeNotes())`，
+               那块面板在 `:847-862` 建、内容是 null 就整块不可见 —— 本仓同口径：清单没写就不渲染这一段。 -->
+          <p v-if="selected.changeNotes" class="plugin-detail-desc">变更说明：{{ selected.changeNotes }}</p>
           <p v-if="selected.error" class="plugin-detail-error">清单无法读取：{{ selected.error }}</p>
           <p v-else-if="pluginIsBroken(selected)" class="plugin-detail-error">{{ pluginLoadingError(selected) || selected.broken }}<template v-if="!pluginCanToggle(selected)"> —— 复选框点不动就是它的原因；这期间它的命令、模板与文件类型都不会出现。</template></p>
           <section v-if="selected.commands.length" class="plugin-detail-section">
@@ -537,7 +537,8 @@ const fileTypeKindLabel = (bean: PluginFileType) => (bean.implementationClass ? 
       </div>
       </template>
       <PluginMarketPanel v-show="tab === 'market'" :plugins="plugins" :busy="busy" :seed="marketSeed"
-                         @changed="emit('refresh')" @catalog="entries => marketEntries = entries" @focus-plugin="focusInstalledPlugin" />
+                         @changed="emit('refresh')" @catalog="entries => marketEntries = entries" @focus-plugin="focusInstalledPlugin"
+                         @update-available="notice => emit('updateAvailable', notice)" />
 
       <div class="dialog-actions"><button class="subtle-button" @click="emit('close')">关闭</button></div>
     </section>
@@ -563,7 +564,7 @@ const fileTypeKindLabel = (bean: PluginFileType) => (bean.implementationClass ? 
 .plugin-sort { flex-shrink: 0; }
 .plugin-sort.on { color: var(--bright); background: var(--hover); }
 .plugin-filters { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); margin: var(--space-2) 0; }
-.plugin-filter { display: inline-flex; align-items: center; gap: 4px; padding: 3px var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 11px; }
+.plugin-filter { display: inline-flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 11px; }
 .plugin-filter.on { border-color: var(--line-strong); background: var(--selected); color: var(--bright); }
 .plugin-filter-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .plugin-filter-note { color: var(--muted); font-size: 11px; }
@@ -584,8 +585,8 @@ const fileTypeKindLabel = (bean: PluginFileType) => (bean.implementationClass ? 
 .plugin-row:hover { border-color: var(--line-strong); }
 .plugin-row.is-selected { border-color: var(--accent); background: var(--selected); }
 .plugin-row.is-pending { opacity: .75; border-style: dashed; border-color: var(--line-strong); }
-.plugin-avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%; color: var(--on-accent); font: 600 13px var(--font-brand); text-shadow: 0 1px 1px rgb(0 0 0 / 35%); }
-.plugin-avatar-pending { background: var(--hover); color: var(--muted); text-shadow: none; }
+.plugin-avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--muted); }
+.plugin-avatar-pending { background: var(--hover); }
 .plugin-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .plugin-name { display: flex; align-items: baseline; gap: var(--space-2); color: var(--bright); font-size: 13px; font-weight: 600; }
 .plugin-version { color: var(--muted); font-size: 11px; font-weight: 400; }
@@ -595,7 +596,7 @@ const fileTypeKindLabel = (bean: PluginFileType) => (bean.implementationClass ? 
 .plugin-empty { padding: var(--space-5) var(--space-3); color: var(--muted); font-size: 12px; text-align: center; }
 .plugin-detail { min-height: 0; overflow: auto; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--editor); }
 .plugin-detail h3 { margin: 0 0 var(--space-2); color: var(--bright); font-size: 13px; }
-.plugin-detail dl { display: flex; flex-direction: column; gap: 4px; margin: 0 0 var(--space-2); }
+.plugin-detail dl { display: flex; flex-direction: column; gap: var(--space-1); margin: 0 0 var(--space-2); }
 .plugin-detail dl > div { display: flex; gap: var(--space-2); font-size: 11px; }
 .plugin-detail dt { flex-shrink: 0; width: 44px; color: var(--muted); }
 .plugin-detail dd { flex: 1; min-width: 0; margin: 0; color: var(--secondary); overflow-wrap: anywhere; }
@@ -604,7 +605,7 @@ const fileTypeKindLabel = (bean: PluginFileType) => (bean.implementationClass ? 
 /* 卸载牵连提醒：正文里每个依赖者一行（`pluginUninstallPrompt` 用 \n 拼接，上游是同一条 HTML 正文）。 */
 .plugin-detail-warning { margin: 0 0 var(--space-2); color: var(--warning); font-size: 11px; line-height: 1.6; white-space: pre-line; }
 .plugin-detail-section { margin-top: var(--space-2); }
-.plugin-detail-section h4 { margin: 0 0 4px; color: var(--bright); font-size: 11px; }
+.plugin-detail-section h4 { margin: 0 0 var(--space-1); color: var(--bright); font-size: 11px; }
 .plugin-detail-section ul { display: flex; flex-direction: column; gap: 3px; margin: 0; padding-left: var(--space-3); color: var(--secondary); font-size: 11px; line-height: 1.5; }
 .plugin-detail-muted { color: var(--muted); }
 .plugin-update { color: var(--accent); }

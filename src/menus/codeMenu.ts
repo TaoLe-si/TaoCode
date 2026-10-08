@@ -3,17 +3,25 @@
 // 成员先用 any（参数逆变 + 内部类型未提取），随批次收紧。
 import type { MenuRow } from './types'
 import { createInspectCodeInCodeMenuRows, type AnalyzeGroupContext } from './analyzeMenu.ts'
+import { createSaveAsTemplateHost, type SaveAsTemplateHostDeps } from '../saveAsTemplateHost'
 // 「比较对象…」的标题常量（上游 `action.compare.with.text`，中文包取值）。
 import { COMPARE_WITH_TEXT } from '../compareFiles.ts'
+// 键位显示的两个现成真源：`foldingLevelChords` 是「展开到级别」那五条 chord 的**权威表**
+// （键名 + 命令名），`windowsKeystroke` 是本仓既有的显示串格式化函数（`Ctrl Shift V` → `Ctrl+Shift+V`，
+// 上游 `WinKeyStrokePresentation` 口径）。菜单这一侧只查、不手抄第二份键位文案。
+import { foldingLevelChords } from '../foldingKeymap.ts'
+import { windowsKeystroke } from '../presentationAssistant.ts'
 
 export interface CodeMenuContext extends AnalyzeGroupContext {
   hasEditor: () => boolean
+  foldSelectionEnabled: () => boolean
   active: any
   lspReady: any
   isDesktop: boolean
   editable: (name: any, title: any, keys?: any, keywords?: any) => MenuRow
   semantic: (kind: any, title: any, keys: any, keywords: any) => MenuRow
   openTemplateChooser: () => void
+  saveAsTemplateDeps: SaveAsTemplateHostDeps
   openSurround: () => void
   openGeneratePopup: () => void
   showQuickDoc: () => any
@@ -28,7 +36,24 @@ export interface CodeMenuContext extends AnalyzeGroupContext {
   copyFilePath: () => any
 }
 
+/**
+ * 一条 chord 键名（`src/foldingKeymap.ts` 的 CodeMirror 写法，如 `Ctrl-* 1`）→ 菜单上的显示串。
+ *
+ * 逐段（空格分段 = CodeMirror 的 `buildKeyList` 口径，`@codemirror/view/dist/index.js:9164`）交给既有的
+ * `windowsKeystroke()`，段与段之间用上游的分隔写法 `", "` —— 依据
+ * `platform/platform-api/src/com/intellij/openapi/keymap/KeymapTextContext.java:43-73`
+ * （`getShortcutText(Shortcut)`：先第一键、再 `s += ", " + 第二键文本`）。
+ * 菜单右栏就是这一串（`platform/platform-impl/src/com/intellij/ui/plaf/beg/BegMenuItemUI.java:259-262`
+ * 画 `ActionMenuItem.getFirstShortcutText()`，而 `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionMenuItem.kt:190-194`
+ * 那个串正是 `KeymapUtil.getShortcutText(getShortcutSetForDisplay(action))` ⇒ **两段式 chord 在菜单里是印出来的**）。
+ */
+function chordKeys(command: string): string {
+  const binding = foldingLevelChords.find(item => item.command === command)
+  return binding ? binding.key.split(' ').map(stroke => windowsKeystroke(stroke.replace(/-/g, ' '))).join(', ') : ''
+}
+
 export function createCodeMenuRows(ctx: CodeMenuContext): MenuRow[] {
+  const saveAsTemplate = createSaveAsTemplateHost(ctx.saveAsTemplateDeps)
   return [
     ctx.editable('completion', '代码补全', 'Ctrl Space', 'completion autocomplete suggest 补全'),
     // CodeCompletionGroup（`intellij.platform.lang.impl.actions.xml:133-147`）：补全 → 智能类型补全 →
@@ -41,6 +66,8 @@ export function createCodeMenuRows(ctx: CodeMenuContext): MenuRow[] {
     ...createInspectCodeInCodeMenuRows(ctx),
     ctx.editable('template.expand', '展开实时模板', 'Ctrl Alt J', 'live template postfix expand 模板'),
     { id: 'code.templateChooser', title: '实时模板列表…', keys: 'Ctrl J', keywords: 'live template list chooser insert 模板列表', enabled: ctx.hasEditor, run: ctx.openTemplateChooser },
+    { id: 'code.saveAsTemplate', title: '另存为实时模板…', keywords: 'Save as Live Template save selected text 保存 实时模板', enabled: saveAsTemplate.available, run: () => { void saveAsTemplate.run() } },
+    { id: 'code.ruleTemplate', rule: true },
     { id: 'code.surround', title: '用模板包裹选中代码', keys: 'Ctrl Alt T', keywords: 'surround wrap try if block 包裹 模板', enabled: ctx.hasEditor, run: ctx.openSurround },
     // `Unwrap`（上游 `UnwrapAction`，$default.xml:917-920 = Ctrl+Shift+Delete）：去掉最内层
     // 可拆的 if/for/while/… 包裹；PSI 版本在 lang-impl/codeInsight/unwrap，本仓是文本子集
@@ -63,13 +90,21 @@ export function createCodeMenuRows(ctx: CodeMenuContext): MenuRow[] {
         ctx.editable('foldAll', '全部收起', 'Ctrl Shift -', 'collapse all 全部收起'),
         { id: 'code.folding.rule2', rule: true },
         // `ExpandToLevel` / `ExpandAllToLevel` 是两个 popup 组（`:284-297`），行文案就是 `_1`.._5（`action.ExpandToLevel1.text`）。
+        // 键位栏：caret 族（`$default.xml:385-404`，`control MULTIPLY` + `1`..`5`）在本仓**真的能按到**
+        // （`src/foldingKeymap.ts:49-55` → `src/editorCommands.ts:291-295` → `src/components/CodeEditor.vue:882`），
+        // 所以显示串从那张权威表推导（`chordKeys()`），不在菜单里手抄。
+        // `ExpandAllToLevel1..5`（`$default.xml:405-424`，`control shift MULTIPLY` + 1..5）**不给键位**：
+        // 乘号是字符键，`w3c-keyname` 让 `Ctrl-Shift-*` 与 `Ctrl-*` 在浏览器里分不开
+        // （`@codemirror/view/dist/index.js:9106-9116` 的 `modifiers(..., !isChar)` 首查就把 Shift 摘掉），
+        // 那一族绑定永不可命中、真按会得到 caret 族的动作 ⇒ 给它印快捷键就是假加速键（规约 §3）。
+        // 判据：`tests/menukeys-probe.test.mjs`。
         {
           id: 'code.folding.caretLevels', title: '展开到级别(_E)', children: [
-            ctx.editable('unfold.level1', '1', '', 'expand to level 1 展开到级别'),
-            ctx.editable('unfold.level2', '2', '', 'expand to level 2 展开到级别'),
-            ctx.editable('unfold.level3', '3', '', 'expand to level 3 展开到级别'),
-            ctx.editable('unfold.level4', '4', '', 'expand to level 4 展开到级别'),
-            ctx.editable('unfold.level5', '5', '', 'expand to level 5 展开到级别'),
+            ctx.editable('unfold.level1', '1', chordKeys('unfold.level1'), 'expand to level 1 展开到级别'),
+            ctx.editable('unfold.level2', '2', chordKeys('unfold.level2'), 'expand to level 2 展开到级别'),
+            ctx.editable('unfold.level3', '3', chordKeys('unfold.level3'), 'expand to level 3 展开到级别'),
+            ctx.editable('unfold.level4', '4', chordKeys('unfold.level4'), 'expand to level 4 展开到级别'),
+            ctx.editable('unfold.level5', '5', chordKeys('unfold.level5'), 'expand to level 5 展开到级别'),
           ],
         },
         {
@@ -88,7 +123,7 @@ export function createCodeMenuRows(ctx: CodeMenuContext): MenuRow[] {
         { id: 'code.folding.rule4', rule: true },
         ctx.editable('fold.toggle', '切换折叠', '', 'toggle fold expand collapse 切换折叠'),
         { id: 'code.folding.rule5', rule: true },
-        ctx.editable('fold.selection', '折叠选区/移除区域(_S)', 'Ctrl .', 'fold selection custom region 折叠选区 移除区域'),
+        { ...ctx.editable('fold.selection', '折叠选区/移除区域(_S)', 'Ctrl .', 'fold selection custom region 折叠选区 移除区域'), enabled: ctx.foldSelectionEnabled },
         ctx.editable('fold.block', '折叠代码块(_B)', 'Ctrl Shift .', 'collapse block braces 折叠代码块'),
       ],
     },
@@ -108,7 +143,9 @@ export function createCodeMenuRows(ctx: CodeMenuContext): MenuRow[] {
     ctx.semantic('format', '重新格式化', 'Ctrl Alt L', 'format code reformat 格式化'),
     // IDEA Code menu: 自动缩进 (Auto-Indent, Ctrl+Alt+I) and 优化导入 (Optimize
     // Imports, Ctrl+Alt+O — a source.organizeImports code action).
-    ctx.editable('indent.selection', '自动缩进', 'Ctrl Alt I', 'auto indent selection 自动缩进'),
+    // 「自动缩进」= 上游 `AutoIndentLinesHandler`（**重算**行首空白，不是加一级）：
+    // 命令 `indent.auto` 的规则在 src/autoIndentLines.ts。旧行错接成 `indent.selection`（= indentMore）。
+    ctx.editable('indent.auto', '自动缩进', 'Ctrl Alt I', 'auto indent selection 自动缩进'),
     { id: 'code.optimizeImports', title: '优化导入', keys: 'Ctrl Alt O', keywords: 'optimize imports organize 优化导入', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: () => void ctx.runOrganizeImports() },
     { id: 'code.rule3', rule: true },
     { id: 'code.blame', title: 'Git 追溯（Annotate）', keywords: 'blame annotate git history 追溯', checked: () => ctx.blameEnabled(), enabled: () => Boolean(ctx.active.value) && ctx.isDesktop, run: () => void ctx.showBlame() },

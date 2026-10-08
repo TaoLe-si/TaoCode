@@ -137,7 +137,10 @@ test('smartEnterCommand 接上了块注释那一步（有效次序：字面量 �
 
 test('Enter 键确实绑在回车家族上（上游 EditorEnter，$default.xml:800-801）', () => {
   const view = readFileSync(join(root, 'src/components/CodeEditor.vue'), 'utf8')
-  assert.match(view, /\{ key: 'Enter', preventDefault: true, run: smartEnter \}/,
+  // 常驻 keymap 那一张表 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限，
+  // 拆一次降一次）；判据跟着搬到新落点，钉的仍是同一条键位，没有放松。
+  const keymap = readFileSync(join(root, 'src/editorKeymap.ts'), 'utf8')
+  assert.match(keymap, /\{ key: 'Enter', preventDefault: true, run: smartEnter \}/,
     'Enter 没接到 smartEnterCommand ⇒ 这四条全都落不了地')
   // 语言工厂必须把**块注释**那一半也喂进来：只给 `line` 时第②步在真实编辑器里永远问不到
   // （上游要的是 `CodeDocumentationAwareCommenter`，`EnterInBlockCommentHandler.java:38-39`；

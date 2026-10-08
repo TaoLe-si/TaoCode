@@ -95,7 +95,10 @@ test('isSplit 的初值就是注册表的 EP secondary（DesktopLayout.kt:46）'
   assert.equal(h.isSplitOf('notifications'), true)
   assert.equal(h.isSplitOf('files'), false)
   assert.equal(h.isSplitOf('gradle'), false)
-  assert.deepEqual(h.stripeOrder.value('right'), ['gradle', 'notifications'])
+  // 右条纹：gradle 与 agent（非 side tool）排前面一组，notifications 是 side tool 排末尾。
+  // agent = 本仓的 Agent 对话窗口（上游对标 `AIAssistant`，右锚、非 side tool，见
+  // `src/toolWindowMeta.ts` 注册表里的注释与 `defaultToolWindowlayoutProvider.kt:263-273`）。
+  assert.deepEqual(h.stripeOrder.value('right'), ['gradle', 'agent', 'notifications'])
 })
 
 test('拖出来的那一位覆盖注册表初值，并且换项目后还在', t => {

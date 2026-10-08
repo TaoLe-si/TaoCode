@@ -329,3 +329,20 @@ export function historyPresentableText(fileName: string, configurationName?: str
   const hhmmss = clock.replace(/h/, ':').replace(/m/, ':').replace(/s$/, '')
   return `${configurationName ?? withoutExtension.slice(0, at)} (${day} ${hhmmss})`
 }
+
+/**
+ * 导入历史会话里**失败的用例名**（上游 `ImportedTestRunnableState.java:67-78` 给导入的结果挂
+ * `AbstractRerunFailedTestsAction`：导入的会话照样能「重跑失败的」）。
+ * 本仓从导入的事件里抽 `testFailed` 的 `name`（去重保序）；名字交给 `src/testRunner.ts` 的
+ * `rerunCommand` 拼进命令（与本仓自己跑出来的失败重跑同一条链路）。
+ * 消费点 `src/components/TestRunnerPanel.vue` 的「重跑导入的失败」按钮。
+ */
+export function importedFailedNames(events: readonly TestEvent[]): string[] {
+  const out: string[] = []
+  for (const event of events) {
+    if (event.kind !== 'testFailed') continue
+    const name = (event.name ?? '').trim()
+    if (name && !out.includes(name)) out.push(name)
+  }
+  return out
+}

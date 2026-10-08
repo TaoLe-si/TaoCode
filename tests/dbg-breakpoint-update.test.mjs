@@ -11,7 +11,8 @@
 //     `:549-567` + `:574-582`（同目标只留最新那份，旧的那条**保证被结算**、不补跑）
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   breakpointFileSend, breakpointRefSendable, breakpointSendPlan, createBreakpointUpdater, provideBreakpointSendRules, resendAllFromRoot,
   BREAKPOINT_MERGE_MS,
@@ -136,6 +137,41 @@ test('窗内的连续改动只发**一次**（:79-83 + :296-304）：三次改�
     '被合并掉的那两份不许声称「这就是我的结果」（面板据此跳过 verifiedLines 判定）')
   assert.deepEqual(updater.queuedPaths(), [])
   assert.deepEqual(updater.waitingPaths(), [])
+})
+
+// 被合并掉的那一份**既不拿结果、也不拿错**：上游同目标的旧 Update 走 `setProcessed()` + `setRejected()`
+// 之后根本不 run（`MergingUpdateQueue.kt:574-582` 的 `put` 里 `:579`、`:545`），而它的回调挂在 Update 自己身上
+// （`FrontendXLineBreakpointVisualizationManager.kt:296-304` 的 `callOnUpdate` 在 `run()` 里）⇒ 一次都不会被叫到。
+// 上一版本仓把整份 `round` 原样发给所有等待者，于是连排同一文件时「别人那份载荷的失败」会被界面说成
+// 自己这轮的失败（四处 `round.error` 写点里只有 `result` 那一半被 `applied` 挡住）。
+test('被合并掉的那一轮不替别人报错：`error` 与 `result` 都只给载荷主人（:545 + :579）', async () => {
+  const seen = []
+  const updater = createBreakpointUpdater(async item => {
+    seen.push(item.send.map(point => point.line))
+    if (item.send.some(point => point.line === 2)) throw new Error('适配器拒了这份载荷')
+    return ok(item.path, item.send.map(point => point.line))
+  }, { mergeMs: 20 })
+  const first = updater.queue(breakpointFileSend('src/a.cpp', [{ line: 1 }], {}))
+  const second = updater.queue(breakpointFileSend('src/a.cpp', [{ line: 2 }], {}))
+  const [roundFirst, roundSecond] = await Promise.all([first, second])
+  assert.deepEqual(seen, [[2]], '两份载荷合成一轮，发的是最新那份（第一条从没单独发过）')
+  assert.equal(roundFirst.applied, false)
+  assert.equal(roundFirst.error, null, '被合并掉的那一轮不该替别人报错')
+  assert.equal(roundFirst.result, null, '被合并掉的那一轮不该拿到别人那份载荷的结果')
+  assert.equal(roundSecond.applied, true)
+  assert.equal(roundSecond.error, '适配器拒了这份载荷', '失败由载荷主人报这一次')
+
+  // 反向半边：落地那份**成功**时，被合并掉的那一份同样不给错（否则界面会多报一条根本没发生的失败）。
+  const calm = createBreakpointUpdater(async item => ok(item.path, item.send.map(point => point.line)), { mergeMs: 20 })
+  const a = calm.queue(breakpointFileSend('src/b.cpp', [{ line: 7 }], {}))
+  const b = calm.queue(breakpointFileSend('src/b.cpp', [{ line: 7 }, { line: 8 }], {}))
+  const [roundA, roundB] = await Promise.all([a, b])
+  assert.equal(roundA.applied, false)
+  assert.equal(roundA.error, null)
+  assert.equal(roundA.result, null, '这一轮发的是 b 那份载荷，结果不姓 a')
+  assert.equal(roundB.applied, true)
+  assert.equal(roundB.error, null)
+  assert.notEqual(roundB.result, null, '主人拿到自己那份的结果')
 })
 
 test('`flush()` = 上游 `sendFlush()`（`MergingUpdateQueue.kt:618-620` 的 `restart(0)`）：不排队等满，但等得到发完', async () => {
@@ -382,4 +418,84 @@ test('对话框提交走规则层 `breakpointEditPatch`：清空的与关掉启�
   const pane = readFileSync('src/components/DebugBreakpointsPane.vue', 'utf8')
   assert.match(pane, /condition: undefined, hitCondition: undefined, logMessage: undefined, \.\.\.patch/,
     '提交时先清空三个字段，否则被删掉的条件会留在断点对象上')
+})
+
+// ── 上游行号锚点（参考树不在就跳过，与引用门控同一策略）────────────────────────────────
+// 上面那 20 多条钉的是**行为**；这一条钉「行为照的那几行确实长在那儿」。
+// 桶 12 这一族的教训是：合并窗、冲窗、全量重发三条口径全靠 `MergingUpdateQueue` 与
+// `FrontendXLineBreakpointVisualizationManager` 的行号说话，而 dap 系四轮里已经订正过 5 处假行号
+// （`:332`/`:336-341`/`:325-335`/`:19`/`:44-52`）—— 没有这一条就只能靠人再数一遍。
+test('上游锚点逐行核内容：合并窗/冲窗/全量重发/结算那几张行号都对得上参考树', () => {
+  const REF = 'D:/Backup/Downloads/intellij-community-master/intellij-community-master'
+  const QUEUE = 'platform/ide-core/src/com/intellij/util/ui/update/MergingUpdateQueue.kt'
+  const FRONTEND = 'platform/xdebugger-impl/frontend/src/com/intellij/platform/debugger/impl/frontend/FrontendXLineBreakpointVisualizationManager.kt'
+  const HANDLER = 'java/debugger/impl/src/com/intellij/debugger/engine/JavaBreakpointHandler.java'
+  if (!existsSync(join(REF, QUEUE))) return
+  const at = (path, n) => readFileSync(join(REF, path), 'utf8').split('\n')[n - 1].trim()
+  const pins = [
+    // 窗长 300ms 的本体（`BREAKPOINT_MERGE_MS` 就是它）。
+    [FRONTEND, 79, 'private val breakpointUpdateQueue: MergingUpdateQueue = MergingUpdateQueue.mergingUpdateQueue('],
+    [FRONTEND, 81, 'mergingTimeSpan = 300,'],
+    // 窗不续期：只有队列为空才起表；`restartOnAdd` 默认 false；要续期得显式开。
+    [QUEUE, 529, 'if (active && scheduledUpdates.isEmpty) {'],
+    [QUEUE, 530, 'restartTimer()'],
+    [QUEUE, 123, 'private var restartOnAdd: Boolean = false'],
+    [QUEUE, 534, 'if (restartOnAdd) {'],
+    [QUEUE, 505, 'open fun queue(update: Update) {'],
+    // `{ now: true }` 那一档：queue + 整条队列的 sendFlush()，注释点名「Skip waiting 300ms」。
+    [FRONTEND, 290, '// Skip waiting 300ms in myBreakpointsUpdateQueue (good for sync updates like enable/disable or create new breakpoint)'],
+    [FRONTEND, 291, 'fun updateBreakpointNow(breakpoint: FrontendXLineBreakpointVisualizable) {'],
+    [FRONTEND, 292, 'queueBreakpointUpdate(breakpoint)'],
+    [FRONTEND, 293, 'breakpointUpdateQueue.sendFlush()'],
+    [QUEUE, 618, 'fun sendFlush() {'],
+    [QUEUE, 619, 'restart(0)'],
+    // 回调挂在 Update 自己身上 ⇒ 被合并掉的旧那条根本不 run，既拿不到结果也拿不到错（本批 T2 的依据）。
+    [FRONTEND, 296, 'private fun queueBreakpointUpdate(breakpoint: FrontendXLineBreakpointVisualizable, callOnUpdate: Runnable? = null) {'],
+    [FRONTEND, 300, 'callOnUpdate?.run()'],
+    [QUEUE, 545, 'updatesToReject.forEachGuaranteed(Update::setRejected)'],
+    [QUEUE, 574, 'private fun put(update: Update, updatesToReject: MutableList<Update>) {'],
+    [QUEUE, 579, 'existing.setProcessed()'],
+    // 分岔与全量重发。
+    [FRONTEND, 281, 'fun breakpointChanged(breakpoint: FrontendXLineBreakpointVisualizable) {'],
+    [FRONTEND, 263, 'private fun isImmediateUiUpdateAllowed(): Boolean {'],
+    [FRONTEND, 306, 'fun queueAllBreakpointsUpdate() {'],
+    [FRONTEND, 315, 'breakpointUpdateQueue.sendFlush()'],
+    [FRONTEND, 127, 'StartupManager.getInstance(project).runAfterOpened { queueAllBreakpointsUpdate() }'],
+    // 一次 setBreakpoints = 把整份文件的重建请求排进去（本仓队列的类比来源）。
+    [HANDLER, 33, 'Breakpoint javaBreakpoint = BreakpointManager.getJavaBreakpoint(breakpoint);'],
+    [HANDLER, 35, 'javaBreakpoint = createJavaBreakpoint(breakpoint);'],
+    [HANDLER, 41, '// use schedule not to block initBreakpoints'],
+    [HANDLER, 47, 'public void unregisterBreakpoint(final @NotNull XBreakpoint breakpoint, boolean temporary) {'],
+  ]
+  for (const [path, n, text] of pins) assert.equal(at(path, n), text, `${path.split('/').pop()}:${n} 不是那一行`)
+
+  // 本仓注释里的引用必须指在上面这些实测行上（裸行号不带路径 ⇒ 仓里的引用门控收不到，只能这样钉）。
+  const source = readFileSync('src/dbgBreakpointUpdate.ts', 'utf8')
+  assert.match(source, /mergingTimeSpan = 300/, '窗长 300 没写成上游那句原文')
+  assert.match(source, /:291-294/, '`{ now: true }` 没指到实测的 updateBreakpointNow 那四行')
+  assert.match(source, /:296-304/, '回调挂 Update 身上那条没指到实测区间')
+  assert.match(source, /:574-582/, '旧那条被结算掉没指到实测的 put')
+  assert.match(source, /:618-620/, 'sendFlush = restart(0) 没指到实测区间')
+  assert.match(source, /:306-315/, '全量重发没指到实测区间')
+  assert.match(source, /:529-530/, '「窗不续期」没指到实测那两行')
+  // 假行号的反证：本批新写的「被合并掉的那份不拿错」这条依据必须逐字留在源码注释里（`:545`/`:579` 两条）。
+  assert.match(source, /`:545`/, '被合并掉的那份不报错这条没留下上游 :545 的依据')
+  assert.match(source, /`:579`/, '旧那条被结算掉这条没留下上游 :579（`setProcessed()`）的依据')
+})
+
+// R1 收口（主代理接线，dapfix 交付的请求）：`logMessage` 现在是桥接接口自己的字段
+// —— native 早就整份透传（`native/dap.hpp:185` 的 `requested` 形状、`native/dap_shaping.cpp:323`
+// 把 `condition`/`hitCondition`/`logMessage` 三个键一起带上），前端曾各自做本地投影补这一格。
+test('logMessage 归位到 DapBreakpoint，本地投影全部删除（R1）', async () => {
+  const { readFileSync } = await import('node:fs')
+  const read = rel => readFileSync(new URL(rel, import.meta.url), 'utf8')
+  assert.match(read('../src/bridge.ts'),
+    /export interface DapBreakpoint \{[^}]*logMessage\?: string/,
+    '桥接接口没有登记 logMessage ⇒ 面板与合并窗两头各写一份')
+  assert.doesNotMatch(read('../src/dbgBreakpointUpdate.ts'), /& \{ logMessage\?: string \}/,
+    '还在用本地投影补 logMessage ⇒ 字段归位后这是死形状')
+  assert.doesNotMatch(read('../src/debugBreakpointExtras.ts'), /(DapBreakpoint & \{ logMessage|as \{ logMessage)/,
+    '属性表那一边还留着强制转换')
+  assert.doesNotMatch(read('../src/debugBreakpointEditor.ts'), /& \{ logMessage\?: string \}/,
+    '编辑器入参还留着投影')
 })

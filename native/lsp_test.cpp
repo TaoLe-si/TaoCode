@@ -243,6 +243,192 @@ int main() {
         check(written[1].at("id") == "server-string-id" && written[1].at("error").at("code") == -32601, "unknown method preserves the id type and gets MethodNotFound");
     });
 
+    run("服务器主动发起的六条请求逐条有回包（本轮补的 workspaceFolders / register / unregister / create）", [&] {
+        // 这一族的判据形状是「**每条都要回**，且回的是协议规定的值」：客户端不回 = 服务器那条请求的
+        // future 永远不落，它后面所有依赖这个答案的动作都不开始（派单里点名的就是这一条）。
+        // 上游逐条（platform/lsp-impl/src/impl/LspServerNotificationsHandlerImpl.kt）：
+        //   · `:119-123` registerCapability —— 每条 registration 记进动态能力表 + 让受影响的那几族重取，
+        //     最后 `completedFuture(null)`；`:125-128` unregisterCapability 同形状；
+        //   · `:241-247` workspaceFolders —— 每个根一份 WorkspaceFolder(uri, name)；
+        //   · `:255` createProgress —— 一行 `completedFuture(null)`（同意，别的什么都不做）。
+        Harness h;
+        std::vector<Json> forwarded;
+        h.client.on_server_message([&](Json params) { forwarded.push_back(std::move(params)); });
+
+        const Json registrations{{"registrations", Json::array({
+            {{"id", "r1"}, {"method", "textDocument/inlayHint"}},
+            {{"id", "r2"}, {"method", "workspace/didChangeConfiguration"}, {"registerOptions", Json::object()}}})}};
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 81}, {"method", "client/registerCapability"}, {"params", registrations}});
+        auto written = h.drain();
+        check(written.size() == 1 && written[0].contains("result") && written[0].at("result").is_null(),
+              "registerCapability 协议的返回类型是 void ⇒ 回 null，不能挂着不回");
+        check(forwarded.size() == 1 && forwarded[0].at("method") == "client/registerCapability" &&
+                  forwarded[0].at("registrations").size() == 2 && forwarded[0].at("registrations")[0].at("id") == "r1",
+              "registrations 必须原样转出去：收下不记账 = 那四条 dynamicRegistration 声明成了空头支票");
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 82}, {"method", "client/unregisterCapability"},
+                          {"params", {{"unregisterations", Json::array({{{"id", "r1"}, {"method", "textDocument/inlayHint"}}})}}}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("result").is_null(), "注销同样回 null");
+        check(forwarded.size() == 2 && forwarded[1].at("unregisterations").size() == 1 &&
+                  forwarded[1].at("unregisterations")[0].at("id") == "r1", "注销的那一批也要转出去，界面才记得下少了几项");
+
+        // 半包不登记：条目缺 id ⇒ 整条按 InvalidParams 回，而且**不**转出去。
+        // `id` 是撤销的把手，记半条 = 服务器下一条 unregisterCapability 撤不掉它当初注册的那一条。
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 83}, {"method", "client/registerCapability"},
+                          {"params", {{"registrations", Json::array({{{"method", "textDocument/hover"}}})}}}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("error").at("code") == -32602, "缺 id 的注册明着拒（拒也是回了包）");
+        check(forwarded.size() == 2, "拒掉的那一条不转出去，免得界面记下一份残缺的注册表");
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 84}, {"method", "client/registerCapability"},
+                          {"params", {{"registrations", Json::object()}}}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("error").at("code") == -32602, "registrations 整个形状不对也明着拒");
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 85}, {"method", "client/somePrivateRequest"}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("error").at("code") == -32601, "认不得的方法回 MethodNotFound，而不是不回");
+    });
+
+    run("workspace/workspaceFolders 回的是 initialize 那份表，不再是 -32601", [&] {
+        // 客户端能力表里 `workspace.workspaceFolders` 是 true（native/lsp_host_bootstrap.cpp 的 workspace 段），
+        // 所以服务器有权来问；以前分派表里没有这一支 ⇒ 掉进 -32601 兜底 = 「声明了能力却没有处理器」。
+        Harness h;
+        h.client.start({{"capabilities", Json::object()},
+                        {"workspaceFolders", Json::array({{{"uri", "file:///a"}, {"name", "a"}},
+                                                          {{"uri", "file:///b"}, {"name", "b"}}})}},
+                       [](Json, Json) {});
+        h.drain();
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 80}, {"method", "workspace/workspaceFolders"}});
+        const auto written = h.drain();
+        check(written.size() == 1, "一条请求一份回包");
+        check(!written[0].contains("error"), "不能再回 -32601");
+        const auto& folders = written[0].at("result");
+        check(folders.is_array() && folders.size() == 2 && folders[0].at("uri") == "file:///a" && folders[1].at("name") == "b",
+              "回的就是 initialize 时发给服务器的那一份（两份不一致时服务器会按两份不同的根建工程）");
+        // 没在 initialize 里发过那份表 ⇒ 回 null（协议的 `WorkspaceFolder[] | null` 那一支），
+        // 不交一个空数组冒充「有工作区，只是它是空的」。
+        Harness bare;
+        bare.client.start(Json::object(), [](Json, Json) {});
+        bare.drain();
+        bare.client.receive({{"jsonrpc", "2.0"}, {"id", "folders-string-id"}, {"method", "workspace/workspaceFolders"}});
+        const auto answered = bare.drain();
+        check(answered.size() == 1 && answered[0].at("id") == "folders-string-id" && answered[0].at("result").is_null(),
+              "没发过那份表就回 null，且字符串 id 按原类型回");
+    });
+
+    run("window/workDoneProgress/create：两种 token 都同意，没 token 明着拒，三条都回包", [&] {
+        // 上游 `LspServerNotificationsHandlerImpl.kt:255` 就是一行 completedFuture(null)（同意，不做别的事）；
+        // 真正的行是之后 `$/progress` 的 begin 才建的（`:266-314`）⇒ 本端也不能在这里凭空造一条进度。
+        Harness h;
+        std::vector<Json> forwarded;
+        h.client.on_server_message([&](Json params) { forwarded.push_back(std::move(params)); });
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 86}, {"method", "window/workDoneProgress/create"},
+                          {"params", {{"token", "import-1"}}}});
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 87}, {"method", "window/workDoneProgress/create"},
+                          {"params", {{"token", 42}}}});
+        auto written = h.drain();
+        check(written.size() == 2 && written[0].at("result").is_null() && written[1].at("result").is_null(),
+              "字符串与整数两种 token 都算合法（协议的 ProgressToken 是联合类型）");
+        check(forwarded.size() == 2 && forwarded[0].at("token") == "import-1" && forwarded[1].at("token") == 42,
+              "token 原样转出去，界面才说得出是哪一条申请");
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 88}, {"method", "window/workDoneProgress/create"},
+                          {"params", Json::object()}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("error").at("code") == -32602,
+              "没有 token 的申请按 InvalidParams 拒：收了就等于答应一条永远对不上号的进度");
+        check(forwarded.size() == 3 && forwarded[2].at("method") == "window/workDoneProgress/create",
+              "拒掉的那条也转出去留一行（服务器在问一件我们接不住的事，这件事必须看得见）");
+    });
+
+    run("workspace/applyEdit 与 workspace/configuration 回的是真实结果，不是默认成功", [&] {
+        Harness h;
+        h.client.set_configuration({{"java", {{"format", {{"tabs", true}}}}}});
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 89}, {"method", "workspace/applyEdit"}, {"params", Json::object()}});
+        auto written = h.drain();
+        check(written.size() == 1 && written[0].at("error").at("code") == -32602, "没有 edit 对象 ⇒ InvalidParams（仍然回了包）");
+
+        const Json edits{{"file:///a.java", Json::array({
+            {{"range", {{"start", {{"line", 0}, {"character", 0}}}, {"end", {{"line", 0}, {"character", 0}}}}},
+             {"newText", "x"}}})}};
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 90}, {"method", "workspace/applyEdit"},
+                          {"params", {{"edit", {{"changes", edits}}}}}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("result").at("applied") == false &&
+                  written[0].at("result").contains("failureReason"),
+              "没接上工作区写手时如实报「未应用」并给理由，不谎报 applied:true");
+
+        // 一份完全不含动作的编辑 = 没有东西要写，也没有失败 ⇒ applied:true。
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 91}, {"method", "workspace/applyEdit"},
+                          {"params", {{"edit", Json::object()}}}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("result").at("applied") == true,
+              "空编辑按定义就是已应用（不是「写成功了」）");
+
+        // create/rename/delete 一条都不做 ⇒ 整份拒了，而且**不落笔**（写手一次都不许被叫）。
+        Harness wired;
+        int editor_calls = 0;
+        std::string edited_uri;
+        wired.client.set_document_editor([&](const std::string& uri, const Json& document_edits, int) {
+            ++editor_calls;
+            edited_uri = uri;
+            check(document_edits.size() == 1, "写手拿到的是排好序（自后向前）的那一份 TextEdit");
+            return std::optional<std::string>();
+        });
+        const Json create_only{{"kind", "create"}, {"uri", "file:///New.java"}};
+        Json resource_edit;
+        resource_edit["documentChanges"] = Json::array({create_only});
+        wired.client.receive({{"jsonrpc", "2.0"}, {"id", 95}, {"method", "workspace/applyEdit"},
+                              {"params", {{"edit", resource_edit}}}});
+        written = wired.drain();
+        check(written.size() == 1 && written[0].at("result").at("applied") == false && editor_calls == 0,
+              "本端不做 create/rename/delete（能力表里那三样声明了却没实现）⇒ 如实回未应用，而不是回 applied:true 冒充做过");
+
+        const Json one_text_edit{{"range", {{"start", {{"line", 4}, {"character", 0}}},
+                                            {"end", {{"line", 4}, {"character", 0}}}}}, {"newText", "y"}};
+        Json document_change;
+        document_change["textDocument"] = {{"uri", "file:///a.java"}, {"version", 3}};
+        document_change["edits"] = Json::array({one_text_edit});
+        const Json rename_operation{{"kind", "rename"}, {"uri", "file:///a.java"}, {"newUri", "file:///b.java"}};
+        Json mixed_edit;
+        mixed_edit["documentChanges"] = Json::array({document_change, rename_operation});
+        wired.client.receive({{"jsonrpc", "2.0"}, {"id", 96}, {"method", "workspace/applyEdit"}, {"params", {{"edit", mixed_edit}}}});
+        written = wired.drain();
+        check(written.size() == 1 && written[0].at("result").at("applied") == false && editor_calls == 0,
+              "文本编辑 + 资源操作混在一份里时整份拒：先写完再回 false 会留下「一半落盘」的状态");
+
+        Json text_only_edit;
+        text_only_edit["documentChanges"] = Json::array({document_change});
+        wired.client.receive({{"jsonrpc", "2.0"}, {"id", 97}, {"method", "workspace/applyEdit"}, {"params", {{"edit", text_only_edit}}}});
+        written = wired.drain();
+        check(written.size() == 1 && written[0].at("result").at("applied") == true && editor_calls == 1 &&
+                  edited_uri == "file:///a.java",
+              "纯文本编辑真的交给了写手，回的是那一次的实际结果");
+
+        // 协议的硬要求：结果条数与请求条数**一致**，认不出的 section 回 null 而不是整条不回。
+        const Json items{{"items", Json::array({
+            Json{{"section", "java.format.tabs"}},
+            Json{{"section", "java.missing"}},
+            Json{{"scopeUri", "file:///a.java"}, {"section", "java"}}})}};
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 92}, {"method", "workspace/configuration"}, {"params", items}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("result").size() == 3 &&
+                  written[0].at("result")[0] == true && written[0].at("result")[1].is_null() &&
+                  written[0].at("result")[2].at("format").at("tabs") == true,
+              "三条问就答三条：命中的给值、没登记的给 null、只有 scopeUri 的给根设置");
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 93}, {"method", "workspace/configuration"},
+                          {"params", {{"items", Json::array()}}}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("result").is_array() && written[0].at("result").empty(),
+              "空 items ⇒ 空数组，不是 null（服务器按「一条都没问到」继续，而不是按「客户端坏了」）");
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 94}, {"method", "workspace/configuration"}});
+        written = h.drain();
+        check(written.size() == 1 && written[0].at("error").at("code") == -32602, "整个没有 params ⇒ InvalidParams");
+    });
+
     run("服务器主动的四条各有处置：logMessage 转出去、showMessageRequest 与 refresh 答对回包", [&] {
         // 上游逐条（platform/lsp-impl/src/impl/LspServerNotificationsHandlerImpl.kt）：
         //   · `:396-404` logMessage —— 写进语言服务日志（只有 Error/Warning 另弹通知），

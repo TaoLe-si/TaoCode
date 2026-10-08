@@ -20,9 +20,17 @@
 //     pass 名是 `AnalysisBundle.message("pass.syntax")` = "Syntax analysis"
 //     （`AnalysisBundle.properties:123`）。分趟调度的另一半在 `src/highlightPasses.ts`。
 //
-// 与上游的差异（如实）：本仓**没有插件贡献点宿主**（没有 plugin.xml、没有第三方注册面），
-// 注册表是进程内的单例，注解器由本仓自己 `register()` 进来。第三方注解器这件事做不到，
-// 不是"太复杂"，是**没有加载插件描述符的那一层**。
+// 第三方注解器的贡献面：上游的 `Annotator` 是 `com.intellij.annotator` EP 的贡献（plugin.xml 里
+// `<annotator implementation="…"/>`），本仓没有插件 XML 解析器，但**有**扩展点宿主
+// （`src/extensionPoints.ts` 的 `EXTENSIONS`）。所以本文件把注册表接到那个 EP 上：
+// `register()` 同时登记进 EP，`adoptFromExtensions()` 把 EP 里的贡献（含第三方挂的）收编进分派表 ——
+// 第三方按 `ANNOTATOR_EP` 挂自己的注解器即可被 `forLanguage()` 分派，与内置的两条走同一条路。
+
+import { ANNOTATOR_EP, EXTENSIONS } from './extensionPoints.ts'
+// 外部注解器过滤器（上游 `com.intellij.daemon.externalAnnotatorsFilter` EP）——
+// 消费口径照 `ExternalLanguageAnnotators.allForFile`（`ExternalLanguageAnnotators.java:20-26`）：
+// 任一过滤器说 prohibited，那个注解器在这份文件上就不跑。内建三条在 `src/annotatorHighlights.ts`。
+import { externalAnnotatorsFor, type DaemonFileRef } from './daemonAnalysisExtensionPoints.ts'
 
 /** 注解的严重度档（上游 `HighlightSeverity` 的可移植子集；四档模型见 `src/highlightLevels.ts`）。 */
 export type AnnotationSeverity = 'error' | 'warning' | 'weakWarning' | 'information'
@@ -92,6 +100,12 @@ export interface ExternalAnnotatorInput {
 export interface AnnotatorInput {
   /** 工作区相对路径。 */
   path: string
+  /**
+   * 语言 id（`src/annotatorRegistry.ts` 的 `run()` 按它分派）。
+   * 注解器自己也要用语言判定时读这一格：线索来自 `ImplicitUsageProvider` 的元素形状
+   * 与 `ContributedReferencesAnnotator` 的语言门槛（`allForLanguageOrAny`）。
+   */
+  language?: string
   text: string
   /** 这一拍要算的行范围（0 基、闭区间）；`null` = 整份重算（`myUpdateAll`）。 */
   dirtyLines: readonly { start: number; end: number }[] | null
@@ -120,6 +134,12 @@ export interface AnnotatorRun {
   ran: string[]
   /** 索引未就绪而被跳过的注解器（`AnnotatorRunner.java:137-139`）。 */
   skippedDumb: string[]
+  /**
+   * 被 `ExternalAnnotatorsFilter` 拦下的注解器（上游对应面：`ExternalLanguageAnnotators.allForFile`
+   * 里 `ContainerUtil.findAll` 淘汰掉的那些）。它与 `skippedDumb` 分开记 —— 一个是「现在不算」，
+   * 一个是「这份文件根本不该由它算」，混在一起就判不出过滤器有没有生效。
+   */
+  skippedProhibited: string[]
 }
 
 /**
@@ -133,10 +153,30 @@ export class AnnotatorRegistry {
   register(annotator: Annotator): void {
     if (this.annotators.has(annotator.id)) throw new Error(`注解器 id 重复：${annotator.id}`)
     this.annotators.set(annotator.id, annotator)
+    // 同时挂进**扩展点宿主**的 `com.intellij.annotator` EP：这样第三方按同一 id 挂进来的注解器
+    // 与内置的走同一条分派路（上游是 plugin.xml 的 `<annotator>` + LanguageAnnotators 收编）。
+    if (EXTENSIONS.hasExtensionPoint(ANNOTATOR_EP))
+      EXTENSIONS.registerExtension(ANNOTATOR_EP, annotator.id, annotator, { source: 'user' })
   }
 
   unregister(id: string): void {
     this.annotators.delete(id)
+    EXTENSIONS.unregisterExtension(ANNOTATOR_EP, id)
+  }
+
+  /**
+   * 从扩展点宿主**收编**注解器（上游 `LanguageAnnotators` 在启动时把 plugin.xml 里的
+   * `<annotator>` 全注册进来）。返回收编的条数 —— EP 里的同 id 覆盖本注册表里的那条
+   * （EP 是"后来者"，与 `register` 的"最后写入赢"同一口径）。
+   */
+  adoptFromExtensions(): number {
+    let adopted = 0
+    for (const annotator of EXTENSIONS.extensionsOf<Annotator>(ANNOTATOR_EP)) {
+      if (!annotator?.id || typeof annotator.annotate !== 'function') continue
+      this.annotators.set(annotator.id, annotator)
+      adopted += 1
+    }
+    return adopted
   }
 
   get(id: string): Annotator | undefined {
@@ -155,11 +195,19 @@ export class AnnotatorRegistry {
     const ran: string[] = []
     const skippedDumb: string[] = []
     const dumb = input.dumb === true
-    for (const annotator of this.forLanguage(language)) {
+    const file: DaemonFileRef = { path: input.path, text: input.text, language }
+    // 外部注解器过滤器（`ExternalLanguageAnnotators.allForFile` 的等价物，见
+    // `src/daemonAnalysisExtensionPoints.ts` 的 `externalAnnotatorsFor`）：任一过滤器说 prohibited 的注解器
+    // 在这份文件上不跑，也不记进 `ran`；单独记在 `skippedProhibited` 里，判据据此区分「被拦」与「没跑」。
+    const candidates = this.forLanguage(language)
+    const allowed = externalAnnotatorsFor(candidates, file)
+    const skippedProhibited = candidates.filter(candidate => !allowed.includes(candidate)).map(candidate => candidate.id)
+    for (const annotator of allowed) {
       if (dumb && annotator.dumbAware === false) { skippedDumb.push(annotator.id); continue }
       ran.push(annotator.id)
       for (const annotation of annotator.annotate({
         path: input.path,
+        language,
         text: input.text,
         batchMode: input.batchMode,
         external: input.external,
@@ -169,7 +217,7 @@ export class AnnotatorRegistry {
         annotations.push({ ...annotation, annotator: annotator.id, batchMode: input.batchMode })
       }
     }
-    return { annotations, ran, skippedDumb }
+    return { annotations, ran, skippedDumb, skippedProhibited }
   }
 }
 

@@ -81,7 +81,11 @@ test('接线：检查宿主把范围接到空判上，没接时交 null 而不�
   assert.match(host, /commitScope\?: \(\) => readonly string\[\]/, '可选入参：宿主没接之前恒为 undefined')
   assert.match(host, /includedCount: commitScope \? commitIncludedCount\(changes\.value, commitScope\(\)\) : null/,
     '没给范围 ⇒ 交给空判的是 null，判据落回整份暂存区')
-  assert.match(host, /import \{ commitBlockMessage, commitBlockReason, commitIncludedCount \} from '\.\/commitCheck\.ts'/,
+  // 按实现的真实锚点写（2026-10-07）：文案那半已搬到 `checkinHandlers.ts` 的 `cancelMessage`
+  // （`git diff` 里 `commitCheckError.value = commitBlockMessage(reason)` 那行随之移走），
+  // 本宿主只留判定要用的两个值。意图不变：**值的 import 必须带 `.ts` 扩展名**
+  // （本仓的三条语法坑之一），缺扩展名会在 Node 的 ESM 解析期整片变红。
+  assert.match(host, /import \{ commitBlockReason, commitIncludedCount \} from '\.\/commitCheck\.ts'/,
     '值的 import 带 .ts 扩展名（本仓的三条语法坑之一）')
   assert.doesNotMatch(host, /includedCount: 0/, '不许在检查宿主里替范围编一个常数')
 })

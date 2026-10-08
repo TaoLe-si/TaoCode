@@ -12,6 +12,7 @@
 // 本地词只补服务端没有的；本地条的 `sortText` 加 `~` 前缀排在服务端候选之后。
 
 import { camelHumpMatch, localSortKey } from './completionSort.ts'
+import { COMPLETION_CONTRIBUTOR_EP, EXTENSIONS } from './extensionPoints.ts'
 
 /** 一条本地补全候选（`CompletionResultSet.addElement` 的最小字段集）。 */
 export interface ContributorItem {
@@ -152,15 +153,43 @@ export function wordCompletionContributor(options: WordCompletionOptions = {}): 
 /** 贡献者注册表：按 id 覆盖注册；`contributeAll` 展平所有适用贡献者的条目。 */
 export interface ContributorRegistry {
   register: (contributor: LocalCompletionContributor) => void
+  /** 注销一个贡献者（EP 侧的 `unregisterExtension` 等价物）。 */
+  unregister: (id: string) => boolean
   contributors: () => readonly LocalCompletionContributor[]
   contributeAll: (context: ContributorContext, mode?: ContributorMode) => ContributorItem[]
 }
 
+/**
+ * 从**扩展点宿主**取初始贡献者（`completion.contributor` EP，
+ * `platform/analysis-api/resources/intellij.platform.analysis.xml:75`）。
+ * 内置的那几个（文档词补全、命令补全）由调用方按 bundled 贡献注册进去；这里只做
+ * 「EP 里现在有哪些 → 注册表里就有哪些」这一步，所以第三方按同一个 id 挂进来的贡献者
+ * 与内置的走同一条路（`tests/extension-points.test.mjs` 钉着这条）。
+ */
+export function contributorsFromExtensions(): LocalCompletionContributor[] {
+  return EXTENSIONS.extensionsOf<LocalCompletionContributor>(COMPLETION_CONTRIBUTOR_EP)
+}
+
 export function createContributorRegistry(initial: readonly LocalCompletionContributor[] = [wordCompletionContributor()]): ContributorRegistry {
   const table = new Map<string, LocalCompletionContributor>()
-  for (const contributor of initial) table.set(contributor.id, contributor)
+  // `initial` 只进本注册表，**不**写回全局 EP —— 调用方（`src/lspCompletion.ts` 的命令贡献者
+  // 带着运行期的动作面）传进来的是私有集合，写回 EP 会让下一次建表把它当第三方贡献收编回来
+  // （跨实例串味）。全局 EP 里只放随本仓发货的那个词补全（模块加载时登记，见文件尾）。
+  for (const contributor of initial) if (contributor?.id) table.set(contributor.id, contributor)
+  for (const contributor of contributorsFromExtensions()) if (!table.has(contributor.id)) table.set(contributor.id, contributor)
   return {
-    register: contributor => { table.set(contributor.id, contributor) },
+    register: contributor => {
+      if (!contributor?.id) return
+      table.set(contributor.id, contributor)
+      // 经注册表注册 = 第三方贡献 ⇒ 同时挂进 EP（上游插件在 plugin.xml 里声明同效）。
+      if (EXTENSIONS.hasExtensionPoint(COMPLETION_CONTRIBUTOR_EP))
+        EXTENSIONS.registerExtension(COMPLETION_CONTRIBUTOR_EP, contributor.id, contributor, { source: 'user' })
+    },
+    unregister: id => {
+      const removed = table.delete(id)
+      if (removed) EXTENSIONS.unregisterExtension(COMPLETION_CONTRIBUTOR_EP, id)
+      return removed
+    },
     contributors: () => [...table.values()],
     contributeAll: (context, mode = 'always') => {
       const items: ContributorItem[] = []
@@ -187,3 +216,9 @@ export function mergeWithServerItems<T extends { label: string; insertText?: str
   const fillers = local.filter(item => !taken.has(item.label.toLowerCase()))
   return [...server, ...fillers]
 }
+
+// ── 随本仓发货的词补全贡献者：作为 **bundled 贡献**登记进全局扩展点宿主 ────────────────────
+// 上游 `WordCompletionContributor` 在 plugin.xml 里声明（`completion.contributor` EP）；本仓没有
+// 插件 XML 解析器，所以"声明"在模块加载时用代码完成。登记进 EP 之后
+// `contributorsFromExtensions()` 拿得到完整集合，第三方也能按同一个 EP id 挂自己的贡献者。
+EXTENSIONS.registerExtension(COMPLETION_CONTRIBUTOR_EP, WORD_CONTRIBUTOR_ID, wordCompletionContributor(), { source: 'bundled' })

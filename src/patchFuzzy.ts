@@ -19,6 +19,7 @@
 //
 // 纯逻辑（不 import bridge），能被 `node --test` 直接加载。
 import type { PatchHunk } from './patchApply.ts'
+import { detectLineSeparator, patchHunkStartIndex, splitPatchLines } from './vcsFileUtil.ts'
 
 /** `GenericPatchApplier.ourMaxWalk`（`:41`）：从绑定点往两边各走多少行去找这个块。 */
 export const MAX_WALK = 1000
@@ -55,7 +56,8 @@ function isInsertion(hunk: PatchHunk): boolean {
  * 用来保证不与上一块重叠（上游 `myTransformations` 的 TextRange 键不重叠）。
  */
 export function findHunkPlacement(hunk: PatchHunk, source: readonly string[], floor = 0, maxWalk = MAX_WALK): HunkPlacement | null {
-  const bound = Math.max(0, hunk.beforeStart - 1)
+  // 绑定点与 `patchApply.applyHunksToText` 同一算法（`@@ -l,0` 的纯插入块：`l` 是「插在第 l 行之后」）。
+  const bound = patchHunkStartIndex(hunk.beforeStart, hunk.beforeCount)
   if (isInsertion(hunk)) return { line: Math.max(floor, bound), distance: 0 }
   if (matchesAt(hunk, source, bound)) return { line: bound, distance: 0 }
   for (let step = 1; step <= maxWalk; step++) {
@@ -88,7 +90,10 @@ export interface OffsetApplyResult {
  */
 export function applyHunksWithOffsetSearch(text: string, hunks: readonly PatchHunk[]): OffsetApplyResult {
   const hadTrailingNewline = text.endsWith('\n')
-  const source = text.split('\n')
+  // 与 `patchApply.applyHunksToText` 同一口径：两侧都按 `LineTokenizer.tokenize(text, false)` 切行
+  // （`\r`、`\n`、`\r\n` 都算分隔符且不留在行里），写回时用原文件的主行尾。
+  const separator = detectLineSeparator(text)
+  const source = splitPatchLines(text)
   const target: string[] = []
   let cursor = 0
   let offsetHunks = 0
@@ -109,7 +114,7 @@ export function applyHunksWithOffsetSearch(text: string, hunks: readonly PatchHu
     cursor = read
   }
   for (let i = cursor; i < source.length; i++) target.push(source[i] ?? '')
-  let result = target.join('\n')
+  let result = target.join(separator)
   // 结尾换行的规矩与 `patchApply.applyHunksToText` 完全一致：块里最后一行带 `\ No newline`
   // 且这一块吃到文件末尾 ⇒ 结果不带结尾换行（上游 `PatchHunk.java:65-70` +
   // `apply/PlainSimplePatchApplier.java:74-79` + `apply/GenericPatchApplier.java:1139-1145`）。
@@ -118,8 +123,9 @@ export function applyHunksWithOffsetSearch(text: string, hunks: readonly PatchHu
   const suppress = lastHunk?.lines[lastHunk.lines.length - 1]?.noNewline === true && touchesEnd
   if (suppress) {
     if (result.endsWith('\n')) result = result.slice(0, -1)
-  } else if (hadTrailingNewline && !result.endsWith('\n')) {
-    result += '\n'
+  } else if (hadTrailingNewline && !result.endsWith('\n') && result !== '') {
+    // `result === ''` = 整份文件被删空 ⇒ 空文件（真 `git apply` 同款，见判据）。
+    result += separator
   } else if (!hadTrailingNewline && result.endsWith('\n') && text !== '') {
     result = result.slice(0, -1)
   }

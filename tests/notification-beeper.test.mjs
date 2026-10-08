@@ -214,8 +214,9 @@ test('接线：通知中心的 ⋮ 菜单接上了那个开关（EventLogPanel�
   assert.match(source, /setGroupPlaysSound/)
   assert.match(source, /groupSoundToggleLabel/)
   // 上游：设置项排最前、后面跟一条分隔线（NotificationsPanel.kt:1110 / :1115）。
-  assert.match(source, /return sound \? \[sound, \.\.\.rest\] : rest/)
-  assert.match(source, /index === 1 && hasGroupSound\(entry\)/)
+  // 设置组现在有两项（声音 + 写入通知中心），分隔线画在它们**之后**（`groupSettingCount`）。
+  assert.match(source, /\.\.\.\(sound \? \[sound\] : \[\]\), \.\.\.\(log \? \[log\] : \[\]\), \.\.\.rest/)
+  assert.match(source, /index === groupSettingCount\(entry\) && groupSettingCount\(entry\) > 0/)
 })
 
 test('模块头引用的上游文件都在判据里出现过的地方', () => {

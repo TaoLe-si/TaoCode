@@ -95,3 +95,17 @@ const next = applyStructuralReplacements(fileText, plan.edits)   // 一次事务
 不改的理由：这条改动会把 `block.end` 从"没块时把键让给别人"变成"没块时吞掉键并清掉用户选区"，
 是用户可见的退化风险，且 `tests/editor-code-block.test.mjs:78-82`/`:150-163` 钉的就是现在这条（不吞键）。
 要按上游收口的话，动的是 `src/editorCommands.ts`（非本代理可改面），所以交到这里。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R-1（`editorLanguageId` facet）** —— `src/components/CodeEditor.vue`（禁改）。需 CodeEditor owner。
+- **R-2（替换全部走逐处编辑）** —— `src/editorCommands.ts`（本 lane）+ `SearchPanel.vue`，登记。
+- **R-3（Python 语法数据）** —— `package.json`（保留），非本 lane。
+- **R-4（选区语义）** —— `src/editorCommands.ts`（本 lane），登记。
+
+结论：零接线（R-1 转 owner，R-2/R-4 登记，R-3 非本 lane）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（R-1 转 owner，R-2/R-4 登记，R-3 非本 lane）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

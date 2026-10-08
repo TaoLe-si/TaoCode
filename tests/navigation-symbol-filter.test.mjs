@@ -45,8 +45,10 @@ test('接线：fileSymbolEntries 委托 lspSymbolBridge 的 documentSymbolEntrie
   assert.match(navigation, /documentSymbolEntries\(outline\.value as NavigationDocumentSymbol\[], path, query\)/,
     'fileSymbolEntries 没有委托 documentSymbolEntries')
   const bridge = read('src/lspSymbolBridge.ts')
-  assert.match(bridge, /import \{ symbolMatchesQuery \} from '\.\/symbolSearch\.ts'/, '包装层没有引入匹配器')
-  assert.match(bridge, /symbolMatchesQuery\(symbol\.name, query\)/,
+  assert.match(bridge, /import \{ SPEED_SEARCH_STRUCTURE_SEPARATORS, symbolMatchesQuery \} from '\.\/symbolSearch\.ts'/, '包装层没有引入匹配器')
+  // 结构弹层那一站（`FileStructurePopup.java:318` 的 `new SpeedSearchComparator(false, true, " ()")`）
+  // 必须把 `" ()"` 这份硬分隔符带进匹配器 —— 少带一个参数就等于把上游这一档判据丢了。
+  assert.match(bridge, /symbolMatchesQuery\(symbol\.name, query, SPEED_SEARCH_STRUCTURE_SEPARATORS\)/,
     'documentSymbolEntries 还在用 toLowerCase().includes（驼峰缩写搜不到）')
   assert.doesNotMatch(bridge, /symbol\.name\.toLowerCase\(\)\.includes\(/, '旧的子串过滤还在')
   // 过滤后只 slice(0,limit) —— 没有任何 sort：上游 SpeedSearch 在树里过滤，行序不变。

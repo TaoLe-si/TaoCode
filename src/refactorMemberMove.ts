@@ -469,3 +469,74 @@ export function memberMoveNotice(direction: MemberMoveDirection, className: stri
   if (result.missing.length) parts.push(`没找到「${result.missing.join('、')}」。`)
   return parts.join('')
 }
+
+// ── 成员清单改由**符号模型**优先供给（`PsiClass.getMembers` 的等价物） ──────────────────────
+// 上游列成员走 PSI（`PsiClass.getMembers` + `MemberSelectionPanel` 的勾选表）；本仓原先只有
+// 文本层的 `classMembers()`（花括号配对 + 声明头正则）。本批把「语言服务给了 documentSymbol
+// 就用它、没给才退到文本层」这一档接上 —— 落点就是 `src/symbolModel.ts` 的
+// `buildFileSymbolModel`/`fileMembers`：前者建符号树（`documentSymbol` 或词法降级），
+// 后者出类型成员清单并带 `source` 标注（`lsp` / `lexical`）。
+//
+// 为什么这件事值：`classMembers()` 只认它自己那套声明头正则，语言服务报出的成员（注解/泛型/
+// 多行签名/嵌套类型）它认不全；有 `documentSymbol` 时按符号树的直接子节点取成员，
+// 与上游 `getMembers` 同一形状。降级路径逐字保留（`classMembers` 一行未动），所以没有
+// 语言服务时行为与接线前完全一致。
+
+import { buildFileSymbolModel, fileMembers, type SymbolNode } from './symbolModel.ts'
+
+/** 成员来源（供调用方如实说明这一份清单是符号树还是文本降级来的）。 */
+export type MemberListSource = 'lsp' | 'lexical'
+
+export interface MemberList {
+  /** 成员名（去重保序）。 */
+  names: string[]
+  source: MemberListSource
+}
+
+/**
+ * 一个文件里某个类的成员名清单：`documentSymbol` 里那个类符号的直接子节点优先，
+ * 没有符号树（或符号树里找不到那个类）时退回文本层的 `classMembers()`。
+ *
+ * `className` 是文本层 `findMemberMoveClasses()` 认出的类名；符号树里按**同名 + 包含光标/声明行**
+ * 找那个类（同名类在不同位置是两个节点，所以还要比起始行 —— `startLine` 给了就用它）。
+ */
+export function memberListFor(
+  text: string, language: string, className: string, startLine?: number,
+  symbols?: readonly SymbolNode[] | null,
+): MemberList {
+  const model = buildFileSymbolModel({ path: '', language, text, symbols })
+  if (model.tree.source === 'lsp') {
+    const type = findTypeByName(model, className, startLine)
+    if (type && type.children.length) {
+      const names = type.children.map(child => child.name).filter(Boolean)
+      return { names: [...new Set(names)], source: 'lsp' }
+    }
+  }
+  // 文本层兜底：与接线前逐字同路（`classMembers` 只认花括号语言的类体）。
+  const cls = findMemberMoveClasses(text, language).find(candidate => candidate.name === className)
+  if (!cls) return { names: [], source: 'lexical' }
+  return { names: classMembers(text, cls).map(member => member.name), source: 'lexical' }
+}
+
+/** 在符号树里按名字（可选起始行）找那个类型符号。 */
+function findTypeByName(model: ReturnType<typeof buildFileSymbolModel>, className: string, startLine?: number): SymbolNode | null {
+  const visit = (nodes: readonly SymbolNode[]): SymbolNode | null => {
+    for (const node of nodes) {
+      if (node.name === className && (startLine === undefined || node.startLine === startLine)) return node
+      const nested = visit(node.children)
+      if (nested) return nested
+    }
+    return null
+  }
+  return visit(model.tree.roots)
+}
+
+/** 一个文件里全部可搬动的成员名（符号模型优先；调用方据此在成员表里出候选）。 */
+export function fileMemberNames(
+  text: string, language: string, symbols?: readonly SymbolNode[] | null,
+): MemberList {
+  const model = buildFileSymbolModel({ path: '', language, text, symbols })
+  const members = fileMembers(model)
+  if (members.length) return { names: [...new Set(members.map(member => member.name))], source: members[0].source }
+  return { names: [], source: 'lexical' }
+}

@@ -234,3 +234,15 @@ else await request('shell.openUrl', { url })                          // 策略 
   还是 (b) 换成上游那三个固定位置（Home/Desktop 在工作区之外，本仓的 `workspace.list` 列不出来，
   点了只能转交宿主原生对话框 —— 语义会变味），还是 (c) 保留空栏（现在就是这样，`v-if` 保证一行都不画）。
   本桶按 (c) 收尾，没有新增假控件。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1b（结构视图光标补列）已接线**：`src/App.vue:225` 的 `todoSource` 已带 `character: active.value.column`。
+- **W2（外部链接判定）已接线**：URL 出口收成 `src/externalLinkLauncher.ts` 的 `openExternalUrl`（见 bucket14c 处理结果）。
+
+结论：W1b/W2 已接线。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W1b/W2 已接线。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

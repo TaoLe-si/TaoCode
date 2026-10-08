@@ -114,7 +114,10 @@ export function wireLspProgressNotices(notifyProgress: NotifyProgress) {
         message: message.message,
         error: message.severity <= 2,
         detail: [`来自 ${message.language || '语言服务'}`],
-        displayId: `lsp:message:${message.language}`,
+        // 分级映射（该进上游哪个通知组）由 `src/lspServerMessages.ts` 算好并随条目带出：showMessage 走
+        // `lsp:message:<语言>`（BALLOON，弹），logMessage 的 Error/Warning 走 `lsp:log:message:<语言>`
+        // （上游 :399 那一组，displayType=NONE ⇒ 只进通知中心不弹）。没带 displayId 的旧形状保持原行为。
+        displayId: message.displayId || `lsp:message:${message.language}`,
       })
       // 错误/警告把日志行一并留在消息窗口（`LspServerNotificationsHandlerImpl` 的 showMessage
       // 只给消息本身；日志尾部让用户能看见这条消息之前服务器都说了什么）。

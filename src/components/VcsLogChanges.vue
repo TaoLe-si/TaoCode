@@ -33,20 +33,20 @@ const tree = computed(() => changeTree(files.value.map(file => ({ path: file.pat
     <label v-if="changes && comparisons.length > 1" class="comparison">比较父提交
       <select v-model="comparisonIndex" aria-label="比较父提交"><option v-for="(item, index) in comparisons" :key="item.parent" :value="index">{{ item.parent.slice(0, 8) }}</option></select>
     </label>
-    <p v-if="!selected">选择提交以查看变更。</p>
-    <p v-else-if="loading">正在加载变更…</p>
-    <p v-else-if="error" role="alert">{{ error }}</p>
-    <p v-else-if="changes === null">尚未加载变更。</p>
-    <p v-else-if="!files.length">此比较没有文件变更。</p>
+    <p v-if="!selected" class="vcslog-changes-message">选择提交以查看变更。</p>
+    <p v-else-if="loading" class="vcslog-changes-message">正在加载变更…</p>
+    <p v-else-if="error" class="vcslog-changes-message" role="alert">{{ error }}</p>
+    <p v-else-if="changes === null" class="vcslog-changes-message">尚未加载变更。</p>
+    <p v-else-if="!files.length" class="vcslog-changes-message">此比较没有文件变更。</p>
     <div v-else class="tree"><VcsLogChangeTree :nodes="tree" :selected="selectedPath" @select="select" /></div>
   </section>
 </template>
 <style scoped>
 .changes { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.heading { display: flex; align-items: center; justify-content: space-between; min-height: 30px; padding: 0 8px; border-bottom: 1px solid var(--line); font-size: 11px; }
-.heading span, p { color: var(--muted); font-size: 11px; }
-p { margin: 12px; overflow-wrap: anywhere; }
-.comparison { display: flex; gap: 8px; padding: 4px 8px; font-size: 11px; }
+.heading { display: flex; align-items: center; justify-content: space-between; min-height: 30px; padding: 0 var(--space-2); border-bottom: 1px solid var(--line); font-size: 11px; }
+.heading span, .vcslog-changes-message { color: var(--muted); font-size: 11px; }
+.vcslog-changes-message { margin: var(--space-3); overflow-wrap: anywhere; }
+.comparison { display: flex; gap: var(--space-2); padding: var(--space-1) var(--space-2); font-size: 11px; }
 .comparison select { color: var(--text); background: var(--editor); border: 1px solid var(--line); }
-.tree { overflow: auto; flex: 1; padding: 4px 0; }
+.tree { overflow: auto; flex: 1; padding: var(--space-1) 0; }
 </style>

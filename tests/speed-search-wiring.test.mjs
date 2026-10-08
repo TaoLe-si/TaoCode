@@ -26,10 +26,11 @@ const fakeTree = () => ({ openSpeedSearch: () => { opened++ } })
 // SpeedSearch 不再是第 0 条 —— 判据改成"它就在 additionalGearActions 之后、CloseAll 之前"。
 test('SpeedSearch 紧跟 additionalGearActions，且在 CloseAll 之前（ToolWindowImpl.kt:859-872）', () => {
   const order = TOOL_WINDOW_GEAR_SPEC.map(entry => entry.action)
-  assert.equal(order[0], 'usage.viewOptions', 'additionalGearActions 那一组在最前')
-  assert.equal(order[1], 'window.speedSearch', '顺序照源码：SpeedSearch 在 CloseAll 之前')
-  assert.equal(order.indexOf('window.closeAllTabs'), 2)
-  const search = TOOL_WINDOW_GEAR_SPEC[1]
+  assert.deepEqual(order.slice(0, 2), ['usage.viewOptions', 'usage.groupBy'],
+    'additionalGearActions 那一组在最前（用法视图的两组：`UsageViewContentManagerImpl.java:114-116` 的 gearActions 与 `UsageViewImpl.java:1089-1098` 的「分组」弹出组）')
+  assert.equal(order[2], 'window.speedSearch', '顺序照源码：SpeedSearch 在 CloseAll 之前')
+  assert.equal(order.indexOf('window.closeAllTabs'), 3)
+  const search = TOOL_WINDOW_GEAR_SPEC[2]
   assert.equal(search.fromHost, true, '它不在菜单索引里，行由宿主给')
 })
 
@@ -97,4 +98,19 @@ test('搜索框：关着不出现，开着带上游的空提示', async () => {
   assert.ok(open.includes('class="speed-search-input"'), '开着时要有输入框')
   assert.ok(open.includes('placeholder="搜索"'), '空提示 = editorsearch.search.hint（ApplicationSearchBundle.properties:661）')
   assert.ok(open.includes('aria-label="搜索"'), '输入框要有可读名字')
+})
+
+// 「替换 vs 追加」这一档落到 DOM 上，靠的是**焦点是否进了搜索框**：
+// 上游搜索框一出现就吃后续按键（`SpeedSearchBase.java:730-744` 的 insertString +
+// `SpeedSearch.java:43-45` 的 `updatePattern(myString + letter)` ⇒ 追加），收起时焦点回列表
+// （`:964-975`/`:976-980`）。SSR 拿不到焦点，所以按本文件既有的判法（源码钉接线，非字符串行为）核：
+// 焦点的收放必须在**共享件**里，否则「打字即开」的宿主（书签/日志）每敲一个字符都会被列表容器的
+// keydown 覆盖成最后一个字符，多字符追加丢失。
+test('搜索框自己收放焦点：打开进框才追加、关闭交回列表（SpeedSearchBase.java:730-744 / :964-980）', () => {
+  const bar = read('src/components/SpeedSearchBar.vue')
+  assert.match(bar, /watch\(\(\) => props\.open,/, '没有随 open 变化处理焦点 ⇒ 追加这一档落不回 DOM')
+  assert.match(bar, /el\.focus\(\)/, '打开时没把焦点收进输入框 ⇒ 列表仍持焦，逐字符各自替换')
+  assert.match(bar, /setSelectionRange\(/, '打开后没把光标放到串尾 ⇒ 已种下的首字符之后会插到串首')
+  assert.match(bar, /returnFocus\??\.focus\(\)/, '关闭时没把焦点交回列表（上游 :964-980 收起即回列表）')
+  assert.match(bar, /typeof document === 'undefined'/, '无 DOM（SSR 渲染判据）环境要早退，否则 renderToString 抛')
 })

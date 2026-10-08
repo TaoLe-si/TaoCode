@@ -1,18 +1,18 @@
 // IDEA 的状态栏组件**注册表**与可见性设置 —— `StatusBarWidgetFactory` 那一层。
 //
 // 上游三件（都在 `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/widget/`）：
-//   · `StatusBarWidgetSettings.kt:20-41`：状态是 `Map<String 工厂 id, Boolean>`，**只存与默认不同的**——
-//     `setEnabled` 在新值等于 `isEnabledByDefault` 时把那条**删掉**（`:32-40`）；查询是
-//     `state.widgets.get(id) ?: factory.isEnabledByDefault`（`:26-28`）。所以"用户的显式关闭"才是
-//     `isExplicitlyDisabled(id)`（`:24`），它只认 `== false` 那条。
+//   · `StatusBarWidgetSettings.kt:16-40`：状态是 `Map<String 工厂 id, Boolean>`，**只存与默认不同的**——
+//     `setEnabled`（`:28-39`）在新值等于 `isEnabledByDefault` 时把那条**删掉**；查询是
+//     `state.widgets.get(id) ?: factory.isEnabledByDefault`（`isEnabled`，`:24-26`）。所以"用户的显式关闭"才是
+//     `isExplicitlyDisabled(id)`（`:22`），它只认 `== false` 那条。
 //   · `StatusBarWidgetsManager.kt:58-59`：`LinkedHashMap<Factory, Widget>` + `widgetIdMap: Map<id, Factory>`
-//     —— 前者是"已创建的组件"，后者是"按 id 反查工厂"（`findWidgetFactory` :139）。
-//   · `updateWidget`（:97-131）：三道闸依次开 —— `(isConfigurable && !settings.isEnabled(factory))
-//     || !isAvailable || !isAllowedByInternalMode` 就 `disableWidget`，否则建组件并登记。
-//     `canBeEnabledOnStatusBar`（:161-167）是右键菜单用的**四合一**判据：
+//     —— 前者是"已创建的组件"，后者是"按 id 反查工厂"（`findWidgetFactory` `:149`）。
+//   · `updateWidget`（函数在 `:96`，三道闸在 `:97-99`，装配体到 `:131`）：三道闸依次开 —— `(isConfigurable &&
+//     !settings.isEnabled(factory)) || !isAvailable || !isAllowedByInternalMode` 就 `disableWidget`，否则建组件并登记。
+//     `canBeEnabledOnStatusBar`（`:176-181`）是右键菜单用的**四合一**判据：
 //     `isAvailable && isAllowedByInternalMode && isConfigurable && canBeEnabledOn(statusBar)`。
 //
-// 上游 `isAllowedByInternalMode = !isInternal || 应用处于内部模式`（:243-245）—— 内部组件（`WriteThread`、
+// 上游 `isAllowedByInternalMode = !isInternal || 应用处于内部模式`（`:275-277`）—— 内部组件（`WriteThread`、
 // `SmartModeIndicator`、`IndexesAndVfsFlushIndicator`）只在内部模式出现。本仓没有内部模式，等价物是
 // `isInternal` 直接当"不注册"。
 //
@@ -28,35 +28,36 @@ import { disposeWidget, installWidget, type StatusBarBinding, type WidgetInstanc
 
 /** 上游 `StatusBarWidgetFactory`（`platform-api/.../StatusBarWidgetFactory.java`）的字段面。 */
 export interface StatusBarWidgetFactory {
-  /** 上游 `getId()`：与 plugin.xml 的扩展 `id` 一致，**也是持久化可见性用的键**（`:31-34`）。 */
+  /** 上游 `getId()`：与 plugin.xml 的扩展 `id` 一致，**也是持久化可见性用的键**（`:24-29`）。 */
   id: string
-  /** 上游 `getDisplayName()`：右键勾选项与"显示/隐藏 <名字>"动作里的名字（`:37-41`）。 */
+  /** 上游 `getDisplayName()`：右键勾选项与"显示/隐藏 <名字>"动作里的名字（`:31-37`）。 */
   displayName: string
-  /** 上游 `isEnabledByDefault()`，默认 true（`:112-114`）。 */
+  /** 上游 `isEnabledByDefault()`，默认 true（`:102-108`）。 */
   enabledByDefault?: boolean
-  /** 上游 `isConfigurable()`，默认 true；false = 用户不能开关（`:122-124`）。 */
+  /** 上游 `isConfigurable()`，默认 true；false = 用户不能开关（`:110-118`）。 */
   configurable?: boolean
-  /** 上游 `isInternal()`，默认 false；true = 只在内部模式出现（`:128-130`）。 */
+  /** 上游 `isInternal()`，默认 false；true = 只在内部模式出现（`:120-125`）。 */
   internal?: boolean
-  /** 上游 `isAvailable(project)`，默认 true（`:68-70`）。 */
+  /** 上游 `isAvailable(project)`，默认 true（`:39-57`）。 */
   available?: boolean
   /**
-   * 上游 `StatusBarEditorBasedWidgetFactory.canBeEnabledOn`（`status/widget/StatusBarEditorBasedWidgetFactory.kt:14-16`）：
+   * 上游 `StatusBarEditorBasedWidgetFactory.canBeEnabledOn`（`status/widget/StatusBarEditorBasedWidgetFactory.kt:12`，
+   * 里面调的 `getTextEditor` 在 `:16`）：
    * `getTextEditor(statusBar) != null` —— **没有打开的编辑器时这个组件不能开启**。右键菜单里那一格
    * 会因此禁用（`ToggleWidgetAction.update` 在状态栏位置用 `canBeEnabledOnStatusBar` 决定
-   * `isEnabledAndVisible`，`StatusBarWidgetsActionGroup.kt:104-110`）。
+   * `isEnabledAndVisible`，`StatusBarWidgetsActionGroup.kt:116-117`）。
    */
   editorBased?: boolean
 }
 
-/** `widgets.get(id) ?: factory.isEnabledByDefault`（`StatusBarWidgetSettings.kt:26-28`）。 */
+/** `widgets.get(id) ?: factory.isEnabledByDefault`（`StatusBarWidgetSettings.kt:24-26`）。 */
 export function widgetEnabled(overrides: Readonly<Record<string, boolean>>, factory: StatusBarWidgetFactory): boolean {
   const stored = Object.prototype.hasOwnProperty.call(overrides, factory.id) ? overrides[factory.id] : undefined
   return typeof stored === 'boolean' ? stored : factory.enabledByDefault !== false
 }
 
 /**
- * `setEnabled`（`StatusBarWidgetSettings.kt:32-40`）：新值等于默认就把这条**删掉**（不是存一个等于默认的
+ * `setEnabled`（`StatusBarWidgetSettings.kt:28-39`）：新值等于默认就把这条**删掉**（不是存一个等于默认的
  * 值）—— 这样"改回默认"与"从没动过"在存档里是同一个状态。
  */
 export function withWidgetEnabled(overrides: Readonly<Record<string, boolean>>, factory: StatusBarWidgetFactory, value: boolean): Record<string, boolean> {
@@ -66,13 +67,13 @@ export function withWidgetEnabled(overrides: Readonly<Record<string, boolean>>, 
   return next
 }
 
-/** `isAllowedByInternalMode`（`StatusBarWidgetsManager.kt:243-245`）。本仓没有内部模式，一律放行非内部组件。 */
+/** `isAllowedByInternalMode`（`StatusBarWidgetsManager.kt:275-277`）。本仓没有内部模式，一律放行非内部组件。 */
 function allowedByInternalMode(factory: StatusBarWidgetFactory): boolean {
   return factory.internal !== true
 }
 
 /**
- * 工厂该不该建组件（`updateWidget` :98-100 的三道闸）。
+ * 工厂该不该建组件（`updateWidget` 的三道闸，`StatusBarWidgetsManager.kt:97-99`）。
  * 上游还有一道"显式关掉就连实例都不建"的闸：`StatusBarWidgetsManager.kt:197` 在装配可用工厂列表时按
  * `StatusBarWidgetSettings.isExplicitlyDisabled(id)`（`StatusBarWidgetSettings.kt:22`）先过滤一遍。
  * 本仓这一条由下面的 `widgetEnabled`（存过的值优先，没存过按 `isEnabledByDefault`）承担 —— 同一个存档、
@@ -87,10 +88,10 @@ export function shouldCreateWidget(factory: StatusBarWidgetFactory, overrides: R
 }
 
 /**
- * `StatusBarActionManager.getActionsFor`（`StatusBarWidgetsActionGroup.kt:191-196`）只给 `isConfigurable`
+ * `StatusBarActionManager.getActionsFor`（`StatusBarWidgetsActionGroup.kt:208-211`，过滤那一句在 `:210`）只给 `isConfigurable`
  * 的工厂出勾选项 —— 组件自己不可开关的（上游 `FatalErrorWidgetFactory`）不该出现在右键菜单里。
  * `ToggleWidgetAction.update` 还会再按 `canBeEnabledOnStatusBar`（四合一）决定该项**能不能点**
- * （`StatusBarWidgetsActionGroup.kt:104-110`）：本仓只兑现其中一条有真宿主的分支 ——
+ * （`StatusBarWidgetsActionGroup.kt:116-117`；判据本体 `StatusBarWidgetsManager.kt:176-181`）：本仓只兑现其中一条有真宿主的分支 ——
  * editor-based 工厂在没有打开的编辑器时不可开启（`getTextEditor(statusBar) != null`）。
  */
 export function configurableFactories<T extends StatusBarWidgetFactory>(factories: readonly T[]): T[] {
@@ -98,7 +99,7 @@ export function configurableFactories<T extends StatusBarWidgetFactory>(factorie
 }
 
 /**
- * 右键勾选项此刻是否可点 —— 上游 `canBeEnabledOnStatusBar`（`StatusBarWidgetsManager.kt:161-167`）
+ * 右键勾选项此刻是否可点 —— 上游 `canBeEnabledOnStatusBar`（`StatusBarWidgetsManager.kt:176-181`）
  * 的第三、四条里本仓能兑现的那部分：`canBeEnabledOn(statusBar)`。对 editor-based 工厂就是
  * 「有打开的编辑器」；其余组件一律可点（`canBeEnabledOn` 默认 true）。
  */

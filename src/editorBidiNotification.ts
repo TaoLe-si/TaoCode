@@ -1,7 +1,7 @@
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { EditorView, showPanel, type Panel } from '@codemirror/view'
 import { BIDI_DIRECTIONS, bidiDirectionLabel, type BidiDirection } from './bidiTextDirection.ts'
-import { BIDI_NOTIFICATION_KEY, containsBidirectionalText, showBidiNotification } from './bidiNotification.ts'
+import { BIDI_NOTIFICATION_KEY, BIDI_NOTIFICATION_TEXT, bidiPanelForText, containsBidirectionalText, showBidiNotification } from './bidiNotification.ts'
 
 function notificationDisabled(): boolean {
   try { return localStorage.getItem(BIDI_NOTIFICATION_KEY) === 'true' } catch { return false }
@@ -29,7 +29,9 @@ export function bidiNotificationExtension(choose: (direction: BidiDirection) => 
     dom.className = 'bidi-notification'
     dom.setAttribute('role', 'status')
     const message = dom.appendChild(document.createElement('span'))
-    message.textContent = '双向文本的显示布局取决于基础方向（视图 › 文本方向）。'
+    // 文案走 `com.intellij.editorNotificationProvider` 那条收集路径（`bidiPanelForText`），
+    // 与第三方挂的编辑器通知同一份口径；取不到退回常量（内建那支一定给得出）。
+    message.textContent = bidiPanelForText(view.state.doc.toString())?.text ?? BIDI_NOTIFICATION_TEXT
     const direction = dom.appendChild(document.createElement('select'))
     direction.setAttribute('aria-label', '选择文本方向')
     const prompt = direction.appendChild(document.createElement('option'))

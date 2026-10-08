@@ -39,12 +39,17 @@ test('读写走 localStorage 键，存储不可用不抛', () => {
 })
 
 test('面板接线：附加输入有历史候选，成功附加才记录；进程列表没有宿主通道（判词要点）', () => {
+  // 附加输入整块从 DebugPanel.vue 拆到 DebugStartPane.vue（面板贴机检上限）。判据跟着实现
+  // 走，断言意图不变：输入带历史候选/成功附加才记录/存进 localStorage。
+  const pane = readFileSync('src/components/DebugStartPane.vue', 'utf8')
+  assert.match(pane, /list="debug-attach-history"/)
+  assert.match(pane, /<datalist id="debug-attach-history">/)
+  assert.match(pane, /attachHistory\.value = pushAttachTarget\(attachHistory\.value, selector\)/)
+  assert.match(pane, /saveAttachHistory\(storage, attachHistory\.value\)/)
+  assert.match(pane, /const attachHistory = ref<string\[\]>\(loadAttachHistory\(storage\)\)/)
+  // 面板必须挂载这一块，否则接线在 UI 里够不着（拆出去不等于可以丢）。
   const panel = readFileSync('src/components/DebugPanel.vue', 'utf8')
-  assert.match(panel, /list="debug-attach-history"/)
-  assert.match(panel, /<datalist id="debug-attach-history">/)
-  assert.match(panel, /attachHistory\.value = pushAttachTarget\(attachHistory\.value, selector\)/)
-  assert.match(panel, /saveAttachHistory\(storage, attachHistory\.value\)/)
-  assert.match(panel, /const attachHistory = ref<string\[\]>\(loadAttachHistory\(storage\)\)/)
+  assert.match(panel, /<DebugStartPane /)
   // 进程枚举通道：native 里只有 run 实例的进程树（run_host 的 descendant_processes），
   // 没有系统进程列表方法 —— 这条判据防止将来有人"以为有"。
   const method = readFileSync('src/bridge.ts', 'utf8').match(/export type Method = '([\s\S]*?)'$/m)

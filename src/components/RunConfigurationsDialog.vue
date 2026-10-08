@@ -27,10 +27,19 @@
 //     `setVisible(settings.isTemplate() && factory.getSingletonPolicy().isPolicyConfigurable())`），
 //     本仓模板与配置上各有一份 —— 模板那份随 `src/runConfigTemplates.ts` 的 `applyTemplate` 给新配置取初值，
 //     配置那份让已存的配置能改。
-//   * 「Store as project file」不渲染：要写 `.idea/runConfigurations/*.xml`，而本仓按设计**不在用户项目里
-//     建配置**（`native/projects_test.cpp:281/:442-443` 两条断言锁住），配置随应用状态文件走。
-//     要接后端得新增 native 模块 + 改 `src/bridge.ts` 的 Method union + 改 `native/main.cpp` 分派表，
-//     并推翻那两条设计断言 —— 独立工程，不是这一刀能带上的。
+//   * 「Store as project file」**语义已核、控件不补**（2026-10-06 第四批，逐行实读
+//     `platform/execution-impl/src/com/intellij/execution/impl/RunConfigurationStorageUi.java`）：
+//     上游那一格**不是一档而是三档**（`:530` `enum RCStorageType {Workspace, DotIdeaFolder, ArbitraryFileInProject}`），
+//     不勾 = `Workspace`（`.idea/workspace.xml`，**本地工作区文件**，不是可共享的项目文件）；
+//     勾上 = 后两档之一，默认档位按 `:281-346` 那条 UX-1126 流程算（已共享过就保持、非 VCS 工程走
+//     `.idea/runConfigurations`、该目录被 VCS 忽略时改走 `<项目根>/.run`…，`:344-345` 是默认那一步）；
+//     文件名 = `MODERN_NAME_CONVERTER(名字) + ".run.xml"`（`:227-229`），
+//     复选框与齿轮只对 `type.isManaged` 的配置启用（`:391/:403/:406`）。
+//     本仓不渲染这两格的原因不变：要往用户项目里写文件，而 `native/projects_test.cpp:281`
+//     那条断言（`"Configuration may not be stored in the user project"`）锁住这个设计，
+//     配置随应用状态文件走；接后端要新增 native 模块 + 改 `src/bridge.ts` 的方法联合 + 改
+//     `native/main.cpp` 分派表（三处都在别人名下）⇒ 见 docs/wiring-requests-2026-10-06-runcfg4.md W3。
+//   * 同一格上的「Manage File Location」齿轮与路径校验六条（`:130-142` 与 `:232-269`）同样不补，理由同上。
 //   * 「Run on target」也只在模板上（wrapper `settings.isTemplate()` 才建 `RunOnTargetPanel`），
 //     已在 src/executionTargets.ts 接上（本机 + app.jdks 探测的 JDK 目标）。
 import { computed, onMounted, ref, watch } from 'vue'
@@ -46,6 +55,14 @@ import {
   targetById, writeRunTargetsEnabled,
 } from '../executionTargets.ts'
 import { checkRunConfiguration, runConfigEditorFor, runConfigFieldsFor, type RunConfigFieldId } from '../runConfigEditors.ts'
+// 「启动时打开运行面板 / 启动时把焦点移到运行面板」这两个开关：唯一的存放处是**这条运行配置记录**
+// （上游 `RunnerAndConfigurationSettings.java:235/:242/:249/:256` + `RunnerAndConfigurationSettingsImpl.kt:108-109/:212-222/:243-244/:317-321`），
+// 本面板是它唯一的**写**点（对应上游 Before launch 那两格：`BeforeRunStepsPanel.java:170-171/:214-217/:238-243`
+// 经 `ConfigurationSettingsEditorWrapper.java:143-144` 落回记录；新 UI 的两个 tag 在 `BeforeRunFragment.java:28-42`）。
+// 补默认与「只落非默认」都走 `src/runStartupFocus.ts` 那一个入口，本组件不自己写规则。
+import {
+  runStartupFocusFlagsOf, withRunStartupFocusFlags,
+} from '../runStartupFocus.ts'
 import {
   loadTargetEnvironments, projectDefaultTarget, targetEnvironmentsStoreKey, validateTargetEnvironment,
   type TargetEnvironment, type TargetEnvironmentsState,
@@ -54,7 +71,10 @@ import { runtimeExecutable } from '../languageRuntimes.ts'
 import { currentTargetPlatform, targetPlatformOfPath } from '../targetPlatform.ts'
 import TargetEnvironmentsDialog from './TargetEnvironmentsDialog.vue'
 import type { RuntimeRunConfig as RunConfig } from '../runTargets.ts'
-import { RUN_CONFIG_TYPES as TYPES, buildRunConfigTree, formatRunArguments, parseRunArguments, nodeKey, uniqueRunConfigName, validateFolderName } from '../runConfigTree'
+import {
+  RUN_CONFIG_TYPES as TYPES, RUN_CONFIG_UNNAMED_NAME, buildRunConfigTree, formatRunArguments, parseRunArguments,
+  nodeKey, runConfigNameProblem, uniqueRunConfigName, validateFolderName, type RunConfigSaveOrigin,
+} from '../runConfigTree'
 import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
@@ -65,7 +85,15 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (event: 'save', config: RunConfig): void
+  /**
+   * `origin` 带的是「这条草稿的前身」（见 `src/runConfigTree.ts` 的 `RunConfigSaveOrigin`）：
+   * 上游没有这一参 —— 它手里那条 `RunnerAndConfigurationSettings` 就是身份本身，
+   * 改名字段动的是同一条（`RunConfigurable.kt:659-666` 只在 apply 时拦重名）、
+   * 副本插在被复制的那条之后（同文件 `:900-911`）。
+   * 本仓的草稿是扁平记录、名字就是键 ⇒ 不带这一参就是「改名 = 新增一条、旧的那条留在盘上」。
+   * `src/App.vue:2563` 那句 `@save="saveRunConfigFromDialog"` 会把两个参数都传过去（保留文件，不动它）。
+   */
+  (event: 'save', config: RunConfig, origin?: RunConfigSaveOrigin): void
   (event: 'remove', name: string): void
   (event: 'select', name: string): void
   (event: 'close'): void
@@ -86,11 +114,30 @@ function toggleBefore() {
 /** 树里被选中的节点：类型节点（`type:`）、文件夹（`folder:类型/文件夹`）或配置（`config:名字`）。 */
 const selected = ref(props.draft.name ? nodeKey('config', props.draft.name) : '')
 const collapsed = ref(new Set<string>())
-const form = ref<RunConfig>({ ...props.draft })
+/**
+ * 面板的 reset 侧：把那两个开关**补成显式布尔**再交给复选框。
+ * 上游同一件事在 `BeforeRunStepsPanel.java:214-217`（`setSelected(settings.isActivateToolWindowBeforeRun())`）——
+ * 那里读的已经是补过默认的值，所以「记录里没这个键」的旧配置在界面上显示成**勾着打开面板**（默认 true，
+ * `RunnerAndConfigurationSettingsImpl.kt:108`）、焦点那格不勾（`:109`）。
+ * 只补在**表单**上：保存时 `withRunStartupFocusFlags` 又把默认值收掉，配置记录不会因此长出新键。
+ */
+function withStartupFocusDefaults(config: RunConfig): RunConfig {
+  const flags = runStartupFocusFlagsOf(config)
+  return { ...config, activateToolWindowBeforeRun: flags.activateToolWindowBeforeRun, focusToolWindowBeforeRun: flags.focusToolWindowBeforeRun }
+}
+
+const form = ref<RunConfig>(withStartupFocusDefaults({ ...props.draft }))
 const hint = ref('')
+/**
+ * 表单当前**载入自**哪条记录（上游没有这个东西：那里改的是同一条 settings，见 `defineEmits` 上那段）。
+ * 只在「草稿换人」时更新（父组件 select/载入新记录 ⇒ `props.draft` 变），
+ * 新建（`addConfig`）当场清空 —— 否则「新建」会被当成把当前选中那条改名。
+ */
+const originName = ref(props.draft.name?.trim() ?? '')
 
 watch(() => props.draft, value => {
-  form.value = { ...value }
+  form.value = withStartupFocusDefaults({ ...value })
+  originName.value = value.name?.trim() ?? ''
   if (value.name) selected.value = nodeKey('config', value.name)
 }, { deep: true })
 
@@ -104,7 +151,9 @@ const projectRoot = ref('')
 const jdks = ref<JdkInfo[]>([])
 const templates = ref<RunConfigTemplates>({})
 const targetsEnabled = ref(readRunTargetsEnabled())
-const templateForm = ref<RunConfigTemplate>({})
+// 初值 = 上游那两个开关的默认（activate true / focus false，`RunnerAndConfigurationSettingsImpl.kt:108-109`）；
+// 选中类型节点时由 `loadTemplateIntoForm` 用盘上的模板覆盖（缺键同样补这两个默认）。
+const templateForm = ref<RunConfigTemplate>({ ...runStartupFocusFlagsOf(undefined) })
 const templateHint = ref('')
 // 用户自定义目标环境（上游 `TargetEnvironmentsManager`）：存 localStorage、按项目根分键。
 const targetEnvs = ref<TargetEnvironmentsState>({ defaultTargetUuid: '', targets: [] })
@@ -119,7 +168,15 @@ function loadTemplateIntoForm(type: string) {
   // 模板没记过时用**项目默认目标**（上游 `ExecutionTargetManager.getActiveTarget`，见
   // CompoundRunConfiguration.kt:146 的 activeTarget/defaultTarget 两个取值）——本仓照此预填。
   const fallback = projectDefaultTarget(targetEnvs.value)?.uuid
-  templateForm.value = { ...(saved ?? {}), ...(!saved?.target && fallback ? { target: `target:${fallback}` } : {}) }
+  // 模板那两个开关同样要补默认再上复选框（与配置那一格同一条规则，见 `withStartupFocusDefaults`）：
+  // `runStartupFocusFlagsOf` 认的就是「记录里缺键 ⇒ 上游默认」，模板记录与配置记录形状一致。
+  const startup = runStartupFocusFlagsOf(saved)
+  templateForm.value = {
+    ...(saved ?? {}),
+    activateToolWindowBeforeRun: startup.activateToolWindowBeforeRun,
+    focusToolWindowBeforeRun: startup.focusToolWindowBeforeRun,
+    ...(!saved?.target && fallback ? { target: `target:${fallback}` } : {}),
+  }
   templateHint.value = ''
 }
 watch(selectedType, type => { if (type) loadTemplateIntoForm(type) }, { immediate: true })
@@ -175,7 +232,9 @@ function clearTemplate() {
   const type = selectedType.value
   if (!type) return
   templates.value = removeRunConfigTemplate(storage(), projectRoot.value, type)
-  templateForm.value = {}
+  // 清空后表单回到**上游默认**（activate=true / focus=false，`RunnerAndConfigurationSettingsImpl.kt:108-109`），
+  // 不是两个都不勾 —— 否则「清除模板」会把界面显示成一个不存在的 false。
+  templateForm.value = { ...runStartupFocusFlagsOf(undefined) }
   templateHint.value = '模板已清除，新建配置回到空表单。'
 }
 function toggleTargetsEnabled(checked: boolean) {
@@ -246,6 +305,16 @@ const beforeText = computed({
     form.value = { ...form.value, beforeLaunch: steps }
   },
 })
+/**
+ * 「启动前」标题上的条数后缀 = 上游 `BeforeRunStepsPanel.updateText()`（`:222-227`）那一条：
+ * `count == 0 || isVisible() ? "" : message("before.launch.panel.title.suffix", count)`
+ * ⇒ **展开着不挂、0 条不挂**，只有折叠起来当摘要时才挂（文案 `ExecutionBundle.properties:302`
+ * = `: {0,choice,1#1 task|2#{0} tasks}`，标题本体 `:301` = `&Before launch`）。
+ * 英文那条 choice 形分单复数（1 task / 2 tasks），中文不分 ⇒ 后缀对 1 和 N 是同一句（如实登记）。
+ */
+const beforeLaunchCount = computed(() => (form.value.beforeLaunch ?? []).length)
+const beforeLaunchSuffix = computed(() =>
+  !beforeOpen.value && beforeLaunchCount.value > 0 ? `：${beforeLaunchCount.value} 项任务` : '')
 // IDEA 的 CompoundRunConfiguration editor 只有一张成员多选表（`CompositeSettingsEditor`）——
 // 选中的成员在运行时可被单独启动，所以这里禁止把成员选成自己或另一个复合配置的**空环**，
 // 环形/缺失引用由 src/runConfigTree.ts 的整组校验在启动前拒绝（保存也拦一次）。
@@ -275,7 +344,12 @@ const uniqueName = (base: string) => uniqueRunConfigName(props.configs, base)
 /** IDEA 的 add 按钮：在**选中的类型**下新建（`RunConfigurable` 用类型节点决定工厂）。 */
 function addConfig(type: RunConfig['type']) {
   const folder = selected.value.startsWith('folder:') ? selected.value.slice(7).split('\u0000')[1] ?? '' : ''
-  const name = uniqueName('新配置')
+  // 基名 = 上游 `createUniqueName` 的回落那一档（`ExecutionBundle.properties:266` = `Unnamed` 的直译）：
+  // 上游先问 `LocatableConfiguration.suggestedName()`（`RunConfigurable.kt:942-949`），本仓没有「建议名」
+  // 这一层 ⇒ 直接落回落档。编号形状由 `uniqueRunConfigName` 按上游 `RunManager.kt:51-65` 给（`名 (1)`）。
+  const name = uniqueName(RUN_CONFIG_UNNAMED_NAME)
+  // 新建没有前身：不清的话「保存」会被父组件当成把当前选中那条改名（`originName` 的口径见它的声明处）。
+  originName.value = ''
   // 新配置从模板取初值（上游 createConfiguration 把模板字段拷进新配置）。
   const template = type ? templateFor(templates.value, type) : undefined
   const seeded = applyTemplate({ name, type, command: '', program: '', args: [], cwd: '', env: [], beforeLaunch: [], folder }, template, name)
@@ -285,15 +359,25 @@ function addConfig(type: RunConfig['type']) {
   selected.value = nodeKey('config', name)
   hint.value = ''
 }
-/** MyCopyAction（RunConfigurable.kt:1129）：复制选中配置并取唯一名。 */
+/**
+ * `MyCopyAction`（`platform/execution-impl/src/com/intellij/execution/impl/RunConfigurable.kt:1129-1160`）：
+ * 副本名 = `createUniqueName(typeNode, configuration.nameText, …)`（`:1142`）——**基名就是源配置自己的名字**，
+ * 上游没有任何「副本 / Copy of」后缀（那句是原实现自造的，已订正）；副本落在源后面那一格（`:902`）。
+ * 上游那条 `type.isManaged` 的可用性门（`:1161-1163`）本仓**不补**：`ConfigurationType.java:83-85` 默认 true，
+ * 全树只有 `UnknownConfigurationType.java:42` 返回 false，而本仓的 schema 直接拒未知类型
+ * （`src/runConfigurationSchema.ts` 那条类型清单门）⇒ 没有「坏配置」这一档，补上就是一张假门。
+ */
 function copyConfig() {
   const source = props.configs.find(config => config.name === selectedConfigName.value)
   if (!source) { hint.value = '先选中一个配置再复制。'; return }
   // `ModuleBasedConfiguration.java:175-178` 特意把 `isAllowRunningInParallel` 一起复制过去。
-  const copy: RunConfig = { ...source, name: uniqueName(`${source.name} 副本`), args: [...(source.args ?? [])], env: [...(source.env ?? [])], beforeLaunch: (source.beforeLaunch ?? []).map(step => ({ ...step })) }
-  emit('save', copy)
+  const copy: RunConfig = { ...source, name: uniqueName(source.name), args: [...(source.args ?? [])], env: [...(source.env ?? [])], beforeLaunch: (source.beforeLaunch ?? []).map(step => ({ ...step })) }
+  emit('save', copy, { copyOf: source.name })
   selected.value = nodeKey('config', copy.name)
   form.value = { ...copy }
+  // 副本自己成了表单的前身：写盘成功时父组件会把草稿载回这条（`watch` 那边同样置上），
+  // 万一这条写入失败（项目没打开 / 宿主拒档），下一次「保存」也不该把**源**那条改名掉。
+  originName.value = copy.name
 }
 /** MyCreateFolderAction（RunConfigurable.kt:1229）：新建文件夹并把选中配置移进去。 */
 function createFolder() {
@@ -326,9 +410,21 @@ function save() {
   // （上游这两条分别落在编辑器 apply 与成员表的环检测上）。
   const checked = checkRunConfiguration({ ...next, name: next.name.trim() }, props.configs)
   if (checked?.severity === 'error') { hint.value = checked.message; return }
+  // 重名拦下：上游也是排在**各编辑器 apply 之后**（`RunConfigurable.kt:649-666` 先 `applyConfiguration`
+  // 再 `names.add`），所以这条判据放在逐类型校验后面，顺序与它一致。
+  const conflict = runConfigNameProblem(props.configs, next.name, originName.value)
+  if (conflict) { hint.value = conflict; return }
   if (folder) next.folder = folder
   else delete next.folder
-  emit('save', next)
+  // 面板的 apply 侧（上游 `ConfigurationSettingsEditorWrapper.java:143-144` 的两行 set），
+  // 落盘规则也照上游：只有**非默认**的值才留在配置记录里（`RunnerAndConfigurationSettingsImpl.kt:317-321`）。
+  next = withRunStartupFocusFlags(next, {
+    activateToolWindowBeforeRun: form.value.activateToolWindowBeforeRun === true,
+    focusToolWindowBeforeRun: form.value.focusToolWindowBeforeRun === true,
+  })
+  // 带上前身：改名 = 就地替换那一条（`src/runConfigurations.ts` 的 `saveRunConfigFromDialog`），
+  // 新建与「名字没动」都传 undefined ⇒ 走原来的追加/就地覆盖。
+  emit('save', next, originName.value && originName.value !== next.name ? { from: originName.value } : undefined)
   selected.value = nodeKey('config', next.name)
   hint.value = ''
 }
@@ -339,7 +435,7 @@ function save() {
     <section class="help-dialog run-configs-dialog" role="dialog" aria-modal="true" aria-label="运行/调试配置">
       <header class="run-configs-head">
         <h2>运行/调试配置</h2>
-        <button type="button" class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
+        <button type="button" class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
       </header>
       <!-- IDEA 的 splitter（RunConfigurable.kt:563-575）：左树带右边框，右面板 padding 15,5,0,15。 -->
       <div class="rc-body">
@@ -354,12 +450,12 @@ function save() {
                 :class="{ 'is-selected': selected === nodeKey('type', node.id) }"
                 @click="pickNode(nodeKey('type', node.id))"
               >
-                <button type="button" class="rc-caret" :title="collapsed.has(nodeKey('type', node.id)) ? '展开' : '折叠'" :aria-label="collapsed.has(nodeKey('type', node.id)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('type', node.id))">
+                <button type="button" class="rc-caret" :aria-label="collapsed.has(nodeKey('type', node.id)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('type', node.id))">
                   <ChevronRight v-if="collapsed.has(nodeKey('type', node.id))" :size="iconSize.dense" /><ChevronDown v-else :size="iconSize.dense" />
                 </button>
                 <span>{{ node.label }}</span>
                 <!-- 该类型已设置模板（新建配置会从模板取初值） -->
-                <span v-if="hasTemplateContent(templateFor(templates, node.id))" class="rc-template-badge" title="已设置该类型的模板：新建配置从模板取初值">模板</span>
+                <span v-if="hasTemplateContent(templateFor(templates, node.id))" class="rc-template-badge">模板</span>
               </div>
               <ul v-if="!collapsed.has(nodeKey('type', node.id))" class="rc-children">
                 <!-- 文件夹节点（RunConfigurableNodeKind.FOLDER，userObject 是名字） -->
@@ -371,7 +467,7 @@ function save() {
                     :class="{ 'is-selected': selected === nodeKey('folder', node.id, group.name) }"
                     @click="pickNode(nodeKey('folder', node.id, group.name))"
                   >
-                    <button type="button" class="rc-caret" :title="collapsed.has(nodeKey('folder', node.id, group.name)) ? '展开' : '折叠'" :aria-label="collapsed.has(nodeKey('folder', node.id, group.name)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('folder', node.id, group.name))">
+                    <button type="button" class="rc-caret" :aria-label="collapsed.has(nodeKey('folder', node.id, group.name)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('folder', node.id, group.name))">
                       <ChevronRight v-if="collapsed.has(nodeKey('folder', node.id, group.name))" :size="iconSize.dense" /><ChevronDown v-else :size="iconSize.dense" />
                     </button>
                     <FolderPlus :size="iconSize.dense" aria-hidden="true" />
@@ -395,7 +491,7 @@ function save() {
               </ul>
             </li>
           </ul>
-          <p v-if="!configs.length" class="rc-empty">还没有保存的配置，点「添加」新建一个。</p>
+          <p v-if="!configs.length" class="rc-empty">还没有保存的配置。</p>
           <!-- RunConfigurable 的树工具条：添加 / 删除 / 复制 / 保存配置 / 新建文件夹 -->
           <div class="rc-toolbar" role="toolbar" aria-label="运行配置工具条">
             <div class="rc-add">
@@ -404,10 +500,10 @@ function save() {
                 <button v-for="entry in TYPES" :key="entry.id" type="button" :disabled="busy" @click="addConfig(entry.id)">{{ entry.label }}</button>
               </div>
             </div>
-            <button type="button" class="icon-button" title="删除配置" aria-label="删除配置" :disabled="busy || !selectedConfigName" @click="emit('remove', selectedConfigName)"><Minus :size="iconSize.toolbar" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" title="复制配置" aria-label="复制配置" :disabled="busy || !selectedConfigName" @click="copyConfig"><Copy :size="iconSize.control" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" title="保存配置" aria-label="保存配置" :disabled="busy || !form.name.trim()" @click="save"><Save :size="iconSize.control" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" title="新建文件夹" aria-label="新建文件夹" :disabled="busy" @click="createFolder"><FolderPlus :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="删除配置" :disabled="busy || !selectedConfigName" @click="emit('remove', selectedConfigName)"><Minus :size="iconSize.toolbar" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="复制配置" :disabled="busy || !selectedConfigName" @click="copyConfig"><Copy :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="保存配置" :disabled="busy || !form.name.trim()" @click="save"><Save :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="新建文件夹" :disabled="busy" @click="createFolder"><FolderPlus :size="iconSize.control" aria-hidden="true" /></button>
           </div>
         </div>
 
@@ -419,7 +515,6 @@ function save() {
             <div class="rc-tabs" role="tablist" aria-label="模板页签">
               <button type="button" class="rc-tab" role="tab" aria-selected="true">模板</button>
             </div>
-            <p class="field-hint">模板是「新建配置的初值」：点左上角「添加」新建这个类型的配置时，下面的字段会带进去（名字自动取唯一值）。上游对应 <code>RunManagerImpl.getConfigurationTemplate</code> 与 <code>TemplateConfigurable</code>。</p>
             <div class="rc-tabpanel" role="tabpanel">
               <label class="field-row"><span>命令</span><input v-model="templateForm.command" aria-label="模板命令" placeholder="cmake --build build" /></label>
               <label class="field-row"><span>程序</span><input v-model="templateForm.program" aria-label="模板程序" placeholder="build/app.exe" /></label>
@@ -447,6 +542,19 @@ function save() {
               <label class="checkbox-row">
                 <input v-model="templateForm.allowRunningInParallel" type="checkbox" />
                 <span>允许并行运行多个实例</span>
+              </label>
+              <!-- 模板也带这两个初值：上游新建配置时把模板记录上的同两个字段拷进来
+                   （`RunnerAndConfigurationSettingsImpl.kt:455-461` 的 `importRunnerAndConfigurationSettings`，
+                   另两个字段是 `isEditBeforeRun` 与 activate/focus ⇒ 本仓承接的是 activate/focus 这两行 `:460-461`）。
+                   这**不是第二处存放**：模板只当「新配置的初值」，配置一旦落成记录就只读记录那一份，
+                   合并规则在 `src/runConfigTemplates.ts` 的 `applyTemplate` 里（走同一个 `runStartupFocusFlagsOf` 入口）。 -->
+              <label class="checkbox-row">
+                <input v-model="templateForm.activateToolWindowBeforeRun" type="checkbox" />
+                <span>启动时打开运行/调试工具窗口（新建配置的初值）</span>
+              </label>
+              <label class="checkbox-row">
+                <input v-model="templateForm.focusToolWindowBeforeRun" type="checkbox" />
+                <span>启动时把焦点移到运行/调试工具窗口（新建配置的初值）</span>
               </label>
               <div class="rc-template-actions">
                 <button type="button" class="primary-button" :disabled="busy" @click="saveTemplate">保存模板</button>
@@ -492,7 +600,6 @@ function save() {
                     <span class="field-hint">{{ member.type }}</span>
                   </label>
                   <p v-if="!RUNNABLE_MEMBERS.length" class="field-hint">还没有可选的成员：先建一个普通配置。</p>
-                  <p class="field-hint">复合配置按顺序启动每个成员；成员各自的参数、工作目录、环境变量与启动前步骤都会保留。</p>
                 </fieldset>
               </template>
             </div>
@@ -501,13 +608,25 @@ function save() {
                  （WithoutOwnBeforeRunSteps，ConfigurationSettingsEditorWrapper.java:71）。 -->
             <div v-if="hasField('beforeLaunch')" class="rc-before">
               <button type="button" class="rc-before-head" :aria-expanded="beforeOpen" @click="toggleBefore">
-                <ChevronDown v-if="beforeOpen" :size="iconSize.menu" /><ChevronRight v-else :size="iconSize.menu" />
-                <span>启动前</span>
-                <span class="rc-before-count">{{ (form.beforeLaunch ?? []).length }} 步</span>
+                <ChevronDown aria-hidden="true" v-if="beforeOpen" :size="iconSize.menu" /><ChevronRight aria-hidden="true" v-else :size="iconSize.menu" />
+                <span>启动前</span><span v-if="beforeLaunchSuffix" class="rc-before-count">{{ beforeLaunchSuffix }}</span>
               </button>
               <div v-if="beforeOpen" class="rc-before-body">
                 <textarea v-model="beforeText" rows="3" aria-label="启动前步骤" placeholder="构建|cmake --build build（每行 name|command）" />
-                <p class="field-hint">对应 IDEA 的「Before launch」：步骤按顺序执行，某一步非零退出会中止整个配置。</p>
+                <!-- 上游那两格就长在这个面板里（`BeforeRunStepsPanel.java:170-171` 建勾、`:183-184` 加进
+                     checkboxPanel），文案取新 UI 那两个 tag 的措辞（`ExecutionBundle.properties:175-176`，
+                     提示语 `:578-579`）。它们写的值是**这条配置**的字段（`ConfigurationSettingsEditorWrapper.java:143-144`），
+                     消费点在 `src/runActions.ts` 的 `startRun` ⇒ 不是装饰控件。
+                     复合配置没有这一格：上游对 `WithoutOwnBeforeRunSteps` 把整行藏掉
+                     （wrapper `:71`），本仓的 `hasField('beforeLaunch')` 是同一个门。 -->
+                <label class="checkbox-row">
+                  <input v-model="form.activateToolWindowBeforeRun" type="checkbox" />
+                  <span>启动时打开运行/调试工具窗口</span>
+                </label>
+                <label class="checkbox-row">
+                  <input v-model="form.focusToolWindowBeforeRun" type="checkbox" />
+                  <span>启动时把焦点移到运行/调试工具窗口</span>
+                </label>
               </div>
             </div>
           </template>
@@ -519,12 +638,10 @@ function save() {
               <input v-model="form.allowRunningInParallel" type="checkbox" />
               <span>允许并行运行多个实例</span>
             </label>
-            <p class="field-hint">关闭（IDEA 默认）时，再启动同一个配置会**先停掉上一个实例**；打开则两个并存，运行工具窗口里各占一个标签。</p>
           </fieldset>
         </div>
       </div>
       <footer class="rc-footer">
-        <p class="field-hint">配置随项目保存。运行 / 调试用 Shift+F10 / Shift+F9。</p>
         <div class="rc-footer-actions">
           <button type="button" class="primary-button" :disabled="busy || !form.name.trim()" @click="save">确定</button>
           <button type="button" class="subtle-button" @click="emit('close')">取消</button>
@@ -552,42 +669,42 @@ function save() {
 .rc-body { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); min-height: 420px; max-height: 62vh; }
 /* 左边框（SideBorder.RIGHT）+ 右面板 padding 15,5,0,15 */
 .rc-tree { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
-.rc-tree > ul { flex: 1; min-height: 0; margin: 0; padding: 4px; overflow: auto; list-style: none; }
+.rc-tree > ul { flex: 1; min-height: 0; margin: 0; padding: var(--space-1); overflow: auto; list-style: none; }
 .rc-children { margin: 0; padding-left: 14px; list-style: none; }
-.rc-node { display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: var(--radius-xs); cursor: default; }
+.rc-node { display: flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-1); border-radius: var(--radius-xs); cursor: default; }
 .rc-node.is-selected { background: var(--selected); color: var(--bright); }
 .rc-type { font-weight: 600; }
-.rc-template-badge { padding: 0 4px; border-radius: var(--radius-xs); background: var(--hover); color: var(--muted); font-size: 10px; font-weight: 400; }
+.rc-template-badge { padding: 0 var(--space-1); border-radius: var(--radius-xs); background: var(--hover); color: var(--muted); font-size: 10px; font-weight: 400; }
 .rc-template-actions { display: flex; align-items: center; gap: var(--space-2); }
 .rc-caret { width: 14px; flex-shrink: 0; display: inline-flex; align-items: center; border: 0; padding: 0; background: transparent; color: inherit; }
 .rc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-empty { margin: 0; padding: var(--space-3); color: var(--muted); font-size: 11px; }
-.rc-toolbar { display: flex; align-items: center; gap: 2px; padding: 4px; border-top: 1px solid var(--line); }
+.rc-toolbar { display: flex; align-items: center; gap: 2px; padding: var(--space-1); border-top: 1px solid var(--line); }
 .rc-add { position: relative; display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; border-radius: var(--radius-xs); transition: background-color var(--dur-1) var(--ease); }
 .rc-add:hover { background: var(--hover); }
-.rc-add-menu { position: absolute; left: 0; bottom: 100%; z-index: 20; display: none; flex-direction: column; min-width: 140px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.rc-add-menu { position: absolute; left: 0; bottom: 100%; z-index: 20; display: none; flex-direction: column; min-width: 140px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .rc-add:hover .rc-add-menu, .rc-add:focus-within .rc-add-menu { display: flex; }
 .rc-add-menu button { text-align: left; }
-.rc-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 4px 0 15px; overflow: auto; }
+.rc-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: var(--space-3) var(--space-1) 0 15px; overflow: auto; }
 .rc-hint { margin: 0; color: var(--muted); font-size: 12px; }
 /* 「运行于」那一行 + 右侧的「管理目标…」按钮（上游 RunOnTargetPanel 的 combo + ActionLink 并排）。 */
 .rc-target-row { display: flex; align-items: center; gap: var(--space-2); }
 .rc-target-row .field-row { flex: 1; min-width: 0; }
 .rc-manage-targets { flex-shrink: 0; margin-top: 0; white-space: nowrap; }
 /* checkConfiguration() 的实时结论（RunConfiguration.java:156-167 的两档：error / warning）。 */
-.rc-problem { margin: var(--space-2) 0 0; padding: 4px var(--space-2); border-radius: var(--radius-xs); background: var(--error-bg); color: var(--error); font-size: 11px; line-height: 1.6; }
+.rc-problem { margin: var(--space-2) 0 0; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); background: var(--error-bg); color: var(--error); font-size: 11px; line-height: 1.6; }
 .rc-problem.rc-warn { background: var(--warning-bg); color: var(--warning); }
 .rc-warn { margin: 0; color: var(--warning); font-size: 11px; }
 .rc-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
-.rc-tab { padding: 4px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--secondary); font-size: 12px; }
+.rc-tab { padding: var(--space-1) 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--secondary); font-size: 12px; }
 .rc-tab[aria-selected='true'] { color: var(--bright); border-bottom-color: var(--accent); }
 .rc-tabpanel { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) 0; }
 .field-row { display: flex; align-items: center; gap: var(--space-2); }
 .field-row > span { flex-shrink: 0; width: 72px; color: var(--muted); font-size: 11px; }
-.field-row input, .field-row select, .field-row textarea { flex: 1; min-width: 0; padding: 4px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: inherit; font-size: 12px; }
+.field-row input, .field-row select, .field-row textarea { flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: inherit; font-size: 12px; }
 .field-row-block { align-items: flex-start; }
 .rc-before { border-top: 1px solid var(--line); padding-top: var(--space-2); }
-.rc-before-head { display: flex; align-items: center; gap: 4px; border: 0; padding: 2px 0; background: transparent; color: var(--secondary); font-size: 12px; }
+.rc-before-head { display: flex; align-items: center; gap: var(--space-1); border: 0; padding: 2px 0; background: transparent; color: var(--secondary); font-size: 12px; }
 .rc-before-count { color: var(--muted); font-size: 11px; }
 .rc-before-body { display: flex; flex-direction: column; gap: var(--space-1); padding-top: var(--space-1); }
 .rc-before-body textarea { width: 100%; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: 12px/1.6 var(--font-mono); }

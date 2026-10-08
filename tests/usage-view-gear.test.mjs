@@ -94,7 +94,7 @@ test('additionalGearActions 排在齿轮组最前，且只在挂内容的窗口�
   const host = usageViewGearRows('references')
   const find = id => (id === 'window.resizeToolWindow' ? { id, title: '调整工具窗口', run: () => {} } : undefined)
   assert.deepEqual(toolWindowGearRows(find, TOOL_WINDOW_GEAR_SPEC, true, host).map(row => row.id),
-    ['usage.viewOptions', 'window.resizeToolWindow'], '底部齿轮：视图选项在最前，其余照引用表')
+    ['usage.viewOptions', 'usage.groupBy', 'window.resizeToolWindow'], '底部齿轮：视图选项在最前，「分组」紧随其后（都来自引用表）')
   assert.deepEqual(toolWindowGearRows(find, TOOL_WINDOW_GEAR_SPEC, false, host).map(row => row.id),
     ['window.resizeToolWindow'], '侧栏齿轮拿不到它（不是那个窗口的内容）')
 })

@@ -109,3 +109,15 @@ const links = terminalHyperlinkRanges(text).flatMap(range => {
 `src/consoleHyperlinks.ts` 的 `consoleLinkMenuItems`（现在返回 activate + copy 两格）、
 `src/components/TerminalPanel.vue` 的 `terminalLinkTooltip`/link provider（终端那条菜单本仓没做，见 T1 的 (b)）。
 在通道落地前**不渲染**只有系统默认那一行的假列表（`不放假控件`）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **T1（终端 `file:` 链接跳编辑器）** —— 同 term3 R1，登记。
+- **T2（逐浏览器菜单行）** —— 依赖 `shell.openUrlWithBrowser`（native + bridge），非本 lane。
+
+结论：零接线（T1 登记，T2 转 native/bridge owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（T1 登记，T2 转 native/bridge owner）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

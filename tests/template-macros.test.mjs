@@ -95,6 +95,66 @@ test('the text-mixing and file macros behave like their upstream classes', () =>
   assert.equal(calc('fileName', [], { path: 'src\\App.java' }), 'App.java', '反斜杠路径同样认')
 })
 
+test('regularExpression counts the capture groups it actually built', () => {
+  // 命名捕获组占一个编号（`java.util.regex.Pattern` 与 ECMA-262 同判据：`(?<n>a)` 就是第 1 组），
+  // 所以 `$1` 合法。原来那个数括号的 `/\((?!\?)/g` 把 `(?<` 一并排除在外，于是 `$1` 被判成越界 ⇒
+  // 整条宏走 `RegExMacro.java:44-45` 的 null 档 ⇒ 用户在模板里看到的是回落 marker `"a"`，不是替换结果。
+  assert.equal(calc('regularExpression', ['2026-10-06', '(?<y>[0-9]{4})-([0-9]{2})', '$1/$2']), '2026/10-06')
+  assert.equal(calc('regularExpression', ['ab', '(?<n>a)(?<m>b)', '$2$1']), 'ba')
+  // 阳性对照：钉住「没有为了这条而顺手放宽越界判据」—— 一个组时 `$2` 仍然 null。
+  assert.equal(calc('regularExpression', ['ab', '(?<n>a)', '$1']), 'ab')
+  assert.equal(calc('regularExpression', ['ab', '(?<n>a)', '$2']), null, '命名组只有一个时 $2 仍越界')
+  // 反方向：字符类里的括号**不是**组。`[(]` 的组数是 0，所以 `$1` 该越界 → null，
+  // 而不是像判据原样那样数出 1 个组、放过去后由引擎吐出一个字面 `$1`。
+  assert.equal(calc('regularExpression', ['a(b', '[(]', '$1']), null, '[(] 没有捕获组')
+  assert.equal(calc('regularExpression', ['a(b', '[(]', 'X']), 'aXb', '字符类本身照旧正常匹配')
+  assert.equal(calc('regularExpression', ['abc', 'a(b)c', '$2']), null, '既有的越界那条不回归')
+})
+
+test('fileNameWithoutExtension follows FileUtilRt: a dotfile has an empty stem', () => {
+  // 这条链是 `FilePathMacroBase.java:46-47` → `VirtualFile.java:196-198` → `FileUtilRt.java:439-441`：
+  // `lastIndexOf('.')`，**只有找不到点（i<0）才留原名**，i=0 也照砍 ⇒ dotfile 的词干是空串。
+  // 空结果再落这条宏自己的 `getDefaultValue()` = `Macro.java:30-32` 的 `""`（`FilePathMacroBase` 没覆写），
+  // 所以 `.gitignore` 在模板里就是留空，不是 `.gitignore`。`src/fileTemplateVars.ts:49` 的 `fileNameStem`
+  // 是 `dot > 0` 那一档（文件模板 `${NAME}` 的口径、另有消费方），本宏不借它。
+  assert.equal(calc('fileNameWithoutExtension', [], { path: 'repo/.gitignore' }), '')
+  assert.equal(calc('fileNameWithoutExtension', [], { path: 'repo/.hidden' }), '')
+  assert.equal(calc('fileNameWithoutExtension', [], { path: 'repo/Makefile' }), 'Makefile', '没有点 → 原名')
+  assert.equal(calc('fileNameWithoutExtension', [], { path: CTX.path }), 'App', '既有的那条不回归')
+  assert.equal(calc('fileNameWithoutExtension', [], { path: 'repo/archive.tar.gz' }), 'archive.tar', '砍最后一个点')
+  assert.equal(calc('fileNameWithoutExtension', [], { path: 'repo/.a.b' }), '.a')
+})
+
+test('the comment macros read the file extension, not PSI (CommentMacro.java:31-64)', () => {
+  // java：行 + 块都有。CTX = src/main/App.java。
+  assert.equal(calc('lineCommentStart', []), '//', '行注释前缀（CommentMacro.java:38-41 + :34-35）')
+  assert.equal(calc('blockCommentStart', []), '/*')
+  assert.equal(calc('blockCommentEnd', []), '*/')
+  assert.equal(calc('commentStart', []), '//', 'AnyCommentStart 优先行注释（CommentMacro.java:58-62）')
+  // css：只有块注释 —— 行注释宏一律 null（等同上游没有 lineCommentPrefix），commentStart 退到块开标记。
+  const css = { path: 'theme/style.css' }
+  assert.equal(calc('lineCommentStart', [], css), null, 'css 没有行注释前缀 → null（CommentMacro.java:34-35）')
+  assert.equal(calc('blockCommentStart', [], css), '/*')
+  assert.equal(calc('commentStart', [], css), '/*', '没有行注释就用块开标记')
+  // py：只有行注释 —— 块宏 null。
+  const py = { path: 'tools/run.py' }
+  assert.equal(calc('lineCommentStart', [], py), '#')
+  assert.equal(calc('blockCommentStart', [], py), null)
+  assert.equal(calc('blockCommentEnd', [], py), null)
+  // html：块注释 <!-- -->。
+  assert.equal(calc('blockCommentStart', [], { path: 'web/index.html' }), '<!--')
+  assert.equal(calc('blockCommentEnd', [], { path: 'web/index.html' }), '-->')
+  // 未知扩展名 = 上游「没有 Commenter」：全部 null。
+  const unknown = { path: 'notes.weirdext' }
+  for (const name of ['lineCommentStart', 'blockCommentStart', 'blockCommentEnd', 'commentStart']) {
+    assert.equal(calc(name, [], unknown), null, `${name} 认不出扩展名 → null`)
+  }
+  // 空结果回落成 marker "a"（MacroBase.java:47-49 的 getDefaultValue，TemplateState:1137-1141 的收尾）。
+  assert.equal(slot('commentStart', {}, unknown), 'a', '未知语言的 commentStart 走 render 得到回退标记 "a"')
+  // commentEnd 仍不实现（合法空串 vs 单格默认值两列差），宏表里查不到这个名字。
+  assert.equal(templateMacroByName('commentEnd'), undefined, 'commentEnd 留在 DEFERRED，不进宏表')
+})
+
 // 带参数那一条是 `new SimpleDateFormat(pattern).format(new Date(time))`（`CurrentDateMacro.java:33-34`）：
 // 认得出的字母出真实字段；认不出的字母上游**抛** `IllegalArgumentException`，被 `:36-38` 接住变成那句
 // `Problem when formatting date/time for pattern "…"`，不是把字母原样打印出来。

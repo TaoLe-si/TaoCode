@@ -98,3 +98,17 @@ W 段 = 宿主侧接线（`src/App.vue`、`src/components/*.vue`、`src/settings
 - **落点**：`native/` 把文件 mtime 随项目设置里的 `foldingState` 一起回，前端在 `src/editorFoldingState.ts` 的 `importFoldState`/`restorePlan` 处比较。
 - **上游依据**：`platform/foldings/src/com/intellij/codeInsight/folding/impl/DocumentFoldingInfo.java:314-341`（`date` 只在 `MARKER_TAG` 那一支问，`:333` 那一条还叠加 `isDocumentUnsaved`）。
 - **代价与建议**：R-6 已经说明本仓的逐条轻签名比上游那道闸更细；加 mtime 要新键、要"旧存档缺键补默认"、还要跨 native ⇒ **建议不做**，只订正判词。列在这里是为了「做不到/无法核实」那条有出口。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R-1..R-8** —— 判词（`docs/inventory/*` / `scripts/verdict_table.py`），非本 lane。
+- **W-1（编辑器内 hint + 重叠确认框）** —— 目标 `src/components/CodeEditor.vue`（禁改清单）+ `src/App.vue`（本 lane）。因确认框宿主在 CodeEditor 内，需 CodeEditor owner。
+- **W-2（折痕占位文字）** —— 目标 `src/components/CodeEditor.vue`（禁改）。需 CodeEditor owner。
+- **W-3** —— 可选。
+
+结论：零接线（挂点全在 CodeEditor / 判词）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（挂点全在 CodeEditor / 判词）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

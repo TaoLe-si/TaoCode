@@ -10,6 +10,7 @@
 //   · 档位顺序 = `actionGroupStructure.txt:2444-2456` 的 `[group MainMenu]` 十二档；「分析」不在主菜单里。
 //   · 工具/窗口两档不在这张静态表里：由 `src/menuUi.ts` 的 `allMenuGroups` 在 Git 前后插入。
 import type { MenuRow } from './menus/types.ts'
+import { mainMenuGroupId, mergeGroupRows } from './actionGroups.ts'
 
 /** 主菜单的档位键 = App.vue 里 `menu` 开关的联合类型（`'analyze'` 只是树右键子菜单的键，不在这一族）。 */
 export type MainMenuId = 'file' | 'edit' | 'view' | 'navigate' | 'code' | 'refactor' | 'build' | 'run' | 'tools' | 'git' | 'help'
@@ -62,5 +63,9 @@ const menus: { menu: MainMenuId; label: string; rows: MenuRow[] }[] = [
   // Git 与帮助之间，得到 Git → Window → Help 的源码顺序。
   { menu: 'help' as const, label: '帮助', rows: helpMenuRows },
 ]
-return menus
+// 动作组贡献（上游 plugin.xml 的 `<add-to-group group-id anchor relative-to-action>`）：
+// 把 `com.intellij.action` EP 里指向本档上游组 id 的贡献按锚并进各行 —— 组 id 映射见
+// `src/actionGroups.ts` 的 `MAIN_MENU_GROUP_IDS`（`actionGroupStructure.txt:2444-2456`）。
+// 静态字面量保持原样（`tests/main-menu-parity.test.mjs` 按它切片），合并只作用在返回值上。
+return menus.map(group => ({ ...group, rows: mergeGroupRows(mainMenuGroupId(group.menu), group.rows) }))
 }

@@ -21,12 +21,12 @@ test('the text-search tabs say nothing was found', () => {
   const all = searchEverywhereEmptyText('all', 'zzz')
   assert.equal(all?.primary, `${SE_EMPTY_TEXT.nothingFound}。`)
   assert.equal(all?.usedOptions, null, '没开选项时上游不显示那一行')
-  assert.equal(searchEverywhereEmptyText('project', 'zzz')?.primary, all?.primary)
+  assert.equal(searchEverywhereEmptyText('files', 'zzz')?.primary, all?.primary)
 })
 
 test('which tabs count as text search follows the upstream implementor', () => {
   assert.equal(tabHasTextSearch('all'), true)
-  assert.equal(tabHasTextSearch('project'), true)
+  assert.equal(tabHasTextSearch('files'), true)
   assert.equal(tabHasTextSearch('commands'), false)
   assert.equal(tabHasTextSearch('runConfigs'), false)
 })
@@ -52,7 +52,7 @@ test('the strings come from the shipped Chinese bundle', () => {
 
 // 两个 tab 都留一条"在文件中查找"的出路（上游 `showFindInFilesAction` 那一支）。
 test('both branches offer the find-in-files way out', () => {
-  for (const tab of ['all', 'project', 'commands', 'runConfigs']) {
+  for (const tab of ['all', 'files', 'commands', 'runConfigs']) {
     const empty = searchEverywhereEmptyText(tab, 'zzz')
     assert.equal(empty?.action?.label, `${SE_EMPTY_TEXT.useMain} ${SE_EMPTY_TEXT.findInFiles}`)
     assert.equal(empty?.action?.shortcut, 'Ctrl Shift F')

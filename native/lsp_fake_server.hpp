@@ -52,6 +52,12 @@ struct Flags {
     bool multi_definition = false;
     // --multi-implementation：implementation 也回两个位置 —— 同理，用来验「选择实现」弹层。
     bool multi_implementation = false;
+    // --server-requests：握手一完成就**主动**发三条服务器请求（`client/registerCapability`、
+    // `window/workDoneProgress/create`、`client/unregisterCapability`）。
+    // 这一族的回包与转出都要穿过 Host 的读线程 + Session 的那条 progress 出口才看得见，
+    // 只用 `lsp_codec` 那种「直接喂 Client」的单测测不到宿主那一段整形
+    // （`native/lsp_host_bootstrap.cpp` 的 `set_server_message` 少转一个键，Client 层照样全绿）。
+    bool server_requests = false;
     std::string hang;                      // --hang=<method>：收到就不回答
     // --stall-stdin=<毫秒>：答完 initialize 之后**停止读 stdin** 这么久 —— 真实世界里
     // JDT LS 导入大工程时就是这样。用来验证客户端写文档不会把调用方堵在 WriteFile 上。

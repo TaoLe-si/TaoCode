@@ -9,7 +9,8 @@ export interface TodoItem {
   line: number
   text: string
   kind: string
-  /** 标记在行内的起始列（0 基，`SearchMatch.column`），多行 TODO 用它定续行的列。 */
+  /** 标记在行内的起始列，**桥接口径 1 基码点列**（`SearchMatch.column` = native `code_points(...) + 1`，
+   *  见 native/search.cpp:698）。多行 TODO 要的是 0 基偏移，由 `TodoPanel.vue` 传入前换算。 */
   column?: number
   /** 多行 TODO 的续行（`src/todoMultiLine.ts` 的判定结果；没开多行时是空）。 */
   additional?: string[]

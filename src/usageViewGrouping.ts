@@ -1,6 +1,12 @@
-// 用法/引用视图的**分组与导出**（上游 `platform/lang-impl/src/com/intellij/usageView/`：
-// `UsageViewImpl` 的树按 目录/包/文件 分组（`UsageViewTreeStructureProvider` 一族），
-// `UsageViewImpl.exportToText` 把整棵树导成文本；`FindUsagesScope` 提供范围收窄）。
+// 用法/引用视图的**分组与导出**（上游 `platform/usageView-impl/src/com/intellij/usages/impl/`：
+// `Node` / `GroupNode` / `UsageNode` / `UsageTargetNode` 那四个树节点（`Node.java:19`、`GroupNode.java:42`、
+// `UsageNode.java:11`、`UsageTargetNode.java:9`）+ `UsageViewTreeModelBuilder.java:19`（`DefaultTreeModel` 的子类，
+// 根是 `GroupNode.Root`）；导出走同目录 `ExporterToTextFile.java`。`FindUsagesScope` 提供范围收窄）。
+// 订正留痕：本行原来写「上游 `platform/lang-impl/src/com/intellij/usageView/` 的 `UsageViewImpl`，
+// 分组树来自 `UsageViewTreeStructureProvider` 一族」—— 2026-10-06 逐条 `find` 过：参考树里**没有**
+// `UsageViewTreeStructure` / `UsageViewTreeStructureProvider` 这两个类名（零命中），`UsageViewImpl` 也不在
+// `platform/lang-impl` 那一支（那一支只有 `UsageViewContentManagerImpl.java` 等三条）。真身坐标见
+// `docs/batch-2026-10-06-refview2.md` §1。
 //
 // 本仓引用面板（`src/referenceContents.ts` + App.vue 的 `bottomTab === 'references'`）此前是
 // 一张按路径排序的**平表**。本模块给这一棵树需要的全部纯规则：
@@ -62,6 +68,17 @@
 // 速度搜索的匹配规则用本仓那一份现成的（MinusculeMatcher 的等价物，文件树/书签/面板都走它）；
 // `.ts` 之间的**值** import 必须带扩展名，这里漏一次就整棵测试树 `ERR_MODULE_NOT_FOUND`。
 import { speedSearchMatches } from './speedSearch.ts'
+// 同级排序、行 id、折叠箭头文案这三条**只有一份**，住在 `src/usageViewTreeModel.ts`（行模型那一层）；
+// 这里只调它们，不再各写一遍（原来四处各写各的：名字 `localeCompare`、小写路径、路径 `localeCompare`）。
+// 值 import 必须带 `.ts` 扩展名，漏一次整棵测试树 `ERR_MODULE_NOT_FOUND`。
+import { compareUsageLocations, compareUsageTreePaths, sortUsageTreeSiblings, usageTreeToggleLabel } from './usageViewTreeModel.ts'
+// 用法分组规则的扩展点宿主（`com.intellij.usageGroupingRuleProvider`，上游
+// `platform/usageView/resources/intellij.platform.usageView.xml:33`）。内建的目录(400)/文件(500) 两档
+// 作为 bundled 贡献登记进来，第三方（原版 IDEA 插件）按同一 id 挂的规则与内建那两支走同一条查询路径。
+import {
+  activeUsageGroupingRules, registerUsageGroupingRuleProvider,
+  type UsageGroupingRuleContribution, type UsageGroupingRuleProviderContribution,
+} from './ideViewExtensionPoints.ts'
 
 export interface UsageLocationLike {
   path: string
@@ -105,6 +122,15 @@ export interface UsageTreeBuildOptions {
   symbolProvider?: (path: string) => readonly UsageMemberSymbol[] | undefined
   /** 成员层开关（上游 `GROUP_BY_FILE_STRUCTURE`，**默认 true**，`UsageViewSettings.kt:21`）。 */
   groupByFileStructure?: boolean
+  /**
+   * 生效的**分组规则**（`usageGroupingRulesFor(root)`，`com.intellij.usageGroupingRuleProvider`）：
+   * 按 `rank` 升序、`groupKeyOf(usage)` 定组、`labelOf(key)` 定显示名。内建那两支
+   * （目录 400 / 文件 500）对应本函数已有的目录层与文件层，**不再重复建组**；其余规则在
+   * **目录层与文件层之间**加一层通用组节点（`kind: 'group'`，名字取 `labelOf`），
+   * 于是第三方插件（例如 Kotlin 的模块/包分组）挂的规则真的会改变树的分层。
+   * 不给 ⇒ 与既有行为一字不差。
+   */
+  rules?: readonly UsageGroupingRuleContribution[]
 }
 
 /** 包住那个位置的类/方法（类给整条嵌套链，方法给最里面那一个）。 */
@@ -173,8 +199,12 @@ export function usageMemberPathFor(ordered: readonly UsageMemberSymbol[], line: 
   return { className: classes.join('.'), methodName: method, methodDetail }
 }
 
-/** 分组树里可能出现的四种组（`class`/`method` 两档只在给得出符号时才有，见 `UsageTreeBuildOptions`）。 */
-export type UsageTreeNodeKind = 'directory' | 'file' | 'class' | 'method'
+/**
+ * 分组树里可能出现的组（`class`/`method` 两档只在给得出符号时才有，见 `UsageTreeBuildOptions`）。
+ * `group` 是**第三方分组规则**加出来的通用组层（`com.intellij.usageGroupingRuleProvider`，
+ * 见 `buildUsageTree` 的 `rules` 选项）：它没有本仓专属的呈现分支，直接用规则 `labelOf()` 给的名字。
+ */
+export type UsageTreeNodeKind = 'directory' | 'file' | 'class' | 'method' | 'group'
 
 /**
  * 分组树节点：目录、文件，或文件之下那一层的类/方法。
@@ -216,8 +246,10 @@ function ensureDirectory(root: UsageTreeNode, segments: readonly string[]): Usag
   return node
 }
 
-/** 子节点在同一层里的先后（目录 < 文件 < 类 < 方法，同级按呈现文本）。 */
-const MEMBER_RANK: Record<UsageTreeNode['kind'], number> = { directory: 0, file: 1, class: 2, method: 3 }
+// 子节点在同一层里的先后（目录 < 文件 < 类 < 方法，同级按呈现文本）—— 那份种类表与比较器
+// 收进 `src/usageViewTreeModel.ts` 的 `sortUsageTreeSiblings`（①），这里不留第二份。
+// 上游那条比较是 `impl/GroupNode.java:328-339`（先节点种类再 `compareTo`）+
+// `impl/rules/UsageGroupBase.java:19-23`（先 `myOrder` 再 `compareToIgnoreCase`）。
 
 /**
  * 按目录 / 文件 / 类 / 方法分组建树。
@@ -269,16 +301,41 @@ export function buildUsageTree(
     }
     return node
   }
+  // 第三方分组规则（`com.intellij.usageGroupingRuleProvider`）：内建目录(400)/文件(500) 两支
+  // 已经由本函数的目录层与文件层承担，这里只收**其余**规则，按 rank 升序在两层之间插通用组。
+  const extraRules = (options.rules ?? [])
+    .filter(rule => rule.rank !== USAGE_DIRECTORY_RANK && rule.rank !== USAGE_FILE_RANK)
+    .slice()
+    .sort((left, right) => left.rank - right.rank || left.id.localeCompare(right.id))
+  /** 一条规则的组名：`labelOf` 抛错就退回组键（不让一个坏规则吃掉整层）。 */
+  const ruleLabel = (rule: UsageGroupingRuleContribution, key: string): string => {
+    try { return rule.labelOf(key) } catch { return key }
+  }
   for (const location of locations) {
     if (!location || typeof location.path !== 'string' || !location.path) continue
     const normalized = normalize(location.path)
     const segments = normalized.split('/')
     const fileName = segments.pop() ?? normalized
     const directory = ensureDirectory(root, segments)
-    let file = directory.children.find(entry => entry.kind === 'file' && entry.name === fileName)
+    // 目录层之下、文件层之上：逐条规则挂一层通用组（每层一个节点，键含规则 id 与组键，
+    // 所以同一条规则在不同父节点下、或不同规则之间都不会撞键）。
+    let parent = directory
+    for (const rule of extraRules) {
+      let key: string | null = null
+      try { key = rule.groupKeyOf({ path: normalized, line: location.line, symbol: null }) } catch { key = null }
+      if (!key) continue
+      const groupPath = `\u0000rule:${rule.id}:${key}`
+      let node = parent.children.find(entry => entry.kind === 'group' && entry.path === groupPath)
+      if (!node) {
+        node = { kind: 'group', name: ruleLabel(rule, key), path: groupPath, filePath: normalized, count: 0, children: [], locations: [] }
+        parent.children.push(node)
+      }
+      parent = node
+    }
+    let file = parent.children.find(entry => entry.kind === 'file' && entry.name === fileName)
     if (!file) {
       file = { kind: 'file', name: fileName, path: normalized, count: 0, children: [], locations: [] }
-      directory.children.push(file)
+      parent.children.push(file)
     }
     const position = { path: normalized, line: location.line, character: location.character }
     const symbols = symbolsFor(normalized)
@@ -299,16 +356,10 @@ export function buildUsageTree(
     target.count += 1
   }
   const total = (node: UsageTreeNode): number => {
-    node.children.sort((left, right) => {
-      const rankLeft = MEMBER_RANK[left.kind]
-      const rankRight = MEMBER_RANK[right.kind]
-      if (rankLeft !== rankRight) return rankLeft - rankRight
-      // 同级比呈现文本：目录/文件一直是路径序（既有判据钉的那一份），
-      // 成员组上游比的是 `compareToIgnoreCase`（`ClassGroupingRule.java:178`）——
-      // `localeCompare` 默认就是这条忽略大小写的口径，两条都落在同一句上。
-      return left.name.localeCompare(right.name)
-    })
-    node.locations.sort((left, right) => left.line - right.line || (left.character ?? 0) - (right.character ?? 0))
+    // ① 同级先后与叶子顺序都取自 `src/usageViewTreeModel.ts` 那一份比较器（上游
+    // `impl/GroupNode.java:328-339` + `impl/rules/UsageGroupBase.java:19-23` + `impl/UsageViewImpl.java:225-234`）。
+    sortUsageTreeSiblings(node.children)
+    node.locations.sort(compareUsageLocations)
     let sum = node.locations.length
     for (const child of node.children) sum += total(child)
     node.count = sum
@@ -336,8 +387,8 @@ export function groupUsagesByFile(locations: readonly UsageLocationLike[]): Usag
     groups.set(path, group)
   }
   return [...groups.values()]
-    .map(group => ({ ...group, locations: group.locations.slice().sort((left, right) => left.line - right.line || (left.character ?? 0) - (right.character ?? 0)) }))
-    .sort((left, right) => left.path.localeCompare(right.path))
+    .map(group => ({ ...group, locations: group.locations.slice().sort(compareUsageLocations) }))
+    .sort((left, right) => compareUsageTreePaths(left.path, right.path))
 }
 
 /** 摘要：`N 处引用 / M 个文件`。 */
@@ -379,7 +430,7 @@ export function usagesClipboardText(locations: readonly UsageLocationLike[]): st
 export interface UsageTreeRow {
   /** 稳定键（组行 = `种类\0路径`，成员组的路径是 `文件#类[#方法]` 那个合成键；叶子 = 位置三元组）—— 折叠集存的就是它。 */
   key: string
-  kind: 'directory' | 'file' | 'class' | 'method' | 'usage'
+  kind: 'directory' | 'file' | 'class' | 'method' | 'group' | 'usage'
   /** 缩进层（根节点不占一层：上游的树根不可见，`UsageViewTreeCellRenderer.java:88-89`）。 */
   depth: number
   /** 主文本：目录 = 相对根的路径、文件 = 文件名或整条路径、类 = `Outer.Inner`、方法 = `名字(参数表)`、用法 = `行:列`。 */
@@ -400,13 +451,13 @@ export interface UsageTreeRow {
   toggleLabel: string
 }
 
-/** 组键（四档组行共用一套命名空间；目录路径自带尾斜杠、成员键带 `#`，都不会与文件键撞）。 */
-export function usageGroupKey(kind: 'directory' | 'file' | 'class' | 'method', path: string): string {
+/** 组键（各档组行共用一套命名空间；目录路径自带尾斜杠、成员键带 `#`，都不会与文件键撞）。 */
+export function usageGroupKey(kind: 'directory' | 'file' | 'class' | 'method' | 'group', path: string): string {
   return `${kind}\u0000${path}`
 }
 
-/** 组行的四种形态（叶子不是组行）——折叠、过滤、导出都按这一份判断。 */
-export type UsageGroupKind = 'directory' | 'file' | 'class' | 'method'
+/** 组行的各档形态（叶子不是组行）——折叠、过滤、导出都按这一份判断。 */
+export type UsageGroupKind = 'directory' | 'file' | 'class' | 'method' | 'group'
 
 /** 是不是组行（叶子之外的四种）。 */
 export function isUsageGroupRow(row: UsageTreeRow): boolean {
@@ -456,12 +507,7 @@ export function usageFileNodes(root: UsageTreeNode): UsageTreeNode[] {
     }
   }
   collect(root)
-  return files.sort((left, right) => {
-    const a = left.path.toLowerCase()
-    const b = right.path.toLowerCase()
-    if (a !== b) return a < b ? -1 : 1
-    return left.path < right.path ? -1 : 1
-  })
+  return files.sort((left, right) => compareUsageTreePaths(left.path, right.path))
 }
 
 /**
@@ -498,8 +544,9 @@ export function flattenUsageTree(root: UsageTreeNode, options: UsageTreeFlattenO
       key, kind: node.kind, depth, label, detail: usageCounterText(node.count),
       // 成员组的导航路径是它所在的那个文件（合成键只用来当折叠键）
       path: node.filePath ?? node.path, count: node.count, line: -1, character: -1,
-      collapsible: true, collapsed: isCollapsed,
-      toggleLabel: `${isCollapsed ? '展开' : '收起'} ${label}`,
+      // 收得动才算可折叠：既没有子组又没有直接位置的组（过滤后可能出现空壳）不该有那个假箭头
+      collapsible: node.children.length > 0 || node.locations.length > 0, collapsed: isCollapsed,
+      toggleLabel: usageTreeToggleLabel(isCollapsed, label),
     })
     return isCollapsed
   }
@@ -517,11 +564,25 @@ export function flattenUsageTree(root: UsageTreeNode, options: UsageTreeFlattenO
     emitOwnLeaves(file, depth + 1)
     for (const child of file.children) emitMember(child, depth + 1)
   }
+  /**
+   * 第三方分组规则加出来的通用组层（`kind: 'group'`，名字来自规则的 `labelOf`）。
+   * 它和目录层一样是个容器：子节点可能是另一个通用组、也可能是文件节点。
+   */
+  const emitGroupLayer = (node: UsageTreeNode, depth: number): void => {
+    if (emitGroup(node, depth)) return
+    for (const child of node.children) {
+      if (child.kind === 'file') emitFile(child, depth + 1)
+      else if (child.kind === 'directory') emitDirectory(child, depth + 1)
+      else if (child.kind === 'group') emitGroupLayer(child, depth + 1)
+      else emitMember(child, depth + 1)
+    }
+  }
   const emitDirectory = (node: UsageTreeNode, depth: number): void => {
     if (emitGroup(node, depth)) return
     for (const child of node.children) {
       if (child.kind === 'file') emitFile(child, depth + 1)
       else if (child.kind === 'directory') emitDirectory(child, depth + 1)
+      else if (child.kind === 'group') emitGroupLayer(child, depth + 1)
       else emitMember(child, depth + 1)
     }
   }
@@ -529,6 +590,7 @@ export function flattenUsageTree(root: UsageTreeNode, options: UsageTreeFlattenO
     for (const child of root.children) {
       if (child.kind === 'file') emitFile(child, 0)
       else if (child.kind === 'directory') emitDirectory(child, 0)
+      else if (child.kind === 'group') emitGroupLayer(child, 0)
       else emitMember(child, 0)
     }
     return rows
@@ -542,15 +604,127 @@ export function flattenUsageTree(root: UsageTreeNode, options: UsageTreeFlattenO
 }
 
 /**
- * 树里**所有**组行的键（「全部折叠」要收的就是这一批 —— 上游 `TreeUtil.collapseAll` 收的是整棵树，
- * 收完之后屏上只剩没被收起的那几行，与本仓的显示结果一致）。
+ * 树里**所有**组行的键（「全部折叠」要收的就是这一批 —— 上游 `TreeUtil.collapseAll(tree, 3)`
+ * 收的是整棵树，只留"选中路径到第 3 层"那一段不许收与唯一那个顶层节点
+ * （`platform/platform-api/src/com/intellij/util/ui/tree/TreeUtil.java:883-892` 的 `keepSelectionLevel`
+ * 与 `:892-907` 的 `strict`/`prohibited`；调用点 `UsageViewImpl.java:356` + `:1338-1343`）。
+ * 本仓的面板**没有选择态**（登记在 `src/usageViewGear.ts:15-17`），那一段留不出来的部分做不成，
+ * 所以这里收的是全部组键、收完屏上仍是那一列组行自己（根不可见，`UsageViewTreeCellRenderer.java:88-89`）。
  * `showDirectories` 决定树里有哪几层，所以目录那一档关着时这里只有文件键。
+ * 键的**来源**改成 `usageLevelCounts` 那一张表（同一份遍历、同一份顺序，两处不再各数一遍账）。
  */
 export function allUsageGroupKeys(root: UsageTreeNode, options: { showDirectories?: boolean } = {}): string[] {
-  return flattenUsageTree(root, { ...options, collapsed: new Set<string>() })
-    .filter(row => row.kind !== 'usage')
-    .map(row => row.key)
+  return usageLevelCounts(root, options).map(entry => entry.key)
 }
+
+// ---------------------------------------------------------------- 同级计数（行模型的那三格账）
+
+/**
+ * 一个组行在账上的三个数（**同级互不重叠**是这张表存在的理由）：
+ *   · `ownCount` = 直接挂在本节点上的用法条数 —— 上游那一格是 `GroupNode.getUsageNodes()`
+ *     （`platform/usageView-impl/src/com/intellij/usages/impl/GroupNode.java:409-417`）；
+ *   · `childCount` = 各**直接子组**的递归合计之和 —— 上游那一格是 `getSubGroups()`（同文件 `:399-407`）；
+ *   · `count` = 子树合计（屏上 `N 条结果` 用的就是它）—— 上游 `getRecursiveUsageCount()`
+ *     （`GroupNode.java:363-366`），它是 `:290-299` `incrementUsageCount` 从叶子一路往上加维护的，
+ *     所以恒等于 `ownCount + childCount`；导出走同一格（`ExporterToTextFile.java:57-63`）。
+ * `parentKey` 是父组的键（根下那一层的父 = 空串，因为上游的根在树里不可见，
+ * `UsageViewTreeCellRenderer.java:88-89`）。
+ */
+export interface UsageLevelCount {
+  key: string
+  kind: UsageGroupKind
+  /** 可见层，与 `UsageTreeRow.depth` 同一口径（目录那一档关着时目录行不占层）。 */
+  depth: number
+  parentKey: string
+  ownCount: number
+  childCount: number
+  count: number
+}
+
+/** 数的是**树里有什么**，与屏上收没收起无关（上游对账对的是 model，`ExporterToTextFile.java:24-29` 导的也是 model）。 */
+const NO_COLLAPSED_KEYS: ReadonlySet<string> = new Set<string>()
+
+/** 把树里所有组节点按 `usageGroupKey` 建索引（与 `showDirectories` 无关：那一档只决定屏上画不画目录行）。 */
+function indexUsageGroupNodes(root: UsageTreeNode): Map<string, UsageTreeNode> {
+  const index = new Map<string, UsageTreeNode>()
+  const walk = (node: UsageTreeNode): void => {
+    for (const child of node.children) {
+      index.set(usageGroupKey(child.kind, child.path), child)
+      walk(child)
+    }
+  }
+  walk(root)
+  return index
+}
+
+/**
+ * 按屏上那一列行的**顺序**给出每个组行的三格账（`flattenUsageTree` 是唯一那份行序，这里只补账不重排，
+ * 所以 `allUsageGroupKeys` 与「全部折叠」收的那批键天然与面板上看到的同一份）。
+ */
+export function usageLevelCounts(root: UsageTreeNode, options: UsageTreeFlattenOptions = {}): UsageLevelCount[] {
+  const nodes = indexUsageGroupNodes(root)
+  const table: UsageLevelCount[] = []
+  const stack: { depth: number; key: string }[] = []
+  for (const row of flattenUsageTree(root, { ...options, collapsed: NO_COLLAPSED_KEYS })) {
+    if (!isUsageGroupRow(row)) continue
+    while (stack.length && stack[stack.length - 1]!.depth >= row.depth) stack.pop()
+    const node = nodes.get(row.key)
+    const ownCount = node ? node.locations.length : 0
+    table.push({
+      key: row.key, kind: row.kind as UsageGroupKind, depth: row.depth,
+      parentKey: stack.length ? stack[stack.length - 1]!.key : '',
+      ownCount, childCount: row.count - ownCount, count: row.count,
+    })
+    stack.push({ depth: row.depth, key: row.key })
+  }
+  return table
+}
+
+// ---------------------------------------------------------------- 展开态沿用（重建之后那份折叠集）
+
+/**
+ * 一份内容的展开态落在哪一档。上游对应的是**两处**分开存的东西：
+ *   · `mixed`（默认）= 逐节点的展开态，只在运行时，重建时按 `UsageViewImpl.java:1270-1288` 的
+ *     `captureUsagesExpandState` 抓"当前展开到看得见用法叶子"的那批路径，再由 `:1291-1307` 的
+ *     `restoreUsageExpandState` 贴回去（贴的时候根下那一层一律展开，`:1293` 那句 `//always expand the last level group`）；
+ *   · `expanded` / `collapsed` = 应用级那一格布尔 `UsageViewSettings.kt:63-64` 的 `IS_EXPANDED`
+ *     （`usageView.xml`，默认 false），只有工具条那两个动作会写它
+ *     （`UsageViewImpl.java:344-347` 展开时置 true、`:353-358` 折叠时置 false），
+ *     结果回来时读它（`:1875-1877`：true 且少于一万条就 `expandAll()`）。
+ */
+export type UsageExpansionMode = 'expanded' | 'collapsed' | 'mixed'
+
+export interface UsageExpansionCarryOptions {
+  /** 目录那一档（决定树里有哪几层的键，切了档旧键就不该往新档上贴）。 */
+  showDirectories?: boolean
+  /** 默认 `mixed`（= 只沿用还存在的键）。 */
+  mode?: UsageExpansionMode
+}
+
+/**
+ * 树重建之后（换档 / 增量结果 / 符号迟到）该用哪一份折叠集 —— 本仓的"沿用"。
+ *   · `expanded` ⇒ 空集：全展开，**新出现的组也展开**（上游 `IS_EXPANDED=true` 时结果回来 `expandAll()`，
+ *     `UsageViewImpl.java:1875-1877`）；
+ *   · `collapsed` ⇒ 整棵树的组键：全折叠，**新出现的组也收起**（上游按了折叠之后新节点不会自己展开）；
+ *   · `mixed` ⇒ **交集**：只保留这一棵树里还存在的键，按树里的顺序、去重
+ *     （上游 `captureUsagesExpandState` 只抓"还看得见"的那批，`:1272` 一句 `if (!myTree.isExpanded(pathFrom)) return;`
+ *     就是这条"消失的组不再沿用"）。
+ * 交集那一支同时把垃圾键清掉：本仓的折叠集是按内容 id 存的一串键，结果换一批、成员层出现/消失都会让
+ * 旧键永不命中（`tests/usage-view-panel-rows.test.mjs:89` 那条断言写的就是这个隐患）。
+ */
+export function carryUsageExpansion(
+  root: UsageTreeNode,
+  options: UsageExpansionCarryOptions = {},
+  previous: Iterable<string> = [],
+): string[] {
+  const present = usageLevelCounts(root, { showDirectories: options.showDirectories }).map(entry => entry.key)
+  const mode = options.mode ?? 'mixed'
+  if (mode === 'expanded') return []
+  if (mode === 'collapsed') return present
+  const keep = new Set(previous)
+  return present.filter(key => keep.has(key))
+}
+
 
 /**
  * 树形导出（上游 `ExporterToTextFile.java:31-71`）：每层缩进 4 空格（`:35`）、根不写（`:34-40`）、
@@ -664,4 +838,60 @@ export function usageRowsForQuery(
   options: UsageTreeFlattenOptions & UsageTreeFilterOptions = {},
 ): UsageTreeRow[] {
   return flattenUsageTree(filterUsageTree(root, query, options), options)
+}
+
+// ── `com.intellij.usageGroupingRuleProvider` 的 bundled 两支与消费面（2026-10-07 epclose2） ──────
+//
+// 上游把「引用/用法树怎么分层」做成一组可插的 `UsageGroupingRule`，按档号（`UsageGroupingRulesDefaultRanks`：
+// 目录结构 400、文件结构 500）装进那棵树；贡献面是 `com.intellij.usageGroupingRuleProvider`
+// （`platform/usageView/resources/intellij.platform.usageView.xml:33`、接口
+// `platform/usageView/src/com/intellij/usages/rules/UsageGroupingRuleProvider.java:18` 的 `EP_NAME`）。
+// 本仓 `buildUsageTree` 内建的「目录 → 文件」两层就是这两条规则；这里把它们作为 bundled 贡献登记进同名
+// EP，第三方（原版 IDEA 插件，如 Kotlin 的模块/包分组）按同一 id 挂的规则会出现在 `usageGroupingRulesFor`
+// 里。**如实差异**：协调单里写的 `com.intellij.moduleGroupingRuleProvider` 上游不存在，`ModuleGroupingRule`
+// 是使用 usageView-impl 的一条**内建规则**而不是 EP（`.../rules/ModuleGroupingRule.java:32`），故落到真 EP 上。
+
+/** 目录分组规则 id（上游 `DirectoryGroupingRule`，档号 400）。 */
+export const DIRECTORY_GROUPING_RULE_ID = 'DirectoryGroupingRule'
+/** 文件分组规则 id（上游 `FileGroupingRule`，档号 500）。 */
+export const FILE_GROUPING_RULE_ID = 'FileGroupingRule'
+/** 目录结构那一档的档号（`UsageGroupingRulesDefaultRanks.DIRECTORY_STRUCTURE = 400`）。 */
+export const USAGE_DIRECTORY_RANK = 400
+/** 文件结构那一档的档号（`UsageGroupingRulesDefaultRanks.FILE_STRUCTURE = 500`）。 */
+export const USAGE_FILE_RANK = 500
+
+/** 路径所在目录（0 基到最后一个 `/`；顶层文件空串），与 `buildUsageTree` 的目录层同一口径。 */
+function directoryKeyOf(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const index = normalized.lastIndexOf('/')
+  return index < 0 ? '' : normalized.slice(0, index)
+}
+
+/** 内建的两条分组规则（目录 → 文件），作为一条 bundled provider。 */
+export function bundledUsageGroupingRuleProvider(): UsageGroupingRuleProviderContribution {
+  return {
+    id: 'TaoCode.bundledUsageGroupingRules',
+    getActiveRules: () => [
+      {
+        id: DIRECTORY_GROUPING_RULE_ID,
+        rank: USAGE_DIRECTORY_RANK,
+        groupKeyOf: usage => usageGroupKey('directory', directoryKeyOf(usage.path)),
+        labelOf: groupKey => groupKey,
+      },
+      {
+        id: FILE_GROUPING_RULE_ID,
+        rank: USAGE_FILE_RANK,
+        groupKeyOf: usage => usageGroupKey('file', usage.path),
+        labelOf: groupKey => groupKey,
+      },
+    ],
+  }
+}
+
+// 模块加载即登记（bundled 贡献必须真的在表里）。
+registerUsageGroupingRuleProvider(bundledUsageGroupingRuleProvider())
+
+/** 当前工作区生效的全部用法分组规则（内建两支 + 第三方挂的），按档号升序。 */
+export function usageGroupingRulesFor(root = ''): UsageGroupingRuleContribution[] {
+  return activeUsageGroupingRules(root)
 }

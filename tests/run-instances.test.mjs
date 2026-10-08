@@ -159,7 +159,10 @@ test('桥接与原生都有 run.instances，事件带 instance 字段', () => {
   assert.ok(bridgeSource.includes('instance?: number; label?: string'), 'Reply 要能带实例 id')
   const main = read('native/main.cpp')
   assert.ok(main.includes('case "run.instances"_h:'), '原生要有 run.instances 路由')
-  assert.ok(main.includes('case "run.started"') === false || true)
+  // 这条原本在末尾多带一个**恒真项**（`… === false` 之后又 `\|\| true`），于是整条永远为真 = 零判据。
+  // 按上一行注释的本意还原成有牙的形状：`run.instances` 的路由在 main.cpp，
+  // `run.started` 的**事件**由 run_host.cpp 自己发，所以 main.cpp 里不该有它的 case 分支。
+  assert.ok(!main.includes('case "run.started"'), 'run.started 不该在 main.cpp 里另开一条路由（分派归 run_host.cpp）')
   // 运行宿主模块自己发 run.started
   assert.ok(read('native/run_host.cpp').includes('{"event", "run.started"}'), '宿主发 run.started')
 })
@@ -262,7 +265,8 @@ test('消费链：控制台真的把清单接上了（点击只切视图）', ()
   assert.match(console_, /runningListRows\(props\.active \|\| null\)/)
   assert.match(console_, /runningListEnabled\(runningRows\.value\)/)
   assert.match(console_, /function pickRunningRow\(id: number\) \{\n\s*emit\('select', id\)/, '点击 = 上游 toFrontRunContent，只切换')
-  assert.match(console_, /@click="pickRunningRow\(row\.id\)"/)
+  assert.match(console_, /@click="liveOpen = false; pickRunningRow\(row\.id\)"/,
+    '点一行 = 收起弹层 + 只切视图（弹层要关，否则选完还盖在控制台上）')
   assert.match(console_, /runInstanceDisplayName\(instance, index\)/, '标签标题与清单同一个规则')
   // 标签上的 × 仍然只做「停 + 摘标签」那两步（上面第 181 行那条既有断言钉着），
   // 清单里那条之所以立刻变成 kill 图标，走的是 `closed` 这一档，不是额外的一次停止标记。

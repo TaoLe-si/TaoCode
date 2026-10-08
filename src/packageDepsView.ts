@@ -215,3 +215,83 @@ export function directDependencies(graph: PackageGraph, name: string): { outgoin
 export function packageDisplay(name: string): string {
   return name === '' ? '(根目录)' : name
 }
+
+// ── 包视图（上游 `ScopeViewTreeModel.visitPackages` 的 PSI 三档，本仓用符号模型还原） ─────────
+// 判词 `pv/project-view-nodes` 里「包视图（`FlattenPackages`/`AbbreviatePackageNames`/
+// `HideEmptyMiddlePackages`）需 PSI/Java 包模型」这一条，本批由 `src/symbolModel.ts` 的
+// `packageTreeOf` 承接：声明的包名（`declaredPackageName`）＋目录归属建包树，三档选项照
+// `ScopeViewTreeModel.java:586-655` 的 `flattenPackages`/`hideEmptyMiddlePackages` 与
+// `GroupByTypeComparator.java:134` 的 `abbreviatePackageNames`。
+//
+// 为什么落在这里而不是项目树：项目树模型（`src/projectTreeModel.ts`）正在别的 lane 上改，
+// 而本模块本来就是「包」这一层的视图规则（作用域/视图设置/依赖闭包），包视图的设置面与它同域。
+// 面板挂载点：`src/components/PackageDepsDialog.vue` 的工具栏（一个「包视图」开关组）——
+// 组件归 UI lane，接线请求见报告。
+
+import { packageLabel, type PackageNode, type PackageViewSettings } from './symbolModel.ts'
+// 「包/项目文件」两方言走上游 EP `com.intellij.patternDialectProvider`：内建两支作为 bundled 贡献
+// 登记在 `src/projectViewExtensionPoints.ts`，第三方按同一 id 挂的方言能整体接管这棵树的建法。
+import { PACKAGE_PATTERN_DIALECT, patternDialectTree } from './projectViewExtensionPoints.ts'
+
+export type { PackageNode, PackageViewSettings } from './symbolModel.ts'
+
+/** 包视图的三档（上游 `ProjectView` 的三个选项；标题取 zh 包同名键的意译）。 */
+export const PACKAGE_VIEW_OPTIONS: Array<{ id: keyof PackageViewSettings; title: string; description: string }> = [
+  { id: 'flattenPackages', title: '平铺包', description: '不建中间层节点，每个包直接列在顶层（上游 ProjectView.isFlattenPackages）' },
+  { id: 'hideEmptyMiddlePackages', title: '隐藏空的中间包', description: '只有子包、没有文件的中间层并进它的父（上游 isHideEmptyMiddlePackages）' },
+  { id: 'abbreviatePackageNames', title: '缩写包名', description: '包名按段取首字母（上游 isAbbreviatePackageNames）' },
+]
+
+export const DEFAULT_PACKAGE_VIEW_SETTINGS: PackageViewSettings = {
+  flattenPackages: false, hideEmptyMiddlePackages: false, abbreviatePackageNames: false,
+}
+
+/** 包树的一行（渲染层用；`label` 已按缩写档算好）。 */
+export interface PackageViewRow {
+  name: string
+  label: string
+  depth: number
+  /** 直接属于这个包的文件数（不含子包）。 */
+  fileCount: number
+  /** 子树合计文件数。 */
+  totalFiles: number
+  middle: boolean
+}
+
+function countFiles(node: PackageNode): number {
+  return node.files.length + node.children.reduce((sum, child) => sum + countFiles(child), 0)
+}
+
+/**
+ * 包树 → 行表（深度优先，父在子前）。`label` 走 `symbolModel.packageLabel`
+ * （缩写档开着时缩写；空包名给「(根)」），所以「缩写包名」这一档只改显示、不改树形 ——
+ * 与上游 `GroupByTypeComparator` 只换呈现文本同一口径。
+ */
+export function packageViewRows(roots: readonly PackageNode[], settings: PackageViewSettings = {}): PackageViewRow[] {
+  const out: PackageViewRow[] = []
+  const visit = (nodes: readonly PackageNode[], depth: number) => {
+    for (const node of nodes) {
+      out.push({ name: node.name, label: packageLabel(node.name, settings), depth, fileCount: node.files.length, totalFiles: countFiles(node), middle: node.middle })
+      visit(node.children, depth + 1)
+    }
+  }
+  visit(roots, 0)
+  return out
+}
+
+/**
+ * 由文件清单 + 声明包名表建包视图行表（面板一次调用拿到整棵树）：
+ * `declared` 缺项按目录归属（`packageTreeOf` 的口径）。这是「包视图」在本仓的**入口**。
+ *
+ * `dialect` 走上游 `com.intellij.patternDialectProvider`（`PatternDialectProvider.java:24`）：
+ * `package` 是内建方言（`packageTreeOf`），`file` 是内建的项目文件方言（按目录分层），
+ * 第三方按同一 shortName 挂的方言会覆盖它并整体接管这棵树。
+ */
+export function buildPackageView(
+  files: readonly string[],
+  declared: ReadonlyMap<string, string | null> = new Map(),
+  settings: PackageViewSettings = {},
+  dialect: string = PACKAGE_PATTERN_DIALECT,
+): PackageViewRow[] {
+  return packageViewRows(patternDialectTree({ files, declared, settings }, dialect), settings)
+}

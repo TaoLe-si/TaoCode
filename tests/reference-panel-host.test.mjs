@@ -17,7 +17,8 @@
 //   · 关掉那条 Content = `UsageViewImpl.java:1786-1791` 的 `close()` →
 //     `UsageViewContentManagerImpl.java:219` 的 `removeContent(content, true)`；
 //   · Find 窗口本身是**按需注册**的（`UsageViewContentManagerImpl.java:120-136`
-//     的 `getOrRegisterFindToolWindow`，`:129` 那句 `registerToolWindow(ToolWindowId.FIND, …)`），
+//     的 `getOrRegisterFindToolWindow`，`:128-135` 那句 `registerToolWindow(ToolWindowId.FIND, …)`，
+//     `:133` 还写着 `shouldBeAvailable = false`），
 //     所以它不是注册表里的一条窗口 ⇒ 本仓的 `references` 也**不进** `TOOL_WINDOW_REGISTRY`：
 //     它是底部那一格（本仓 ContentManager 的等价物）里的一条**内容**。
 import test from 'node:test'

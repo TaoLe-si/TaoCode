@@ -126,8 +126,8 @@ onMounted(() => { void scan() })
 .endpoints-heading { color: var(--bright); font-weight: 500; }
 .endpoints-summary { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .endpoints-filter { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; padding: var(--space-1) var(--space-3); }
-.endpoints-filter input { flex: 1; min-width: 0; box-sizing: border-box; min-height: var(--ctrl-height-sm); padding: 2px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); font: 11px/1.5 var(--font-mono); }
-.endpoints-clients { flex-shrink: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-2); color: var(--muted); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); font-size: 11px; }
+.endpoints-filter input { flex: 1; min-width: 0; box-sizing: border-box; min-height: var(--ctrl-height-sm); padding: 2px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px/1.5 var(--font-mono); }
+.endpoints-clients { flex-shrink: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-2); color: var(--muted); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
 .endpoints-clients.on { color: var(--accent); border-color: var(--accent); }
 .endpoints-note { margin: 0; padding: var(--space-2) var(--space-3); color: var(--muted); font-size: 12px; }
 .endpoints-error { margin: 0; padding: var(--space-2) var(--space-3); color: var(--error); font-size: 12px; }

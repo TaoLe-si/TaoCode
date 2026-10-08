@@ -38,6 +38,10 @@ import {
   KEEP_AS_DELEGATE_LABEL, PARAMETER_OBJECT_PANELS, PARAMETER_OBJECT_TITLE, objectNameFor,
   parameterObjectCommandName, parameterObjectEdits, parseForParameterObject, supportsDelegate,
 } from './refactorIntroduceParameterObject.ts'
+import {
+  EXTRACT_SUPER_TITLES, defaultNewPath, extractSuperEdits, extractSuperNotice, supportsExtractSuper,
+  type ExtractSuperKind,
+} from './refactorExtractSuper.ts'
 import type { SignatureFileText } from './refactorSignature.ts'
 import type { Tab } from './editorTab.ts'
 
@@ -152,8 +156,10 @@ export function createRefactorHost(deps: RefactorHostDeps) {
   const chooser = ref<RefactorChooserModel | null>(null)
   /** 打开勾选表时那一次的上下文（组件无状态，一切回算都在这里）。 */
   let chooserContext: {
-    kind: 'move' | 'parameterObject'
+    kind: 'move' | 'parameterObject' | 'extractSuper'
     direction?: MemberMoveDirection
+    /** `extractSuper` 那一档：提取超类还是提取接口（`ExtractSuperBaseDialog.java:63-64` 的二选一）。 */
+    extractKind?: ExtractSuperKind
     path: string
     text: string
     language: string
@@ -261,6 +267,65 @@ export function createRefactorHost(deps: RefactorHostDeps) {
     }
   }
 
+  /**
+   * 提取超类 / 提取接口（`LangActions.xml:377-382` 的 `ExtractSuperclassAction`/`ExtractInterfaceAction`）。
+   * 上游是 `ExtractSuperBaseDialog`（源类 + 新超类名 + 目标目录 + 成员勾选表），本仓复用同一张
+   * `RefactorChooserModel` 勾选表：面板 0 = 新名字（可编辑），面板 1 = 成员表（无「保持抽象」列 ——
+   * 提取超类上游按原样搬成员，那一列属于 Pull Up）。新文件路径由新名字按 `defaultNewPath` 折出。
+   */
+  async function openExtractSuper(kind: ExtractSuperKind): Promise<void> {
+    const tab = deps.active.value
+    if (!tab) { deps.notify('请先打开一个文件。', true); return }
+    const language = deps.languageOf(tab.path)
+    if (!supportsExtractSuper(language)) { deps.notify(`「${language}」档没有花括号类成员的文本层落点，不做。`, true); return }
+    const text = deps.editorFor(tab.path)?.text?.() ?? tab.content
+    const cls = classAt(findMemberMoveClasses(text, language), caretIn(tab, text))
+    if (!cls) { deps.notify('光标不在类声明里。请把光标放到要提取超类/接口的那个类中。', true); return }
+    const members = classMembers(text, cls)
+    if (!members.length) { deps.notify(`「${cls.name}」里没有可提取的成员。`, true); return }
+    const suggested = `${cls.name}Base`
+    chooserContext = {
+      kind: 'extractSuper', extractKind: kind, path: tab.path, text, language,
+      className: cls.name, files: [], targets: new Map(),
+    }
+    chooser.value = {
+      title: EXTRACT_SUPER_TITLES[kind],
+      panels: [
+        { title: `源类：${cls.name}`, kind: 'text', text: cls.name },
+        { title: kind === 'interface' ? '新接口名' : '新超类名', kind: 'field', label: '名字', value: suggested },
+        {
+          title: '要提取的成员', kind: 'table',
+          columns: [{ label: '成员' }, { label: '种类' }],
+          rows: members.map(member => ({
+            id: member.name, cells: [member.name, member.kind === 'method' ? '方法' : '字段'],
+            checked: false, extra: false, extraEnabled: false,
+          })),
+        },
+      ],
+      checks: [],
+      error: '',
+      note: `新声明文件默认建在源文件同目录（${defaultNewPath(tab.path, suggested)}），名字改了路径跟着改。`
+        + '本仓不把源类改名（那要跨文件符号搜索），只给源类加继承子句并删掉被抽走的成员段。',
+      busy: false,
+    }
+  }
+
+  async function applyExtractSuper(context: NonNullable<typeof chooserContext>, model: RefactorChooserModel) {
+    const newName = model.panels[1]?.value?.trim() ?? ''
+    const memberNames = model.panels[2]?.rows?.filter(row => row.checked).map(row => row.id) ?? []
+    const newPath = defaultNewPath(context.path, newName)
+    const result = extractSuperEdits({
+      kind: context.extractKind!, language: context.language, path: context.path, text: context.text,
+      className: context.className, newName, newPath, memberNames,
+    })
+    if (result.errors.length) { model.error = result.errors.join(' '); return }
+    const label = `${EXTRACT_SUPER_TITLES[context.extractKind!]} ${context.className} → ${newName}`
+    await deps.openEditsPreview(label, result.edits, async edits => {
+      await deps.applyEditsToFiles(edits, extractSuperNotice(context.extractKind!, context.className, newName, newPath, result))
+    })
+    closeChooser()
+  }
+
   /** 勾选表的「确定」：按上下文的种类算编辑，冲突/预览都走既有那条链。 */
   async function applyChooser(): Promise<void> {
     const context = chooserContext
@@ -269,6 +334,7 @@ export function createRefactorHost(deps: RefactorHostDeps) {
     model.busy = true
     try {
       if (context.kind === 'move') await applyMemberMove(context, model)
+      else if (context.kind === 'extractSuper') await applyExtractSuper(context, model)
       else await applyParameterObject(context, model)
     } finally {
       if (chooser.value) chooser.value = { ...chooser.value, busy: false }
@@ -457,6 +523,8 @@ export function createRefactorHost(deps: RefactorHostDeps) {
     chooserState: chooser,
     openPullUp: () => openMemberMove('up'),
     openPushDown: () => openMemberMove('down'),
+    openExtractSuperclass: () => openExtractSuper('superclass'),
+    openExtractInterface: () => openExtractSuper('interface'),
     openIntroduceParameterObject,
     closeChooser, applyChooser, setChooserField, toggleChooserRow, toggleChooserExtra, toggleChooserCheck,
     safeDeleteState: safeDelete, openSafeDelete, safeDeleteChoose, closeSafeDelete, showSafeDelete,

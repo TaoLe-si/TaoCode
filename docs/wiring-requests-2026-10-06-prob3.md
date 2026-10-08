@@ -156,3 +156,15 @@ const problemCountsNow = computed(() => problemCounts(allProblems.value))
 3. 本仓还有**第三份**严重度映射：`src/inspectionReport.ts:29-30` 的 `SEVERITY_NAMES`/`SEVERITY_CLASSES`
    （`{1:'错误',2:'警告',3:'提示',4:'信息'}`，缺省 `'信息'`），与 `levelForSeverity` 平行；
    我的正则只钉"就地重数"那种形状，钉不到名字映射 ⇒ 请转给 inspectionReport 那条 lane 改读 `src/highlightLevels.ts`。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（状态栏严重度计数改读 `problemCounts`）** —— 目标 `src/App.vue`（本 lane）。复核 `statusProblemCounts` 已在用 `problemCounts` 一族（`src/App.vue` 已 import `problemCounts`），登记为已接线/待复核。
+- **R2** —— 判词（`docs/inventory/*`），非本 lane。
+
+结论：R1 复核为已接；R2 非本 lane。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「R1 复核为已接；R2 非本 lane。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

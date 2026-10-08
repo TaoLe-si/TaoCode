@@ -16,6 +16,12 @@
 // 纯函数（存储读写用可注入的 StorageLike），判据 tests/run-config-templates.test.mjs。
 
 import type { RunConfig } from './bridge.ts'
+// 模板 EP（`com.intellij.runConfigurationTemplateProvider`，上游 `RunManagerImpl.kt:130-134`）：
+// 本模块的 `templateFor` 是它的**真实消费点**（第三方给的模板优先于本地存的那份）。
+import { templateFromProviders } from './executionRunExtensionPoints.ts'
+// 那两个「启动时打开/聚焦运行面板」开关的**唯一**解析入口与上游默认值（判据 tests/run-startup-focus.test.mjs）。
+// 模板只是初值来源（上游 `RunnerAndConfigurationSettingsImpl.kt:455-461`），不另开一份存放。
+import { ACTIVATE_TOOL_WINDOW_DEFAULT, FOCUS_TOOL_WINDOW_DEFAULT, resolveRunStartupFocusFlags } from './runStartupFocus.ts'
 
 export interface RunConfigTemplate {
   command?: string
@@ -25,6 +31,17 @@ export interface RunConfigTemplate {
   env?: string[]
   beforeLaunch?: Array<{ name: string; command: string }>
   allowRunningInParallel?: boolean
+  /**
+   * 「启动时打开运行面板」/「启动时把焦点移到运行面板」的**模板初值**。
+   * 上游同一件事在 `RunnerAndConfigurationSettingsImpl.kt:455-461`
+   * （`importRunnerAndConfigurationSettings(template)` 把模板记录上的
+   * `isActivateToolWindowBeforeRun` / `isFocusToolWindowBeforeRun` 拷进新配置）⇒
+   * 模板只是「新建配置时的初值来源」，**不是第二处存放**：新配置一旦落成记录，之后只读那条记录。
+   * 默认方向与配置档相反，所以 `sanitize` 里两个都是「只在非默认时留键」
+   * （上游写档语义 `:317-321`：activate 默认 true ⇒ 只在 false 时落，focus 默认 false ⇒ 只在 true 时落）。
+   */
+  activateToolWindowBeforeRun?: boolean
+  focusToolWindowBeforeRun?: boolean
   /** 运行目标 id（见 src/executionTargets.ts）；空/缺省 = 本机。 */
   target?: string
 }
@@ -52,6 +69,12 @@ function sanitize(template: RunConfigTemplate): RunConfigTemplate {
   if (template.env?.length) out.env = [...template.env]
   if (template.beforeLaunch?.length) out.beforeLaunch = template.beforeLaunch.map(step => ({ name: step.name, command: step.command }))
   if (template.allowRunningInParallel === true) out.allowRunningInParallel = true
+  // 只在**非默认**时留键（上游 `RunnerAndConfigurationSettingsImpl.kt:317-321`）：
+  // activate 的默认是 true ⇒ 只有 false 需要落盘；focus 的默认是 false ⇒ 只有 true 需要落盘。
+  // 读回时缺键由 `src/runStartupFocus.ts` 的 `resolveRunStartupFocusFlags` 补上游默认，
+  // 所以「没留键」与「留了默认值的键」在行为上是同一件事，模板记录不会越写越大。
+  if (template.activateToolWindowBeforeRun === false) out.activateToolWindowBeforeRun = false
+  if (template.focusToolWindowBeforeRun === true) out.focusToolWindowBeforeRun = true
   if (typeof template.target === 'string' && template.target) out.target = template.target
   return out
 }
@@ -91,7 +114,15 @@ export function removeRunConfigTemplate(store: StorageLike | undefined, root: st
   return templates
 }
 
+/**
+ * 这个类型的模板。
+ * 先问 EP（`com.intellij.runConfigurationTemplateProvider` 的 `RunConfigurationTemplateProvider`，
+ * 上游 `RunManagerImpl` 建模板时遍历 EP 的那条路）—— 第三方提供者给的模板经 `sanitize` 清一遍，
+ * 与 localStorage 那份同一口径；没人给就用本仓存的那份。无插件时结果与接线前逐字一致。
+ */
 export function templateFor(templates: RunConfigTemplates, type: string): RunConfigTemplate | undefined {
+  const contributed = templateFromProviders(type)
+  if (contributed) return sanitize(contributed as RunConfigTemplate)
   return templates[type]
 }
 
@@ -117,6 +148,14 @@ export function applyTemplate(draft: RunConfig, template: RunConfigTemplate | un
     beforeLaunch: template?.beforeLaunch ? template.beforeLaunch.map(step => ({ ...step })) : [],
   }
   if (template?.allowRunningInParallel === true) next.allowRunningInParallel = true
+  // 模板那两个开关 → 新配置的两个字段（上游 `RunnerAndConfigurationSettingsImpl.kt:460-461` 的两行拷贝）。
+  // 走的是**同一个**解析入口：模板缺键 ⇒ 补上游默认（true / false，`:108-109`），
+  // 补出来的值正好是默认 ⇒ 下面不落键（默认值不进记录，与写档 `:317-321` 一致）。
+  const startup = resolveRunStartupFocusFlags(template)
+  if (startup.activateToolWindowBeforeRun !== ACTIVATE_TOOL_WINDOW_DEFAULT)
+    next.activateToolWindowBeforeRun = startup.activateToolWindowBeforeRun
+  if (startup.focusToolWindowBeforeRun !== FOCUS_TOOL_WINDOW_DEFAULT)
+    next.focusToolWindowBeforeRun = startup.focusToolWindowBeforeRun
   if (draft.folder) next.folder = draft.folder
   return next
 }

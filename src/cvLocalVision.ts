@@ -20,6 +20,15 @@
 //   2. 上游由 daemon 推结果；本仓没有推送，所以这一层是**旧值先用 + 后台补**（stale-while-revalidate）：
 //      `entries()` 立刻回上一拍的条目，同时按"这一拍还没问过"起一轮抓取，落地后叫宿主补刷一次。
 //
+// 每一跳之前都先查**按文件 × 按特性的表**（`src/lspPerFileCapabilities.ts`）：上游每条特性都有
+// 一个 `isSupportedForFile(file)` 闸（`platform/lsp-impl/src/impl/features/highlightingCommon/LspHighlightingCache.kt:58`，
+// 在 `:62-63` 于发请求之前问；references 那一族是
+// `platform/lsp-impl/src/impl/LspClientImpl.kt:471-473` 的 `supportsFindReferences(file)`，
+// 层次那一族是同文件 `:494-496` 的 `supportsTypeHierarchy(file)`）。本仓的宿主只在服务器
+// **显式声明** false/null 时才本地拒发（`native/lsp_capability_queries.cpp:95-106`），
+// 每问一次都要一次 JSON-RPC 往返 ⇒ 这张表把"已经问过并被拒"的那几族记住，
+// 一轮 Code Vision 不再按符号数量成倍地撞同一扇关着的门。
+//
 // 与 provider 那一层的分工：本文件只管**问与存**，一行文案都不拼（拼文案在
 // `codeVisionProviders.ts`，那里有每条文案的上游键名）。问不到的符号一律**不进计数表**，
 // provider 那侧就跳过这一档 —— 不是填 0（填 0 就是假数字）。
@@ -34,6 +43,7 @@ import {
   type VisionSymbol,
   type VisionSymbolCount,
 } from './codeVisionProviders.ts'
+import { lspFileFeatures } from './lspPerFileCapabilities.ts'
 
 /** 一条 `lsp.request`（宿主方法名固定，参数按 kind 变；见 `src/bridge.ts` 的 `Method` 与 `LspRequestKind`）。 */
 export type VisionRequest = <T>(method: 'lsp.request', params: Record<string, unknown>) => Promise<T>
@@ -211,15 +221,18 @@ export function createCodeVisionLocalChannel(deps: CodeVisionLocalChannelDeps): 
   /** 逐符号问用法数（串行：见文件头差异 1）。中途换文件/换拍就停。 */
   async function fetchUsages(path: string, symbols: readonly VisionSymbol[], mine: number): Promise<VisionSymbolCount[]> {
     const table: VisionSymbolCount[] = []
+    // 整族先问一次表（上游 `platform/lsp-impl/src/impl/LspClientImpl.kt:471-473` 的
+    // `supportsFindReferences(file)` 就是这个位置）：这一条被记成不支持就一个符号都不问，
+    // 而不是每个符号撞一次注定失败的往返。
+    if (!lspFileFeatures.plan('references', path).ask) return table
     for (const symbol of symbols) {
       if (mine !== generation) return table
-      let reply: LocationReply | null = null
-      try {
-        reply = await deps.request<LocationReply>('lsp.request', {
+      const attempt = await lspFileFeatures.ask<LocationReply>('references', path,
+        () => deps.request<LocationReply>('lsp.request', {
           kind: 'references', path, line: symbol.startLine, character: symbol.startChar ?? 0,
-        })
-      } catch { continue }                            // 这一条问不到就跳过，别把整轮带崩
-      const count = usageCountOf(reply, path, symbol)
+        }))
+      if (!attempt.asked || !attempt.ok) continue      // 被拦下或问不到都跳过，别把整轮带崩
+      const count = usageCountOf(attempt.value, path, symbol)
       if (count === null) continue
       table.push({ line: symbol.startLine, character: symbol.startChar ?? 0, count })
     }
@@ -229,22 +242,25 @@ export function createCodeVisionLocalChannel(deps: CodeVisionLocalChannelDeps): 
   /** 逐类问继承者数（两跳，同一份在飞/换拍守卫）。 */
   async function fetchInheritors(path: string, symbols: readonly VisionSymbol[], mine: number): Promise<VisionSymbolCount[]> {
     const table: VisionSymbolCount[] = []
+    // 两跳的第一跳被表拦下 ⇒ 整族不问（第二跳只有第一跳拿到 item 才有意义）。
+    if (!lspFileFeatures.plan('prepareTypeHierarchy', path).ask) return table
     for (const symbol of symbols) {
       if (mine !== generation) return table
       const line = symbol.startLine
       const character = symbol.startChar ?? 0
-      let prepared: HierarchyReply | null = null
-      try {
-        prepared = await deps.request<HierarchyReply>('lsp.request', { kind: 'prepareTypeHierarchy', path, line, character })
-      } catch { continue }
-      const item = prepared?.available === true && Array.isArray(prepared.items) ? prepared.items[0] : undefined
+      const preparedAttempt = await lspFileFeatures.ask<HierarchyReply>('prepareTypeHierarchy', path,
+        () => deps.request<HierarchyReply>('lsp.request', { kind: 'prepareTypeHierarchy', path, line, character }))
+      if (!preparedAttempt.asked || !preparedAttempt.ok) continue
+      const item = preparedAttempt.value?.available === true && Array.isArray(preparedAttempt.value.items)
+        ? preparedAttempt.value.items[0]
+        : undefined
       if (!item) continue                             // 服务端不认这个点：没有条目，不是 0 个
       if (mine !== generation) return table
-      let replied: HierarchyReply | null = null
-      try {
-        replied = await deps.request<HierarchyReply>('lsp.request', { kind: 'typeHierarchySubtypes', path, line, character, item })
-      } catch { continue }
-      const count = inheritorCountOf(replied)
+      if (!lspFileFeatures.plan('typeHierarchySubtypes', path).ask) return table
+      const repliedAttempt = await lspFileFeatures.ask<HierarchyReply>('typeHierarchySubtypes', path,
+        () => deps.request<HierarchyReply>('lsp.request', { kind: 'typeHierarchySubtypes', path, line, character, item }))
+      if (!repliedAttempt.asked || !repliedAttempt.ok) continue
+      const count = inheritorCountOf(repliedAttempt.value)
       if (count === null || count === 0) continue     // 0 个继承者上游本来就不画（`JavaInheritorsCodeVisionProvider.kt:37`）
       table.push({ line, character, count })
     }
@@ -256,20 +272,23 @@ export function createCodeVisionLocalChannel(deps: CodeVisionLocalChannelDeps): 
     const mineSignature = signature()
     const path = deps.path()
     attempted = mineSignature
-    try {
-      const replied = await deps.request<OutlineReply>('lsp.request', { kind: 'documentSymbol', path, line: 0, character: 0 })
-      if (mine !== generation) return build()
-      outline = replied?.available === true ? toVisionSymbols(replied.symbols) : []
+    // 第一跳之前先查表：被记成不支持的那一族，一次刷新都不该再撞（上游是
+    // `LspHighlightingCache.kt:62-63` 在 `getHighlightings` 第一行问 `isSupportedForFile`）。
+    const outlineAttempt = await lspFileFeatures.ask<OutlineReply>('documentSymbol', path,
+      () => deps.request<OutlineReply>('lsp.request', { kind: 'documentSymbol', path, line: 0, character: 0 }))
+    if (!outlineAttempt.asked) return build()
+    if (mine !== generation) return build()
+    if (outlineAttempt.ok) {
+      outline = outlineAttempt.value?.available === true ? toVisionSymbols(outlineAttempt.value.symbols) : []
       if (signature() === mineSignature) {
         usages = await fetchUsages(path, usageAnchorSymbols(outline, maxSymbols), mine)
         inheritors = mine === generation
           ? await fetchInheritors(path, inheritorAnchorSymbols(outline, maxInheritorSymbols), mine)
           : []
       }
-    } catch {
-      // 服务器没起来/这一 kind 不支持：保留上一拍的事实（上游 daemon 也是"旧的先用"），
-      // 但这一拍算已经问过了 —— 否则每次刷新都撞一次失败的请求。
     }
+    // 问失败那一支（`ok:false`）保留上一拍的事实（上游 daemon 也是"旧的先用"），
+    // 但这一拍算已经问过了 —— 而**确定的拒绝**已经进了表，下一次刷新连撞都不撞。
     if (mine !== generation || signature() !== mineSignature) return []
     const entries = build()
     rerender()

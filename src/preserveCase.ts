@@ -3,8 +3,13 @@
 // 替换时把**命中文本的大小写形态**套到替换文本上，而不是原样插入：
 //   `replaceWithCaseRespect(replacement, found)` 只看首字符与整段形态（`Report` + `display preferences` → `Report`）；
 //   `applyCase(found, replacement)` 先把命中按词切开，再逐词套形态（`Project_Lead_Id` → `Program_Lead_Id`）。
-// 上游默认走前者：注册表项 `ide.find.word.based.preserve.case` 默认**关**（`FindManagerBase.java:292-296`），
-// 本模块两个都移植，调用方选档；用过的用例逐条来自上游 `PreserveCaseUtilTest.java`（见 `tests/preserve-case.test.mjs`）。
+// 上游**默认走后者**：`FindManagerBase.getStringToReplace():292-295` 是
+// `Registry.is("ide.find.word.based.preserve.case") ? applyCase(found, replacement) : replaceWithCaseRespect(replacement, found)`，
+// 而该注册表项在 `platform/util/resources/misc/registry.properties:1414` 写的是 `=true`（描述 `:1415`
+// "New word-based preserve case implementation"）。⇒ 默认档 = 逐词 `applyCase`。
+// 本模块两个算法都留着（各自的用例逐条来自上游 `PreserveCaseUtilTest.java`，见 `tests/preserve-case.test.mjs`），
+// 选档走下面那个入口函数的参数，默认值取上游默认；本仓没有 registry，**不给它编 UI 开关**。
+// （订正留痕：这一段原先写的是「上游默认走前者…默认**关**」，与注册表里的实际值相反，2026-10-06 自己开树复核后改掉。）
 //
 // 与上游的字符判定逐条对应：`Character.isUpperCase` → `\p{Lu}`、`isLowerCase` → `\p{Ll}`、
 // `isLetter` → `\p{L}`、`isLetterOrDigit` → `[\p{L}\p{Nd}]}`（Java 的 digit 就是 Unicode Nd）。
@@ -142,4 +147,20 @@ export function applyCase(found: string, replacement: string): string {
   }
   if (start >= 0) result.push(buildWord(replacement.slice(start), analyze(words[index]!)))
   return result.join('')
+}
+
+/** 上游 `ide.find.word.based.preserve.case` 的值（`registry.properties:1414` = `true`）= 本仓的默认档。 */
+export const WORD_BASED_PRESERVE_CASE = true
+
+/**
+ * 替换文本的大小写形态那一刀（上游 `FindManagerBase.getStringToReplace():288-296`）。
+ *
+ * 顺序由调用方保证：正则档**先**按这一处的匹配器展开 `$1` / `${name}` / `\n`…，
+ * 这里拿到的是展开后的文本；反过来套会把 `$1` 也当成形态的一部分。
+ *
+ * 参数顺序照上游两支各自的写法（`applyCase(found, replacement)`、
+ * `replaceWithCaseRespect(replacement, found)` 是反的），别在同一处混着用。
+ */
+export function preserveCaseReplacement(found: string, replacement: string, wordBased: boolean = WORD_BASED_PRESERVE_CASE): string {
+  return wordBased ? applyCase(found, replacement) : replaceWithCaseRespect(replacement, found)
 }

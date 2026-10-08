@@ -8,14 +8,17 @@ import { readFileSync } from 'node:fs'
 import {
   TERMINAL_ACTIONS, createTerminalActions, terminalAction, terminalActionKeyFor, terminalActionTitle,
 } from '../src/terminalActions.ts'
+import {
+  terminalAlternateBuffer, terminalLineScrollKeyApplies, terminalScrollBy, terminalScrollingApplies, terminalViewportAtBottom,
+} from '../src/terminalScrolling.ts'
 
 /** @typedef {import('../src/terminalActions.ts').TerminalActionContext} TerminalActionContext */
 /** @type {(overrides?: Partial<TerminalActionContext>) => TerminalActionContext} */
 function ctx(overrides = {}) {
   return {
     hasTerminal: true, running: true, desktop: true, busy: false, groupSize: 1,
-    searchOpen: false, searchHasText: false, paneCount: 1, exited: false,
-    tabIndex: 0, tabCount: 1,
+    searchOpen: false, searchHasText: false, paneCount: 1, exited: false, alternateBuffer: false,
+    tabIndex: 0, tabCount: 1, moveFocusToEditorWithEscape: false, editorVisible: true,
     hasSelection: false, historyCount: 0, fontSize: 13, baseFontSize: 13, ...overrides,
   }
 }
@@ -141,7 +144,8 @@ test('面板用到的每个动作都在表里，且 id 不重复', () => {
   assert.equal(new Set(ids).size, ids.length, 'id 不重复')
   for (const id of ['terminal.new', 'terminal.split', 'terminal.split.down', 'terminal.unsplit',
     'terminal.pane.next', 'terminal.pane.previous', 'terminal.font.increase', 'terminal.font.decrease',
-    'terminal.font.reset', 'terminal.rename', 'terminal.search', 'terminal.reap', 'terminal.close', 'terminal.restart']) {
+    'terminal.font.reset', 'terminal.rename', 'terminal.search', 'terminal.reap', 'terminal.close', 'terminal.restart',
+    'terminal.page.up', 'terminal.page.down', 'terminal.line.up', 'terminal.line.down', 'terminal.focus.editor']) {
     assert.ok(ids.includes(id), `${id} 应当登记在册`)
     // 跳转与取消分屏在单格时本就不可用，这里只核「有分屏、没忙」那一档。
     const action = find(build({ groupSize: 2, fontSize: 18 }), id)
@@ -204,10 +208,231 @@ test('终端面板真按上游那两条键办事（Ctrl+F 开查找 / Ctrl+Shift
 
 test('接线：面板用这两条键与那条移动实现，不是只过了本表的死判定', () => {
   const panel = readFileSync(new URL('../src/components/TerminalPanel.vue', import.meta.url), 'utf8')
-  assert.match(panel, /terminalActionKeyFor\(event\)/, '面板的按键派发问这张表')
+  assert.match(panel, /terminalActionKeyFor\(event, \{ moveFocusToEditorWithEscape: moveFocusWithEscape\.value \}\)/,
+    '面板的按键派发问这张表（Esc 那一格要把设置传进去，默认关时这把键根本不进这张表）')
   assert.match(panel, /if \(event\.type === 'keydown'\) toggleSearch\(\)/, 'Ctrl+F 真的开查找条')
   assert.match(panel, /if \(event\.type === 'keydown'\) void spawn\(\)/, 'Ctrl+Shift+T 真的新建标签')
   assert.match(panel, /function moveTab\(pane: Pane, forward: boolean\)/, '移动标签的实现挂在面板上')
   assert.match(panel, /@click="selected && moveTab\(selected, false\)"/, '工具条左移按钮接 moveTab(false)')
   assert.match(panel, /@click="selected && moveTab\(selected, true\)"/, '工具条右移按钮接 moveTab(true)')
 })
+
+// 翻页滚动终端输出两条（termact 这一批新增的用户可见终端动作）。
+// 上游：`plugins/terminal/frontend/resources/intellij.terminal.frontend.xml:205-208`
+// （`Terminal.PageUp`，`$default` 键位 shift PAGE_UP）与 `:209-212`（`Terminal.PageDown` = shift PAGE_DOWN）；
+// 文案 `plugins/terminal/resources/messages/TerminalBundle.properties:83`（Page Up）与 `:85`（Page Down）；
+// 实现 `plugins/terminal/frontend/src/com/intellij/terminal/frontend/action/TerminalScrollingActions.kt:16/:18`（动作类）
+// 与同文件 `:37/:39`（`PageUpHandler` = `Unit.PAGE, -1`、`PageDownHandler` = `Unit.PAGE, +1`）
+// 与同文件 `:27-29`（启用门 isOutputModelEditor）；
+// 语义 `.../view/impl/TerminalOutputScrollingModel.kt:33-38`（一页 = 视口里整行的行数，负数向上）+
+// `TerminalOutputScrollingModelImpl.kt:143-172`（`coerceIn` 夹住两端）；
+// 菜单位置 `intellij.terminal.frontend.xml:266-268`（ClearBuffer → PageUp → PageDown）。
+
+const pageKeyUp = { type: 'keydown', code: 'PageUp', key: 'PageUp', ctrlKey: false, shiftKey: true, altKey: false, metaKey: false }
+
+test('翻页两条登记在册，键位与上游一致（frontend.xml:205-212）', () => {
+  const registry = build()
+  const up = find(registry, 'terminal.page.up')
+  const down = find(registry, 'terminal.page.down')
+  assert.ok(up && down, '两条都在这张表里')
+  assert.deepEqual(up.keyStrokes, ['Shift+PageUp'])
+  assert.deepEqual(down.keyStrokes, ['Shift+PageDown'])
+  assert.equal(up.name, '向上翻页')
+  assert.equal(down.name, '向下翻页')
+  assert.equal(up.scope, 'context', '上游这两条只在有终端输出时可用')
+  assert.equal(terminalActionKeyFor(pageKeyUp), 'pageUp')
+  assert.equal(terminalActionKeyFor({ ...pageKeyUp, code: 'PageDown', key: 'PageDown' }), 'pageDown')
+  // 不带 Shift 的 PageUp / PageDown 绝不能被面板吃掉 —— 那是 less / man 的翻页键。
+  assert.equal(terminalActionKeyFor({ ...pageKeyUp, shiftKey: false }), null)
+  assert.equal(terminalActionKeyFor({ ...pageKeyUp, ctrlKey: true }), null)
+  assert.equal(terminalActionKeyFor({ ...pageKeyUp, altKey: true }), null)
+  assert.equal(terminalActionKeyFor({ ...pageKeyUp, metaKey: true }), null)
+  // keyup 再触发一次会多滚一页。
+  assert.equal(terminalActionKeyFor({ ...pageKeyUp, type: 'keyup' }), null)
+})
+
+test('备用屏里翻页两条不启用（TerminalScrollingActions.kt:27-29 的 isOutputModelEditor）', () => {
+  assert.equal(find(build(), 'terminal.page.up').enabled, true)
+  assert.equal(find(build(), 'terminal.page.down').enabled, true)
+  const alternate = build({ alternateBuffer: true })
+  for (const id of ['terminal.page.up', 'terminal.page.down']) {
+    assert.equal(find(alternate, id).enabled, false, `${id} 在备用屏里应当不可用`)
+    assert.match(find(alternate, id).reason, /备用屏/)
+    // 上游那道门 disable 而不 hide（`isEnabled`，不是 `isEnabledAndVisible`）⇒ 条目还在，只是灰的。
+    assert.equal(find(alternate, id).visible, true)
+  }
+  // 没有终端时两条整条不出现（TerminalBaseContextAction.java:20 的 setEnabledAndVisible(terminal != null)）。
+  const none = build({ hasTerminal: false })
+  assert.equal(find(none, 'terminal.page.up').visible, false)
+  assert.equal(find(none, 'terminal.page.down').visible, false)
+  // 键盘那一路与菜单那一路问的是同一个真源（这一条门现在是滚动四条共用的，故改名 terminalScrollingApplies）。
+  assert.equal(terminalScrollingApplies(false), true)
+  assert.equal(terminalScrollingApplies(true), false)
+})
+
+test('两条的 title 带上键位，或者把「为什么点不动」说清楚', () => {
+  assert.equal(terminalActionTitle(find(build(), 'terminal.page.up'), 'x'), '向上翻页（Shift+PageUp）')
+  assert.equal(terminalActionTitle(find(build(), 'terminal.page.down'), 'x'), '向下翻页（Shift+PageDown）')
+  assert.equal(terminalActionTitle(find(build({ alternateBuffer: true }), 'terminal.page.up'), 'x'),
+    '向上翻页：这个终端在全屏程序里（备用屏），翻页交回该程序。')
+})
+
+test('接线：面板真的按这两条滚整页，备用屏把键交回程序，菜单两条紧跟清空缓冲区', () => {
+  const panel = readFileSync(new URL('../src/components/TerminalPanel.vue', import.meta.url), 'utf8')
+  const scrolling = readFileSync(new URL('../src/terminalScrolling.ts', import.meta.url), 'utf8')
+  assert.match(panel, /if \(!terminalScrollingApplies\(isAlternateScreen\(pane\)\)\) return true/, '备用屏里不拦键，交回全屏程序')
+  assert.match(panel, /terminalScrollBy\(pane\.instance, 'page', actionKey === 'pageUp' \? -1 : 1\)/, '键盘那一路滚一整页')
+  assert.match(panel, /terminalScrollBy\(pane\.instance, unit, direction\)/, '菜单那一路按档位滚（page/line 都走这一条）')
+  assert.match(scrolling, /target\.scrollPages\(direction\)/, 'page 那一档落到 xterm 的 scrollPages')
+  assert.match(scrolling, /target\.scrollLines\(direction\)/, 'line 那一档落到 xterm 的 scrollLines')
+  assert.match(panel, /alternateBuffer: isAlternateScreen\(current\)/, '上下文那一格真按备用屏算，不是写死 false')
+  assert.match(panel, /terminalAlternateBuffer\(pane\?\.instance\.buffer\.active\)/, '备用屏的读数来自 xterm 的 buffer.active')
+  assert.match(scrolling, /buffer\?\.type === 'alternate'/, '备用屏判定读的是 buffer.type')
+  const clearAt = panel.indexOf('@click="clearBuffer"')
+  const upAt = panel.indexOf('@click="scrollPage(-1)"')
+  const downAt = panel.indexOf('@click="scrollPage(1)"')
+  assert.ok(clearAt > 0 && upAt > clearAt && downAt > upAt, '菜单顺序 = ClearBuffer → PageUp → PageDown（frontend.xml:266-268）')
+})
+
+// 逐行滚动两条 + 把焦点切回编辑器一条（teampage 这一批 = termact 报告 §1 里「本批未做、可做」那两条）。
+// 上游坐标（本轮逐行 sed 打开过，不沿用任何别人写过的行号）：
+//   · `plugins/terminal/frontend/resources/intellij.terminal.frontend.xml:197-200` = `Terminal.LineUp`
+//     （`:199` 的 `$default` 键位 **control UP**）；`:201-204` = `Terminal.LineDown`（`:203` **control DOWN**）；
+//     文案 `plugins/terminal/resources/messages/TerminalBundle.properties:79`（Line Up）/ `:81`（Line Down）；
+//     实现 `plugins/terminal/frontend/src/com/intellij/terminal/frontend/action/TerminalScrollingActions.kt:12`/`:14`
+//     （两个类）+ `:41`/`:43`（`Unit.LINE, ∓1`）+ `:48-49`（`Unit.LINE -> scrollByLines(direction)`）
+//     + 门在同文件 `:27-29`（与翻页两条**同一句**）；菜单位置同 xml `:269-271`（:269 是 `<separator/>`）。
+//   · `plugins/terminal/resources/META-INF/plugin.xml:127` = `Terminal.SwitchFocusToEditor`（**没有** `<keyboard-shortcut>`），
+//     类 `plugins/terminal/src/org/jetbrains/plugins/terminal/action/TerminalMoveFocusToEditorAction.kt:15-26`
+//     （`:18` = `activateEditorComponent()`；`:21-25` = `isEnabledAndVisible` 那三格门，用的是 isReworkedTerminalEditor）；
+//     文案 `TerminalBundle.properties:6`；键来自设置那一格
+//     `plugins/terminal/frontend/src/com/intellij/terminal/frontend/settings/TerminalOptionsConfigurable.kt:401-405`
+//     （预设 Escape = 同文件 `:869-872`；勾选框初值 = 同文件 `:786` 的 `curShortcuts.isNotEmpty()` ⇒ 默认不勾）；
+//     Esc 归谁另看 `platform/execution-impl/src/com/intellij/terminal/TerminalEscapeKeyListener.java:49-60`
+//     （终端工具窗里「只有匹配上那条 shortcut 才交回编辑器」= `:51-53`）。
+//   · 本批新增模块 `src/terminalScrolling.ts`：门、档位、备用屏读数，以及 Ctrl+↑/↓ 归谁的那条代理规则。
+
+const lineUpKey = { type: 'keydown', code: 'ArrowUp', key: 'ArrowUp', ctrlKey: true, shiftKey: false, altKey: false, metaKey: false }
+const escapeKey = { type: 'keydown', code: 'Escape', key: 'Escape', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false }
+
+test('逐行两条登记在册，键位是 control UP/DOWN 而不是翻页那两把（frontend.xml:197-204）', () => {
+  const registry = build()
+  const up = find(registry, 'terminal.line.up')
+  const down = find(registry, 'terminal.line.down')
+  assert.ok(up && down, '两条都在这张表里')
+  assert.deepEqual(up.keyStrokes, ['Ctrl+↑'])
+  assert.deepEqual(down.keyStrokes, ['Ctrl+↓'])
+  assert.equal(up.name, '向上滚动一行')
+  assert.equal(down.name, '向下滚动一行')
+  assert.equal(up.scope, 'context')
+  assert.equal(down.hidden, false, '上游这两条在右键菜单里（frontend.xml:270-271）⇒ 不是隐藏动作')
+  assert.equal(terminalActionKeyFor(lineUpKey), 'lineUp')
+  assert.equal(terminalActionKeyFor({ ...lineUpKey, code: 'ArrowDown', key: 'ArrowDown' }), 'lineDown')
+  // 裸 ↑/↓ 是 shell 的命令历史，绝不能被吃掉（上游把它给 `Terminal.SelectBlockBelow`，plugin.xml:167-169）。
+  assert.equal(terminalActionKeyFor({ ...lineUpKey, ctrlKey: false }), null)
+  // 加了 Shift 就不是这一条：上游 `control UP` 与 `shift PAGE_UP` 是两档键，不许混。
+  assert.equal(terminalActionKeyFor({ ...lineUpKey, shiftKey: true }), null)
+  assert.equal(terminalActionKeyFor({ ...lineUpKey, altKey: true }), null)
+  assert.equal(terminalActionKeyFor({ ...lineUpKey, metaKey: true }), null)
+  assert.equal(terminalActionKeyFor({ ...lineUpKey, type: 'keyup' }), null)
+  // 翻页那两把仍然只认带 Shift 的 PageUp/Down，两套互不错认。
+  assert.equal(terminalActionKeyFor(pageKeyUp), 'pageUp')
+})
+
+test('逐行两条与翻页两条共用上游那一道门（备用屏里四条全不启用，只灰不藏）', () => {
+  const alternate = build({ alternateBuffer: true })
+  for (const id of ['terminal.page.up', 'terminal.page.down', 'terminal.line.up', 'terminal.line.down']) {
+    assert.equal(find(alternate, id).enabled, false, `${id} 在备用屏里应当不可用`)
+    assert.match(find(alternate, id).reason, /备用屏/)
+    assert.equal(find(alternate, id).visible, true, '上游是 isEnabled，不是 isEnabledAndVisible ⇒ 条目还在')
+  }
+  const none = build({ hasTerminal: false })
+  for (const id of ['terminal.line.up', 'terminal.line.down']) {
+    assert.equal(find(none, id).visible, false, '没有终端时整条不出现（TerminalBaseContextAction.java:20）')
+  }
+  assert.equal(terminalActionTitle(find(build(), 'terminal.line.up'), 'x'), '向上滚动一行（Ctrl+↑）')
+  assert.equal(terminalActionTitle(find(alternate, 'terminal.line.down'), 'x'),
+    '向下滚动一行：这个终端在全屏程序里（备用屏），逐行滚动交回该程序。')
+})
+
+test('Ctrl+↑/↓ 归谁：贴底（正在敲命令）交回 shell，滚离底部才接管；备用屏一律不抢', () => {
+  // 本仓分不出上游那个「焦点在提示符还是在输出」的区（OSC 133 无产生者），用的代理是视口位置。
+  assert.equal(terminalLineScrollKeyApplies(false, true), false, '贴底 = 键归 shell（PSReadLine 的历史检索要留着）')
+  assert.equal(terminalLineScrollKeyApplies(false, false), true, '已滚离底部 = 在读输出，键归这两条动作')
+  assert.equal(terminalLineScrollKeyApplies(true, false), false, '备用屏里连动作都不启用，更不抢键')
+  assert.equal(terminalLineScrollKeyApplies(true, true), false)
+  // 两条读数也真是从 buffer 那三格算的，不是恒真/恒假。
+  assert.equal(terminalViewportAtBottom({ type: 'normal', viewportY: 0, baseY: 0 }), true)
+  assert.equal(terminalViewportAtBottom({ type: 'normal', viewportY: 3, baseY: 40 }), false)
+  assert.equal(terminalViewportAtBottom(undefined), true, '没有窗格时按贴底答 = 不抢键')
+  assert.equal(terminalAlternateBuffer({ type: 'alternate', viewportY: 0, baseY: 0 }), true)
+  assert.equal(terminalAlternateBuffer({ type: 'normal', viewportY: 0, baseY: 0 }), false)
+  assert.equal(terminalAlternateBuffer(null), false)
+})
+
+test('档位分派照上游那个 when 分支：page 走 scrollPages、line 走 scrollLines，方向原样传', () => {
+  const calls = []
+  const target = { scrollLines: n => calls.push(['lines', n]), scrollPages: n => calls.push(['pages', n]) }
+  terminalScrollBy(target, 'page', -1)
+  terminalScrollBy(target, 'page', 1)
+  terminalScrollBy(target, 'line', -1)
+  terminalScrollBy(target, 'line', 1)
+  assert.deepEqual(calls, [['pages', -1], ['pages', 1], ['lines', -1], ['lines', 1]],
+    '档位或方向传错就是「向上翻页变成向下」这种用户一眼看得见的错')
+})
+
+test('把焦点切回编辑器：默认（上游那格没勾）不启用，并把「为什么」说清楚', () => {
+  const focus = find(build(), 'terminal.focus.editor')
+  assert.ok(focus, '这条登记在册')
+  assert.equal(focus.hidden, true, '上游这条**没有菜单条目**（frontend.xml:256-274 里没有它）⇒ 隐藏动作')
+  assert.deepEqual(focus.keyStrokes, ['Escape'], 'Esc 是上游那条设置给的唯一预设（TerminalOptionsConfigurable.kt:869-872）')
+  assert.equal(focus.enabled, false, '上游默认无键 ⇒ 本仓默认也不可用')
+  assert.match(focus.reason, /默认没有键/)
+  assert.equal(terminalActionTitle(focus, 'x'),
+    '把焦点切回编辑器：上游这条默认没有键：要在设置里勾「Move focus to the Editor with: Escape」才交得出焦点。')
+  // 隐藏 + 无键位会被登记规则直接丢掉（TerminalActionUtil.java:36-40）⇒ 反向证明这条能存在靠的就是那把 Esc。
+  const stripped = build({}, [{ ...TERMINAL_ACTIONS.find(a => a.id === 'terminal.focus.editor'), keyStrokes: [] }])
+  assert.equal(terminalAction(stripped, 'terminal.focus.editor'), undefined)
+})
+
+test('把焦点切回编辑器：设置开了且有可见编辑器才可用；没有可交接的编辑器照样不可用', () => {
+  assert.equal(find(build({ moveFocusToEditorWithEscape: true }), 'terminal.focus.editor').enabled, true)
+  const noEditor = build({ moveFocusToEditorWithEscape: true, editorVisible: false })
+  assert.equal(find(noEditor, 'terminal.focus.editor').enabled, false)
+  assert.match(find(noEditor, 'terminal.focus.editor').reason, /没有可见的编辑器/)
+  // 上游的启用门是 isReworkedTerminalEditor（输出区 || 备用屏，比滚动那四条宽一档）⇒ 备用屏里这条照样启用。
+  assert.equal(find(build({ moveFocusToEditorWithEscape: true, alternateBuffer: true }), 'terminal.focus.editor').enabled, true)
+  // 没有终端时整条不出现（scope = context 对应上游 update() 的 isEnabledAndVisible）。
+  assert.equal(find(build({ hasTerminal: false, moveFocusToEditorWithEscape: true }), 'terminal.focus.editor').visible, false)
+})
+
+test('Esc 这把键当下归谁：设置没开就不进这张表，带任何修饰的 Escape 也不算', () => {
+  assert.equal(terminalActionKeyFor(escapeKey), null, '缺省（没传 options）= 上游默认无键 ⇒ 交回 shell')
+  assert.equal(terminalActionKeyFor(escapeKey, { moveFocusToEditorWithEscape: false }), null)
+  assert.equal(terminalActionKeyFor(escapeKey, { moveFocusToEditorWithEscape: true }), 'focusEditor')
+  assert.equal(terminalActionKeyFor({ ...escapeKey, ctrlKey: true }, { moveFocusToEditorWithEscape: true }), null)
+  assert.equal(terminalActionKeyFor({ ...escapeKey, shiftKey: true }, { moveFocusToEditorWithEscape: true }), null)
+  assert.equal(terminalActionKeyFor({ ...escapeKey, type: 'keyup' }, { moveFocusToEditorWithEscape: true }), null)
+})
+
+test('接线：面板真按这两条逐行滚、真把焦点交出去，而且**没有**给 SwitchFocusToEditor 摆菜单条目', () => {
+  const panel = readFileSync(new URL('../src/components/TerminalPanel.vue', import.meta.url), 'utf8')
+  assert.match(panel, /if \(actionKey === 'lineUp' \|\| actionKey === 'lineDown'\)/, '面板有逐行那一路')
+  assert.match(panel, /if \(!terminalLineScrollKeyApplies\(isAlternateScreen\(pane\), !terminalViewportAtBottom\(pane\.instance\.buffer\.active\)\)\) return true/,
+    '贴底/备用屏时 return true 把键交回 shell')
+  assert.match(panel, /terminalScrollBy\(pane\.instance, 'line', actionKey === 'lineUp' \? -1 : 1\)/, '键盘那一路滚一行')
+  assert.match(panel, /if \(actionKey === 'focusEditor'\) return focusActiveEditor\(\) \? false : true/,
+    'Esc 那一路：真的把焦点交出去了才吃键，否则原样给 shell')
+  assert.match(panel, /moveFocusToEditorWithEscape: moveFocusWithEscape\.value/, '上下文那一格真按设置算，不是写死')
+  assert.match(panel, /settings\?\.moveFocusToEditorWithEscape \?\? false/, '缺省 false = 上游默认无键那一档')
+  assert.match(panel, /editorVisible: hasVisibleEditor\(\)/, '「有没有可见编辑器」是真读数')
+  assert.match(panel, /pickEditorToFocus\(editorFocusCandidates\(\)\)\?\.offsetParent/, '用的就是 src/editorFocus.ts 那组选择器')
+  const pageDownAt = panel.indexOf('@click="scrollPage(1)"')
+  const lineUpAt = panel.indexOf('@click="scrollLine(-1)"')
+  const lineDownAt = panel.indexOf('@click="scrollLine(1)"')
+  assert.ok(pageDownAt > 0 && lineUpAt > pageDownAt && lineDownAt > lineUpAt,
+    '菜单顺序 = PageDown →（上游的分隔符）→ LineUp → LineDown（frontend.xml:268-271）')
+  assert.equal(panel.indexOf('terminal.focus.editor'), -1,
+    '上游这条没有菜单条目 ⇒ 本仓也不摆（菜单里不该出现「把焦点切回编辑器」这种假控件）')
+})
+

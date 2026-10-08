@@ -33,8 +33,8 @@
 //   · 注册 `plugins/gradle/plugin-resources/intellij.gradle.xml:177-179`：
 //       `<projectConfigurable groupId="build.tools" groupWeight="110" id="reference.settingsdialog.project.gradle">`
 //
-// 本模块是**纯逻辑**（零 import ⇒ `node --test` 可直接 import）：检测规则、同步命令、输出解析。
-// 真正的状态与命令投递在 src/gradleHost.ts。
+// 本模块是**纯逻辑**（唯一的 import 是同样零依赖的 `src/gradleJvmDiagnostics.ts` ⇒ `node --test` 可直接 import）：
+// 检测规则、同步命令、输出解析、链接目标归一。真正的状态与命令投递在 src/gradleHost.ts。
 
 /** `ProjectSystemId("GRADLE")`。 */
 export const GRADLE_SYSTEM_ID = 'GRADLE'
@@ -164,26 +164,15 @@ export function detectGradle(files: readonly string[], wrapperProperties: string
  */
 export type GradleRunSettings = BuildToolsGradleSettings
 
-/**
- * 「Gradle JVM」的默认值 —— `ExternalSystemJdkUtil.USE_PROJECT_JDK`（`ExternalSystemJdkUtil.java:52`），
- * 也就是 `GradleProjectSettings.java:60` 构造时赋的那个值：**用项目的 JDK**。
- * IDEA 打开 Gradle 项目时 Gradle JVM 就已经是这个值，不是空 —— 这就是「打开默认就有」的一项。
- */
-export const GRADLE_USE_PROJECT_JDK = '#USE_PROJECT_JDK'
-
-/**
- * 「Gradle JVM」的第二档 —— `ExternalSystemJdkUtil.USE_JAVA_HOME`（`ExternalSystemJdkUtil.java:53`）：
- * **用环境变量 `JAVA_HOME`**（上游 `matchJdkName` 的第二分支，没设就抛 `UndefinedJavaHomeException`）。
- *
- * 本仓的等价物不需要额外通道：宿主起子进程时**先继承父进程整个环境块**再盖上覆盖项
- * （`native/runner.cpp:28-69` 的 `environment_block`），所以「不覆盖 `JAVA_HOME`」就是
- * 「用环境变量 `JAVA_HOME`」—— 覆盖表里没有这一项，子进程就沿用宿主自己的那个值。
- * 上游那条 `UndefinedJavaHomeException`（宿主没设 `JAVA_HOME` 时报错）本仓**无法核实**：
- * 宿主没有读环境变量的通道（`native/main.cpp` 的 Method 清单里只有 `app.jdks`，没有 env 读取），
- * 所以这里只能让 Gradle 自己按继承来的环境变量走，报不报由 Gradle 决定，不在这里编一个判断。
- */
-export const GRADLE_USE_JAVA_HOME = '#JAVA_HOME'
-
+// 「Gradle JVM」的哨兵值、解析与环境变量折叠，以及「JAVA_HOME 用不了」的诊断文案，都在
+// `src/gradleJvmDiagnostics.ts`（坐标与「本仓判不了哪一半」写在那份文件头）。这里既 import 进来自用
+// （`GRADLE_RUN_DEFAULTS` 用哨兵值、`gradleFailure` 用那两行分类），又按原路径再导出，免得公共面分两处：
+// `GRADLE_USE_PROJECT_JDK` 的既有消费方是 `src/components/GradleSettingsPage.vue`，
+// `gradleEnvironment` 的是 `src/gradleHost.ts`。
+import { GRADLE_USE_JAVA_HOME, GRADLE_USE_PROJECT_JDK, gradleJavaHomeIssue, gradleJvmIssueText } from './gradleJvmDiagnostics.ts'
+export { GRADLE_USE_PROJECT_JDK, GRADLE_USE_JAVA_HOME, gradleJvmResolutionOf, gradleEnvironment, gradleJavaHomeIssue,
+         gradleJvmIssueText, GRADLE_JVM_OPEN_SETTINGS_ACTION,
+         type GradleJvmState, type GradleJvmResolution, type GradleJavaHomeIssue } from './gradleJvmDiagnostics.ts'
 
 /**
  * 「构建并运行使用」的默认档 —— `GradleProjectSettings.java:40` `DEFAULT_DELEGATE = true`
@@ -217,17 +206,34 @@ export const GRADLE_RUN_DEFAULTS: GradleRunSettings = {
   linkedProjects: [],
 }
 
+// ---------------------------------------------------------------------------
+// Gradle JVM：解析、环境变量折叠与「JAVA_HOME 用不了」的诊断文案都搬到 `src/gradleJvmDiagnostics.ts`
+// （上面按原路径再导出）。下面这一段是「链接 Gradle 项目」的目标归一。
+// ---------------------------------------------------------------------------
+
 /**
- * 「Gradle JVM」→ 环境变量（`Runner::Spec.environment`，`native/gradle.cpp` 会转给子进程）。
+ * 「链接 Gradle 项目」的目标归一 —— 上游 `ImportProjectFromScriptAction.kt:34-36` 的 `getDefaultPath`：
+ * **给的是文件就取它的父目录，给的是目录就照它**；`.kt:28` 那句
+ * `linkAndSyncGradleProject(project, getDefaultPath(virtualFile))` 传出去的永远是**目录**。
  *
- * IDEA 把 `GradleProjectSettings.getGradleJvm()` 折成启动 Gradle 时用的 JVM；
- * CLI 版的等价物就是 `JAVA_HOME`（Gradle 用 `JAVA_HOME` 找跑构建的那个 JVM）。
- * 选「项目 JDK」时取项目的 `jdkHome`；项目也没配就什么都不设（Gradle 用自己的默认）。
+ * 本仓的 `unlinkedProjects` 登记表（`src/gradleHost.ts` 按 `ExternalSystemUnlinkedProjectAware.kt` 建的那条）
+ * 回调进来的就是目录（`linkAndLoadProject(externalProjectPath)`），所以链接入口必须收目录。
  */
-export function gradleEnvironment(settings: GradleRunSettings, projectJdkHome: string): string[] {
-  const chosen = (settings.gradleJvm ?? '').trim()
-  const home = chosen === GRADLE_USE_PROJECT_JDK || !chosen ? (projectJdkHome ?? '').trim() : chosen
-  return home ? [`JAVA_HOME=${home}`] : []
+export function gradleLinkDirectory(path: string): string {
+  const clean = (path ?? '').trim().replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/+$/, '')
+  if (!clean) return ''
+  const name = clean.slice(clean.lastIndexOf('/') + 1)
+  return GRADLE_KNOWN_FILES.includes(name) ? gradleProjectDirectory(clean) : clean
+}
+
+/**
+ * 这条**目录**能不能链接（祖先规则之外只判「同一条链接没链过」，与 `canLinkGradleProject` 的
+ * 文件可见性判据是两件事：上游 `isVisible` 看文件名，`actionPerformed` 传目录）。
+ */
+export function canLinkGradleDirectory(directory: string, linkedDirs: readonly string[]): boolean {
+  const target = (directory ?? '').trim().replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/+$/, '')
+  if (target && (target.startsWith('/') || target.split('/').some(segment => segment === '..' || segment === '.'))) return false
+  return !linkedDirs.includes(target)
 }
 
 /**
@@ -363,6 +369,11 @@ function whatWentWrongLines(output: string): string[] {
  * 因为留给用户的只有一句没信息量的话。这里给"表面原因 — 根因"（因果链的最里层）。
  */
 export function gradleFailure(output: string): string {
+  // 包装器在 Gradle 起步之前就死了（JAVA_HOME 指向无效目录 / 根本没有 java）：这种输出里
+  // 既没有 `FAILURE:` 也没有 `* What went wrong:` 段，原来只剩「Gradle 退出码 N」一句没信息量的话
+  // —— 这就是「SDK/jdkHome 解析失败没有用户可见诊断」的本体。诊断文案的坐标见本节文件头。
+  const jvm = gradleJavaHomeIssue(output)
+  if (jvm) return gradleJvmIssueText(jvm)
   const body = whatWentWrongLines(output)
   if (body.length) {
     const headline = body.find(line => !line.startsWith('>')) ?? ''

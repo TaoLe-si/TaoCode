@@ -41,6 +41,9 @@
 //      （`editor/actions/` 下搜不到）。所以本模块只提供命令与菜单项，**不挂键位** ——
 //      按仓里「无上游依据不编键位」的规矩（见 CodeEditor.vue keymap 里折叠那一族的同款注释）。
 import type { CommentStyle } from './commentToggle.ts'
+// 词选择过滤（`com.intellij.basicWordSelectionFilter`）：第三方按 id 挂的 `Condition` 在这里
+// 被真实问到（上游 `WordSelectioner.canSelect`，见 `wordSelectionAllowed` 的注释）。
+import { canSelectWord } from './editorActionExtraExtensionPoints.ts'
 
 export interface ExtendRange {
   from: number
@@ -55,9 +58,54 @@ export interface ExtendSelectionInput {
   current: ExtendRange
   /** 这门语言的注释词法（上游 `Commenter` 的两个 getter）。认不出的语言传 null。 */
   style: CommentStyle | null
+  /** EP 上下文（路径/语言）：宿主能给出时给，给不出按未知档（见 `acceptsLanguage`）。 */
+  context?: { path?: string; language?: string }
 }
 
 // ── 层级：按上游扩展点顺序，由内到外 ──────────────────────────────────────────
+
+/**
+ * 光标处的词法种类（上游是 `PsiElement` 的类型，本仓没有语法树 ⇒ 按注释词法近似：
+ * 落在块注释或行注释里给 `comment`，其余给 `word`）。与 `src/editorEnterBlockComment.ts`
+ * 的扫描同一口径：不做字符串内外的额外区分（本仓一贯的取舍，见模块头第 1 条如实差异）。
+ */
+function lexicalKindAt(text: string, head: number, style: CommentStyle | null): string {
+  const block = style?.block
+  if (block) {
+    const open = text.lastIndexOf(block[0], Math.max(0, head - 1))
+    if (open >= 0) {
+      const close = text.indexOf(block[1], open + block[0].length)
+      if (close < 0 || close + block[1].length > head) return 'comment'
+    }
+  }
+  const line = style?.line
+  if (line) {
+    const lineStart = text.lastIndexOf('\n', Math.max(0, head - 1)) + 1
+    if (text.slice(lineStart, head).includes(line)) return 'comment'
+  }
+  return 'word'
+}
+
+/**
+ * 这个位置的词/词素区间能不能给出去 —— `com.intellij.basicWordSelectionFilter` 的消费点。
+ * 上游 `WordSelectioner.canSelect(PsiElement)`（`WordSelectioner.java:19-29`）：
+ * 注释元素直接 false，然后**每一个**注册的 `Condition<PsiElement>` 都 `value` 为真才放行。
+ * 本仓把 `PsiElement` 收成「词在文本里的区间 + 词本身 + 词法种类」（见
+ * `src/editorActionExtraExtensionPoints.ts` 的 `WordSelectionInput`）；
+ * 没有贡献时 `canSelectWord` 恒真 ⇒ 这一档与既有实现逐字相同。
+ */
+function wordSelectionAllowed(input: ExtendSelectionInput): boolean {
+  const word = wordRange(input.text, input.head)
+  if (!word) return true
+  const lineStart = input.text.lastIndexOf('\n', word.from - 1) + 1
+  const line = input.text.slice(0, word.from).split('\n').length - 1
+  return canSelectWord({
+    path: input.context?.path ?? '', language: input.context?.language ?? '',
+    text: input.text, line, character: word.from - lineStart,
+    from: word.from, to: word.to, word: input.text.slice(word.from, word.to),
+    lexicalKind: lexicalKindAt(input.text, input.head, input.style),
+  })
+}
 
 /**
  * 光标处能扩展到的所有层级，**由内到外**排好（同长度的按起点排）。
@@ -72,8 +120,13 @@ export function extendLevels(input: ExtendSelectionInput): ExtendRange[] {
     out.push(range)
   }
   // ① 词 → ② 词素（驼峰）。`AbstractWordSelectioner.java:31` 两者都在基类里。
-  push(lexemeRange(input.text, input.head))
-  push(wordRange(input.text, input.head))
+  // 这一档现在是 `com.intellij.basicWordSelectionFilter` 的真实消费点（上游
+  // `WordSelectioner.canSelect`，`WordSelectioner.java:19-29`）：**每一个**注册的
+  // `Condition` 都放行才给词/词素区间；没有贡献时恒放行 ⇒ 既有行为不变。
+  if (wordSelectionAllowed(input)) {
+    push(lexemeRange(input.text, input.head))
+    push(wordRange(input.text, input.head))
+  }
   // ② 行注释链（`LineCommentSelectioner.java:57-58`）—— 只在**行注释**这一带才成立。
   push(lineCommentRunRange(input.text, input.head, input.style?.line))
   // ③ 块注释内容（`BlockCommentSelectioner.java:35-36`）—— 注册顺序在行注释之后。

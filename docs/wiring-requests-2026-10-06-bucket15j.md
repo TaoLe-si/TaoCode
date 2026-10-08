@@ -59,3 +59,11 @@ export interface ArchiveListingResult {
 - `native/zipstore.cpp:42` 有原生 zip 读法（`read_archive`，只支持 store 条目）。将来要脱离 bsdtar
   就在它上面补 inflate；现在这条路依赖系统 `System32\tar.exe`（Win10 1803 起自带），
   拿不到时 `file_queries.cpp:160` 那条会答 `available:false` 并说清原因。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **1 已接线**：`src/bridge.ts:109` 的 `Method` 联合已含 `'file.archiveEntries'`（`src/jarEntriesSource.ts:37` 也记明「2026-10-06 主代理接线」）。
+- **2 不做** —— 请求原文自己判定「不桩」（预览里编造 jar 清单 = 假数据）。维持。
+- **3 后续（档案内条目跳编辑器）** —— 目标含 `src/App.vue`，但依赖「读任意档案内条目」的通道（`file.librarySource` 只吃全限定名）。无通道前接上就是假跳转。维持不做。
+
+结论：零待接，未改任何文件。

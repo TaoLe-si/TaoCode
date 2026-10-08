@@ -184,3 +184,16 @@ native 也只会按整份暂存区提交。**当前源码**（`native/main.cpp:1
 > 本表点名的四份文档与 `docs/batch-2026-10-06-projecttree.md`、`…status2.md`、`…status2defect.md`、
 > 以及本文件里那条 `EditorSettingsExternalizable` 的假路径，都已由 citefix 一轮按真源码订正并复跑双门，
 > 逐条「原文 → 新文 → 打开过的那一行」见 `docs/batch-2026-10-06-citefix.md`。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1（`git.commit` `paths`）已接线**：`native/main.cpp:1169-1175` 已透传。
+- **W1b（「提交文件…」入口）** —— 需新组件 `src/components/CommitFilesDialog.vue`（本 lane 可建）+ App.vue 挂载。复核该组件**不存在**。因 `commitPaths` 的 ctx 链末端在 `SourceControl.vue`（VCS lane 独占），本 lane 未单方面建组件（建了无挂载链 = 零消费）。登记为「需 VCS lane 与 App.vue 同批」。
+- **W2（`editorEpoch`）** —— 已被 `src/documentRevisions.ts` 的按篇号取代（见 commit2 C3）。
+
+结论：W1 已接线；W1b 转 VCS lane，W2 由更优形状闭环。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W1 已接线；W1b 转 VCS lane，W2 由更优形状闭环。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

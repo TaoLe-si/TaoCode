@@ -104,3 +104,16 @@ new（挂起器优先、队列级兜底；`current` 就是 `queueRow` 那个 com
 `tests/status-bar-widget-instances.test.mjs` —— 本仓状态栏组件是 `src/App.vue` 模板里直接渲染的，
 没有实例宿主 ⇒ "只过自己测试"那一档。它不在本批可改面（statusbar/status2 名下实现），
 要么给它一个 App.vue 侧宿主，要么按"死面直接删"处理；**别新写第三个只给自己测试的入口**。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1** —— 判词（`scripts/verdict_table.py`），非本 lane。
+- **W2（挂起原因显示源）** —— 目标 `src/components/EventLogPanel.vue` / 进度面板（本 lane 可改面），登记。
+- **W3（`src/progressSuspender.ts` 三条零消费方法）** —— 本 lane 可改面，登记。
+
+结论：零接线（W2/W3 登记，W1 非本 lane）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（W2/W3 登记，W1 非本 lane）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

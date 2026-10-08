@@ -98,3 +98,13 @@
   （唯一的调用点是 `App.vue:1451` 那条 `pickDirectory`，单目录）。
   在没有消费方之前把行做成可多选，就是 playbook §3 说的假控件。
   等第一个多选调用点（例如「附加目录」「安装多个插件包」）落地时，这条与它一起做。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **1 已接线**：`src/App.vue:1521` 宿主 `recent: () => filenameRecentRows.value.map(row => row.path)`，`:2470` `<FileChooserDialog … :recent="chooser.recent()" :favorites="chooser.favorites()" …>`。
+- **2 已接线（形状升级）**：URL 出口收成唯一一条 `src/externalLinkLauncher.ts` 的 `openExternalUrl`（内部走 `browseWithTrustCheck` = `externalLinkPrompt`/`externalLinkOutcome` 的门禁）。消费点 `src/App.vue:1070/:1511`、`src/quickDocHost.ts:257`、`src/components/TerminalPanel.vue:429`、`src/components/RunConsole.vue:254` 全部改走它；门禁装配在 `src/workspaceLifecycle.ts:214` 的 `installExternalLinkGate`。比逐处调 `externalLinkPrompt` 更严（收成一条出口）。
+- **3 已接线**：`src/components/TrustedProjectDialog.vue:46` 的 `resolve` 已是三参 `(choice, remember, trustAll)`、`:107-108` 的勾选框按 `trustAllAvailable` 条件渲染；宿主 `src/App.vue:2667` 传 `:can-trust-all="trustCanTrustAll"`、`:2668` `@resolve="resolveTrustPrompt"`；落库在 `src/workspaceLifecycle.ts:166` 的三参 `resolveTrustPrompt` → `trustResolver`；会话级信任 `sessionTrustEntries()` 已被 `TrustedLocationsSettingsPage.vue:19/:27` 读并集。
+- **4（指定浏览器通道）跳过** —— 目标 `native/main.cpp`（禁改）+ `native/browser_launch.cpp` + `CMakeLists.txt` + `src/bridge.ts`（前端接线 lane 独占）。需 native/bridge owner 处理。
+- **5（FileChooserDialog 多选）不做** —— 请求原文自己判定「没有消费方之前做 = 假控件」。维持。
+
+结论：零待接（1/2/3 早已接线），未改任何文件。

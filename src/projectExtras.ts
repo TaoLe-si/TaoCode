@@ -2,10 +2,11 @@
 //
 // 判据：这四块**各自持有自己的状态**（open/busy/数据 ref），彼此不依赖，也不被 App 的其它逻辑读
 // （只有模板渲染 + 菜单动作调用）。外部依赖实测只有 2 个（`notify` 与 `workspace`），所以 ctx 很小。
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { request, type GitFileHistory, type GitShowCommit, type GitSubmodule, type GitSubmodules,
          type GitWorktree, type GitWorktrees, type PluginInfo, type PluginList, type Workspace } from './bridge.ts'
 import { errorMessage } from './errors.ts'
+import { applyPluginFileTypes } from './fileTypePluginBeans.ts'
 import { chooseWithDescriptor, singleDirDescriptor, singleFileDescriptor, withExtensionFilter, withTitle,
          type FileChooserHost } from './fileChooserDescriptor.ts'
 
@@ -21,6 +22,18 @@ export function createProjectExtras(deps: ProjectExtrasDeps) {
   const pluginOpen = ref(false)
   const pluginBusy = ref(false)
   const pluginList = ref<PluginInfo[]>([])
+  // 插件贡献的**文件类型**跟着「插件集合」走，不跟着「插件页开着没开」走。上游就是这条口径：
+  // `platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeManagerImpl.java:130` 让注册表
+  // 自己实现 `ExtensionPointListener<FileTypeBean>` —— `:280-291` 的 `extensionAdded` 在 EP 被加进来时当场
+  // 建匹配器并发 `fireFileTypesChanged`，`:294-300` 的 `extensionRemoved` 在插件不再加载时把它收回，
+  // 两头都不经过设置页（`EP_NAME` 是 `:132` 的 `com.intellij.fileType`）。
+  // 本仓原先只有 `src/components/PluginDialog.vue` 在它自己的 `watch` 里灌这张表，于是「重启后还没打开过
+  // 插件页」的那段时间里，插件声明的扩展名 / 文件名 / shebang 一律认不出来 —— 而
+  // `src/workspaceLifecycle.ts` 的 bootstrap 明明已经把列表读进同一个 ref 了。现在列表**任何一次**变化都重算：
+  // 启动那一次、以及启用 / 停用 / 安装 / 卸载 / 刷新。
+  // `applyPluginFileTypes` 自己幂等（同一份清单连调两次不重复认领，判据 `tests/ext-plugin-file-types.test.mjs`
+  // 的「幂等」那条），所以插件页那一份 `watch` 照旧留着 —— 它要的是那份**报告**（被拒的声明要说人话）。
+  watch(pluginList, plugins => { applyPluginFileTypes(plugins) }, { immediate: true, flush: 'sync' })
   // 文件/目录选择走描述件（`src/fileChooserDescriptor.ts`，上游 `FileChooserDescriptor` 的宿主侧子集）：
   // 描述件决定宿主方法与过滤串，选完再复核扩展名，避免用户在「所有文件」里手选一个非插件包。
   const chooserHost: FileChooserHost = {
@@ -32,6 +45,14 @@ export function createProjectExtras(deps: ProjectExtrasDeps) {
   // 正在安装的条目（安装源的名字）。解压完才解析出 plugin.json，所以这期间只有名字；
   // 对话框把它们渲染在"正在安装"组里（对照 IDEA 的 `MyPluginModel.installingPlugins`）。
   const installingPlugins = ref<string[]>([])
+  // 「打开插件页并定位到这个插件」（上游 `PluginManagerConfigurableService.java:14-15` 的
+  // `showPluginConfigurableAndEnable` 在本仓的等价入口；接收侧的定位动作在
+  // `src/components/PluginDialog.vue` 的 `focusPlugin` prop 上，这里只负责把 id 递进去）。
+  const pluginFocusId = ref('')
+  async function openPluginsAndSelect(id: string) {
+    pluginFocusId.value = id
+    await openPlugins()
+  }
   async function openPlugins() {
     if (!isDesktop) { deps.notify('浏览器预览不能读取本机插件目录，请在桌面端使用。', true); return }
     pluginBusy.value = true
@@ -50,7 +71,7 @@ export function createProjectExtras(deps: ProjectExtrasDeps) {
     installingPlugins.value = [label]
     try {
       pluginList.value = (await request<PluginList>('plugin.install', { source })).plugins
-      deps.notify('插件已安装。启用后它贡献的命令与模板会立即生效。')
+      deps.notify('插件已安装。启用后它贡献的命令、模板与文件类型会立即生效。')
       pluginOpen.value = true
     } finally { installingPlugins.value = []; pluginBusy.value = false }
   }
@@ -183,7 +204,8 @@ export function createProjectExtras(deps: ProjectExtrasDeps) {
   }
 
   return {
-    pluginOpen, pluginBusy, pluginList, installingPlugins, openPlugins, togglePluginById, installPlugin, installPluginDirectory,
+    pluginOpen, pluginBusy, pluginList, installingPlugins, pluginFocusId, openPlugins, openPluginsAndSelect,
+    togglePluginById, installPlugin, installPluginDirectory,
     setPluginsEnabled, uninstallPlugin, refreshPlugins, togglePlugin,
     worktreeOpen, worktreeBusy, worktrees, worktreePath, worktreeBranch, worktreeNewBranch, openWorktrees, addWorktree, removeWorktree,
     submoduleOpen, submoduleBusy, submodules, openSubmodules, updateSubmodules,

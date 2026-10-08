@@ -22,6 +22,7 @@ import {
   markDoNotAsk, scheduleRemindLater, type DoNotAskInfo,
 } from '../notificationDoNotAsk'
 import { groupPlaysSound, groupSoundToggleLabel, setGroupPlaysSound } from '../notificationBeeper'
+import { groupLogToggleLabel, groupShouldLog, setGroupShouldLog } from '../notificationLogSetting'
 import { noticeGroupId } from '../notificationGroups'
 import { noticeProgressLabel } from '../notices'
 import { iconSize } from '../uiIcons'
@@ -81,10 +82,11 @@ function menuItems(entry: EventLogEntry): EventLogMenuItem[] {
     },
   })
   const sound = groupSoundItem(entry)
+  const log = groupLogItem(entry)
   // 上游 `NotificationsPanel.kt:1110` 把「设置…」放在**第一个**、提醒/不再显示之前
-  // （中间那条分隔线在 `:1115`）。本仓没有通知设置页，于是把那个对话框里与声音有关的
-  // 唯一一项提上来做成一个真开关；没有注册组的行不画它（`:1109` 的 isRegistered）。
-  return sound ? [sound, ...rest] : rest
+  // （中间那条分隔线在 `:1115`）。本仓没有通知设置页，于是把那个对话框里与这一组有关的
+  // 两项提上来做成真开关（声音 / 写入通知中心）；没有注册组的行不画它们（`:1109` 的 isRegistered）。
+  return [...(sound ? [sound] : []), ...(log ? [log] : []), ...rest]
 }
 
 /**
@@ -94,9 +96,10 @@ function menuItems(entry: EventLogEntry): EventLogMenuItem[] {
  * label 要随点击后的状态变，所以用版本号让这一格重算。
  */
 const soundVersion = ref(0)
-function hasGroupSound(entry: EventLogEntry): boolean {
+/** 前几项是「设置组」的项（声音 / 写入通知中心），分隔线画在它们之后（上游 `NotificationsPanel.kt:1115`）。 */
+function groupSettingCount(entry: EventLogEntry): number {
   void soundVersion.value
-  return groupSoundToggleLabel(entry) !== undefined
+  return (groupSoundToggleLabel(entry) !== undefined ? 1 : 0) + (groupLogToggleLabel(noticeGroupId(entry)) !== undefined ? 1 : 0)
 }
 function groupSoundItem(entry: EventLogEntry): EventLogMenuItem | undefined {
   void soundVersion.value
@@ -109,6 +112,27 @@ function groupSoundItem(entry: EventLogEntry): EventLogMenuItem | undefined {
       const groupId = noticeGroupId(entry)
       if (!groupId) return
       setGroupPlaysSound(groupId, !groupPlaysSound(groupId))
+      soundVersion.value += 1
+    },
+  }
+}
+
+/**
+ * 「写入通知中心」这一项（`NotificationSettings.kt:26` 的 `isShouldLog`；上游编辑面在
+ * `NotificationSettingsUi.kt` 的 Log 一列）。开关是**按组**的、默认取注册项的 `isLogByDefault`
+ * （`src/notificationGroups.ts:28`），点完立刻落存储 —— 下一条同组通知就不进通知中心。
+ * 与声音那一项共用同一个版本号触发重算。
+ */
+function groupLogItem(entry: EventLogEntry): EventLogMenuItem | undefined {
+  void soundVersion.value
+  const groupId = noticeGroupId(entry)
+  const label = groupLogToggleLabel(groupId)
+  if (!label || !groupId) return undefined
+  return {
+    id: 'groupLog',
+    label,
+    run: () => {
+      setGroupShouldLog(groupId, !groupShouldLog(groupId))
       soundVersion.value += 1
     },
   }
@@ -167,7 +191,7 @@ function markSuppressed(id: string | undefined, message: string, forProject: boo
         <button class="icon-button eventlog-suppressed-toggle" :aria-expanded="suppressedOpen"
                 :title="DO_NOT_ASK_LIST_TITLE" :aria-label="`${DO_NOT_ASK_LIST_ACCESSIBLE_NAME}（${suppressed.length}）`"
                 @click.stop="suppressedOpen = !suppressedOpen">
-          <BellOff :size="iconSize.menu" /><span>{{ suppressed.length }}</span>
+          <BellOff aria-hidden="true" :size="iconSize.menu" /><span>{{ suppressed.length }}</span>
         </button>
       </div>
     </div>
@@ -216,7 +240,7 @@ function markSuppressed(id: string | undefined, message: string, forProject: boo
             <div v-if="openMenu === entry.id" class="dropdown eventlog-menu" role="menu" @click.stop>
               <template v-for="(item, index) in menuItems(entry)" :key="item.id">
                 <!-- `NotificationsPanel.kt:1115` 的 `group.addSeparator()`：设置项与提醒项之间那条。 -->
-                <div v-if="index === 1 && hasGroupSound(entry)" class="eventlog-menu-sep" role="separator" />
+                <div v-if="index === groupSettingCount(entry) && groupSettingCount(entry) > 0" class="eventlog-menu-sep" role="separator" />
                 <button class="menu-item" role="menuitem" @click="run(item)">
                   <span class="menu-item-title">{{ item.label }}</span>
                 </button>
@@ -237,7 +261,7 @@ function markSuppressed(id: string | undefined, message: string, forProject: boo
 
 <style scoped>
 .event-log { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
-.eventlog-search { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); height: 22px; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); }
+.eventlog-search { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); height: var(--ctrl-height-sm); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); }
 /* 零命中那一句"你搜的东西不在这里"用底色说清楚（上游把 textEditor 的底色换成红，`NotificationsPanel.kt:461`）。 */
 .eventlog-search.no-match { background: var(--error-bg); border-color: var(--error); }
 .eventlog-search > svg { flex-shrink: 0; }
@@ -259,7 +283,7 @@ function markSuppressed(id: string | undefined, message: string, forProject: boo
 .eventlog-track { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--radius-pill); background: var(--accent-soft); }
 .eventlog-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .eventlog-more-anchor { display: inline-flex; align-self: center; }
-.eventlog-more { width: 22px; height: 22px; }
+.eventlog-more { width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); }
 .eventlog-menu { min-width: 180px; }
 .eventlog-menu-sep { height: 1px; margin: var(--space-1) 0; background: var(--line-strong); }
 .eventlog-empty { padding: var(--space-4) var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; }

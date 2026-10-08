@@ -110,7 +110,7 @@ test('接线：编辑器把装订线的右键转成事件、外壳渲染菜单',
 
 // 顺带钉一条刚拆出来的纯规则：粘性行（`editor.stickyLines`）—— 粘性行的三条设置项就在
 // 装订线菜单的「外观 ▸」里，拆到 src/stickyLines.ts 之后规则本身也要有判据。
-test('粘性行：取包含光标行的最内层 N 条，开关/上限都能关掉它', async () => {
+test('粘性行：取包含光标行的最外 N 条，开关/上限都能关掉它', async () => {
   const { createStickyLines } = await import('../src/stickyLines.ts')
   const outline = ref([
     { name: 'Class', kind: 5, startLine: 0, endLine: 40, startChar: 0, endChar: 0 },
@@ -119,7 +119,11 @@ test('粘性行：取包含光标行的最内层 N 条，开关/上限都能关�
   ])
   const settings = ref({ showStickyLines: true, stickyLinesLimit: 2 })
   const lines = createStickyLines({ editorSettings: settings, outline, currentLine: () => 22 }).stickyLines
-  assert.deepEqual(lines.value.map(line => line.name), ['outer()', 'inner()'], '外层在上、最内层在下，超过上限只留最内层')
+  // 裁的是**最内**那一条，留最外 N 条：上游 `StickyLinesModelImpl.java:200-202` 的
+  // `processRangeHighlightersOverlappingWith` 按 range 起点升序发（外层在前），
+  // `VisualStickyLines.kt:145` 攒够 `lineLimit` 就 `break` ⇒ 尾部（最内层）被丢。
+  // （这一条原本是 `slice(-N)` 的方向，`stickyprio` 按源码翻了实现与它自己那两份测试，漏了这一份 —— 已核对上游后同向更新。）
+  assert.deepEqual(lines.value.map(line => line.name), ['Class', 'outer()'], '外层在上、内层在下，超过上限只留最外层')
   settings.value = { showStickyLines: false, stickyLinesLimit: 2 }
   assert.deepEqual(lines.value, [], '开关关掉就没有粘性行')
   settings.value = { showStickyLines: true, stickyLinesLimit: 0 }

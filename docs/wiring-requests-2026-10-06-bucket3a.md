@@ -188,3 +188,15 @@ import { docHoverPolicyFromSettings } from './docHoverPolicy.ts'
   建议在 `native/lsp_fake_server_requests.cpp:119-120`（fake server 的 `textDocument/hover` 分支）
   顺手回一个 `range`，这样 `lsp_host_test.cpp`/`lsp_coding_test.cpp` 那条 hover 往返能顺带把新字段钉住
   （**我没有改任何 native 文件**，包括 fake server）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1 未接** —— 目标 `src/components/CodeEditor.vue`（禁改清单）。复核 `:510-521` 仍是「自己发 `lsp.request` hover 原样贴」，未换 `sharedDocHover`。需 **CodeEditor owner**。
+- **R2 部分** —— `@policy-change` 已接（`src/App.vue:2478` 的 `@policy-change="(patch) => void saveSettingsPatch(patch)"`）；`:can-toggle-hover="true"` **未加**（R1 未落地前按请求原文「先别接」，否则那颗按钮无生效点 = 假控件）。等 R1。
+- **R3 已接线（形状迁移）**：`docHoverPolicyFromSettings` 现由 `src/workspaceLifecycle.ts:15/:247` 调用（不再是 settingsPersistence.ts 的 `:86`），设置读回后灌运行时单例。
+- **R4 已接线**：`src/settingsModel.ts:504/:506` 两字段 + `:265` 默认值（都 true）。
+- **R5 已接线**：`native/lsp_session.cpp:171` 已透传 `range`（`:163-165` 注释记明）。
+- **3a2 W1 已接线**：`src/style.css:1361` `.quickdoc-content .quickdoc-link`、`:1371` `.quickdoc-section-body p` 等规则已在。
+- **3a2 W2 未接** —— 同 R1，`CodeEditor.vue` 的 hover 渲染仍另走一套（禁改清单）。需 CodeEditor owner。
+
+结论：R3/R4/R5/W1 已接线；R1/R2 的 can-toggle-hover/R2 与 3a2 W2 转给 CodeEditor owner。

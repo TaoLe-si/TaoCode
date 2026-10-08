@@ -19,6 +19,30 @@
 //
 // 纯数据层：不 import `vue`/`bridge`，结构类型入参，便于单测。
 
+import { APPLICATION_SCOPE, EXTENSIONS } from './extensionPoints.ts'
+
+/**
+ * `CodeVisionProvider` 的扩展点 id（逐字取自上游
+ * `platform/lang-impl/resources/intellij.platform.lang.impl.xml:282-283`
+ * 的 `qualifiedName="com.intellij.codeInsight.codeVisionProvider"`，
+ * 接口 `com.intellij.codeInsight.codeVision.CodeVisionProvider`，`dynamic="true"`）。
+ * 本仓此前是私有注册表（`table.set`，第三方挂不进来）；本版把它接进
+ * `src/extensionPoints.ts` 的 EP 宿主 —— 三个内置提供者按 bundled 贡献登记，
+ * 注册表的 `register` 同步进 EP，`createCodeVisionRegistry()` 缺省从 EP 取初始集合。
+ */
+export const CODE_VISION_PROVIDER_EP = 'com.intellij.codeInsight.codeVisionProvider'
+
+/** 声明 EP（幂等）。 */
+export function declareCodeVisionExtensionPoints(): void {
+  EXTENSIONS.declareExtensionPoint({ id: CODE_VISION_PROVIDER_EP, name: 'Code Vision 提供者', scope: APPLICATION_SCOPE, dynamic: true })
+}
+
+/** 某作用域下的全部提供者（已按 `LoadingOrder` 排序）—— 与上游 `CodeVisionProvider.EP_NAME` 同口径。 */
+export function codeVisionProvidersFromExtensions(scope: string = APPLICATION_SCOPE): CodeVisionProvider[] {
+  return EXTENSIONS.extensionsOf<CodeVisionProvider>(CODE_VISION_PROVIDER_EP, scope)
+}
+
+
 /** 一条 Code Vision 条目：挂在哪一行 + 显示什么 + 点击发什么命令。 */
 export interface CodeVisionEntry {
   /** 锚点行（0 基）。 */
@@ -209,7 +233,13 @@ export function inheritorsHintText(count: number, containerKind: number): string
   return containerKind === 11 ? `${count} 个实现` : `${count} 个继承者`
 }
 
-/** usages 的锚点符号集：上游 `PsiMember`（类/方法/字段/属性），**排除类型参数**（`JavaReferencesCodeVisionProvider.kt:21`）。 */
+/**
+ * usages 的锚点符号集：上游 `PsiMember`（类/方法/字段/属性），**排除类型参数** ——
+ * `java/java-impl/src/com/intellij/codeInsight/daemon/impl/JavaReferencesCodeVisionProvider.kt:22`
+ * 的 `acceptsElement(element: PsiElement): Boolean = element is PsiMember && element !is PsiTypeParameter`。
+ * 订正留痕（2026-10-06 hlcache300）：原写 `:21`，实开那一行是**空行**（`:20` 是 `acceptsFile`），
+ * 这条判据在 `:22`。
+ */
 const USAGE_ANCHOR_KINDS: ReadonlySet<number> = new Set([...ANCHOR_KINDS, 7, 8, 14])
 /** inheritors 的锚点符号集：`PsiClass && !PsiTypeParameter || PsiMethod`（`JavaInheritorsCodeVisionProvider.kt:31`）。 */
 const INHERITOR_ANCHOR_KINDS: ReadonlySet<number> = new Set([5, 6, 10, 11, 12, 23])
@@ -233,9 +263,12 @@ function countByPosition(counts: readonly VisionSymbolCount[] | undefined): Map<
  * 组 id `references` = `PlatformCodeVisionIds.kt:5` 的 `USAGES`）。
  * 锚点 = 符号声明行；条目 = 「N 个用法」，**0 也显示**（出厂阈值
  * `code.vision.java.minimal.usages` 缺省 0，`java/java-backend/resources/META-INF/JavaPlugin.xml:227`）。
- * 入口点不显示（`JavaReferencesCodeVisionProvider.kt:25` 的 `isEntryPoint` 直接 return null）
+ * 入口点不显示（`java/java-impl/src/com/intellij/codeInsight/daemon/impl/JavaReferencesCodeVisionProvider.kt:26`
+ * 的 `if (inspection.isEntryPoint(element)) return null`）
  * —— 本仓从 LSP 符号表判得到的入口点只有 `main`；测试方法、带框架注解的入口要靠 PSI 与注解，
  * 判不到就不装判（已登记进报告的「做不到」）。
+ * 订正留痕（2026-10-06 hlcache300）：原写 `:25`，实开那一行取的是 `findUnusedDeclarationInspection(element)`
+ * （赋值语句），`return null` 那条判据在 `:26`。
  */
 export function usagesVisionProvider(): CodeVisionProvider {
   return {
@@ -301,13 +334,20 @@ export function candidateProviders(providers: readonly CodeVisionProvider[], con
   })
 }
 
-export function createCodeVisionRegistry(initial: readonly CodeVisionProvider[] = [
-  problemsVisionProvider(), usagesVisionProvider(), inheritorsVisionProvider(),
-]): CodeVisionRegistry {
+export function createCodeVisionRegistry(initial?: readonly CodeVisionProvider[]): CodeVisionRegistry {
   const table = new Map<string, CodeVisionProvider>()
-  for (const provider of initial) table.set(provider.id, provider)
+  // 缺省初始集合从 EP 取（与 `src/inlayProviderRegistry.ts` 同一条纪律）：三个内置提供者
+  // 作为 bundled 贡献登记进 `com.intellij.codeInsight.codeVisionProvider`，第三方也能按同一个
+  // id 挂进来。显式传 `initial` 的调用方（测试/定制宿主）仍以它为准。
+  for (const provider of initial ?? codeVisionProvidersFromExtensions()) table.set(provider.id, provider)
   return {
-    register: provider => { table.set(provider.id, provider) },
+    register: provider => {
+      // 只进本注册表（与上游 `CodeVisionProvider.EP_NAME` 的静态贡献面区分开）：要挂进 EP 让
+      // 别的消费方看见，走 `src/extensionPoints.ts` 的 `EXTENSIONS.registerExtension(CODE_VISION_PROVIDER_EP, …)`
+      // —— 这里不镜像，是因为 `register` 常被用来「顶掉内置那一条做定制」，镜像会污染全局 EP
+      //（同一个进程里后续 `createCodeVisionRegistry()` 会拿到定制版，判据会假绿）。
+      table.set(provider.id, provider)
+    },
     providers: () => [...table.values()],
     compute: context => {
       const entries: CodeVisionEntry[] = []
@@ -321,6 +361,11 @@ export function createCodeVisionRegistry(initial: readonly CodeVisionProvider[] 
     },
   }
 }
+
+// 三个内置提供者作为 bundled 贡献挂进 EP（幂等：模块加载时一次）。
+declareCodeVisionExtensionPoints()
+for (const provider of [problemsVisionProvider(), usagesVisionProvider(), inheritorsVisionProvider()])
+  EXTENSIONS.registerExtension(CODE_VISION_PROVIDER_EP, provider.id, provider, { source: 'bundled' })
 
 /** 与服务端 lens 合流：**同一行同标题去重**（本地优先），再按行升序、同行保持本地在前。 */
 export function mergeCodeVisionEntries(local: readonly CodeVisionEntry[], server: readonly CodeVisionEntry[]): CodeVisionEntry[] {

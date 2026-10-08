@@ -7,7 +7,7 @@
 // `plugin.install`（工作区根拼绝对路径）；**远程仓库**没有通道（CSP `connect-src 'self'` +
 // 宿主 Method 清单无网络），所以这里没有"在线搜索"这种点不动的假入口。
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { Download, Loader2, PackageSearch, RefreshCw, Search, Star, X } from 'lucide-vue-next'
+import { Blocks, Download, Loader2, PackageSearch, RefreshCw, Search, Star, X } from 'lucide-vue-next'
 import { isDesktop, request, type PluginList } from '../bridge'
 import type { AppState } from '../settingsModel'
 import type { PluginInfo } from '../pluginGroups'
@@ -50,6 +50,17 @@ import {
   wrapAttributeValue,
 } from '../pluginSearchSuggest'
 import { iconSize } from '../uiIcons'
+// 更新检查的**策略层**（`StandalonePluginUpdateChecker.kt` 的可移植一半）：门控（开关 + 一天缓存）、
+// 指数退避、三态结果与文案在 `src/pluginUpdateCheck.ts`（纯函数 + 单测）。这里的取数器就是
+// 本地仓库清单那一份 —— 有更新时把一条**通知**递到宿主（`emit('updateAvailable')`）。
+import {
+  pluginUpdateMessage,
+  runPluginUpdateCheck,
+  type PluginUpdateStatus,
+} from '../pluginUpdateCheck'
+// 签名判定与 bundled 登记（`PluginSignatureVerifier.kt` / `PluginUiModel.isBundled` 的可移植一半）：
+// 本仓没有验签通道 ⇒ 判定如实返回「未校验」，界面照实显示而不是画一个点不动的按钮。
+import { EMPTY_BUNDLED_REGISTRY, SIGNATURE_RESULT_LABELS, declaredSignatureOf, isBundledPlugin, verifyPluginSignature } from '../pluginSignature'
 
 const props = defineProps<{
   /** 已安装插件（父组件持有；安装/更新后由父组件刷新）。 */
@@ -75,6 +86,11 @@ const emit = defineEmits<{
    * 已安装页并把该插件设为选中项；入口是 `PluginManagerConfigurable.kt:397-401`。
    */
   (event: 'focusPlugin', id: string): void
+  /**
+   * 有可用更新（`StandalonePluginUpdateChecker.notifyPluginUpdateAvailable:174-196`）：
+   * 策略层算出来的那一条通知递给宿主，由宿主决定挂到通知中心。`latest` / 失败不发。
+   */
+  (event: 'updateAvailable', notice: { message: string; actionLabel: string; pluginId: string }): void
 }>()
 
 const root = ref(DEFAULT_REPOSITORY_ROOT)
@@ -215,22 +231,55 @@ function canInstall(entry: MarketplacePlugin): boolean {
     && statusOf(entry).state !== 'incompatible' && statusOf(entry).state !== 'installed'
 }
 
-function initial(entry: MarketplacePlugin) {
-  return (entry.name || entry.id).trim().slice(0, 1).toUpperCase() || '?'
-}
-
-function tone(entry: MarketplacePlugin) {
-  const source = entry.id || entry.name || '?'
-  let hash = 0
-  for (const ch of source) hash = (hash * 31 + ch.charCodeAt(0)) % 360
-  return hash
-}
-
 function formatDate(value: number | undefined): string {
   if (!value) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+/** 条目的签名档（`PluginSignatureVerifier.verifyIfRequired` 的判定结果；本仓无验签通道 ⇒ 未校验）。 */
+function signatureLabel(entry: MarketplacePlugin): string {
+  const verdict = verifyPluginSignature({ isMarketplace: true, declaredSignature: declaredSignatureOf(entry) })
+  return SIGNATURE_RESULT_LABELS[verdict.result]
+}
+/** 内置插件那一层（本仓恒空集 ⇒ 不渲染标记，见 `src/pluginSignature.ts` 的说明）。 */
+function bundledLabel(entry: MarketplacePlugin): string {
+  return isBundledPlugin(entry.id, EMPTY_BUNDLED_REGISTRY) ? '内置' : ''
+}
+
+/**
+ * 更新检查的宿主侧接线（`StandalonePluginUpdateChecker.pluginUsed()` + `updateCheck()`）。
+ * 门控（开关 + 一天缓存）与退避策略全在 `src/pluginUpdateCheck.ts`，这里只做三件事：
+ *   ① 刷新成功后跑一轮检查（取数器 = 本地仓库清单里该插件的版本）；
+ *   ② 有更新的条目发一条通知（`emit('updateAvailable')`）；
+ *   ③ 失败的那几条记进 `failure`（上游 `:78-81` 记日志，本仓面板上如实说一句）。
+ * 时间戳存 localStorage（`PropertiesComponent` 的等价物，键与已安装页的存储同前缀）。
+ */
+const UPDATE_CHECK_KEY = 'taocode.pluginUpdateCheck'
+function lastCheckMs(): number {
+  const raw = Number(localStorage.getItem(UPDATE_CHECK_KEY) ?? '0')
+  return Number.isFinite(raw) && raw > 0 ? raw : 0
+}
+async function runUpdateCheck() {
+  const statuses: PluginUpdateStatus[] = []
+  const result = await runPluginUpdateCheck(props.plugins, {
+    available: async id => catalog.value.find(entry => entry.id === id)?.version,
+    lastCheckMs: lastCheckMs(),
+    nowMs: Date.now(),
+    // 上游 `UpdateSettings.isPluginsCheckNeeded` 在本仓没有独立开关；本地仓库读取不花网络，
+    // 所以门控只由「一天缓存」那一档决定（`shouldCheckForUpdates` 的第三参保持默认 true）。
+    failMessage: plugin => plugin.name || plugin.id,
+  })
+  if (!result.ran) return
+  if (result.lastCheckMs) localStorage.setItem(UPDATE_CHECK_KEY, String(result.lastCheckMs))
+  for (const status of result.statuses) {
+    statuses.push(status)
+    if (status.kind === 'update')
+      emit('updateAvailable', { message: pluginUpdateMessage(status), actionLabel: '更新', pluginId: status.pluginId })
+    else if (status.kind === 'failed')
+      failure.value = `${pluginUpdateMessage(status)}${status.detail ? `（${status.detail}）` : ''}`
+  }
 }
 
 async function refresh() {
@@ -248,6 +297,8 @@ async function refresh() {
     emit('catalog', loadResult.value.entries)
     if (!workspaceRoot.value) failure.value = '市场清单来自工作区里的仓库目录：先打开一个包含该目录的工作区。'
     else if (loadResult.value.source === 'none') failure.value = `在 ${root.value} 下没有找到 ${MARKETPLACE_MANIFEST} 或插件包。`
+    // 仓库读出来了才跑更新检查（上游 `pluginUsed()` 是插件页被使用时触发；取数器就是这份清单）。
+    else await runUpdateCheck()
   } catch (error) {
     failure.value = error instanceof Error ? error.message : String(error)
     loadResult.value = null
@@ -268,7 +319,7 @@ async function install(entry: MarketplacePlugin) {
     }, entry, workspaceRoot.value, props.plugins)
     note.value = outcome === 'updated'
       ? `已更新「${entry.name}」到 v${entry.version}。`
-      : `已安装「${entry.name}」。启用后它贡献的命令与模板会立即生效。`
+      : `已安装「${entry.name}」。启用后它贡献的命令、模板与文件类型会立即生效。`
     emit('changed')
   } catch (error) {
     failure.value = error instanceof Error ? error.message : String(error)
@@ -359,7 +410,7 @@ onMounted(() => { void refresh() })
     <ul v-if="visible.length" class="market-list" role="listbox" aria-label="市场插件">
       <li v-for="entry in visible" :key="entry.id">
         <article class="market-row" :class="{ 'is-installed': statusOf(entry).state === 'installed' }">
-          <span class="market-avatar" :style="{ background: `linear-gradient(135deg, hsl(${tone(entry)} 62% 52%), hsl(${(tone(entry) + 40) % 360} 62% 44%))` }" aria-hidden="true">{{ initial(entry) }}</span>
+          <span class="market-avatar" aria-hidden="true"><Blocks :size="iconSize.control" /></span>
           <div class="market-main">
             <p class="market-name">{{ entry.name }}<span class="market-version">v{{ entry.version || '未知' }}</span>
               <!-- 已安装/无效 的状态徽章可点：到已安装页选中它（`selectAndEnable`，
@@ -384,6 +435,10 @@ onMounted(() => { void refresh() })
                    `SearchQueryParser.getTagQuery`，`:254-257`）。 -->
               <button v-for="tag in entry.tags" :key="tag" type="button" class="market-tag"
                       :title="`只看带标签 ${tag} 的插件`" @click="applyQueryWord(tagQueryWord(tag))">· {{ tag }}</button>
+              <!-- 签名档（`PluginSignatureVerifier.verifyIfRequired`）：本仓没有验签通道，
+                   如实显示「未校验」，不画一个点不动的「验证签名」按钮。 -->
+              <span class="market-signature" :title="`签名校验：${signatureLabel(entry)}（本仓没有 marketplace-zip-signer 通道）`">· 签名 {{ signatureLabel(entry) }}</span>
+              <span v-if="bundledLabel(entry)" class="market-badge">{{ bundledLabel(entry) }}</span>
             </p>
           </div>
           <button type="button" class="subtle-button market-install" :disabled="!canInstall(entry)"
@@ -415,20 +470,20 @@ onMounted(() => { void refresh() })
 .market-suggest-item { width: 100%; padding: 3px var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 11px; text-align: left; }
 .market-suggest-item.on, .market-suggest-item:hover { background: var(--hover); color: var(--bright); }
 .market-scopes { display: flex; align-items: center; gap: 2px; }
-.market-scope { display: inline-flex; align-items: center; gap: 4px; padding: 3px var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 11px; }
+.market-scope { display: inline-flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--secondary); font-size: 11px; }
 .market-scope.on { border-color: var(--line-strong); background: var(--selected); color: var(--bright); }
 .market-count { color: var(--muted); font-variant-numeric: tabular-nums; }
-.market-select { padding: 4px var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--editor); color: var(--secondary); font-size: 11px; }
+.market-select { padding: var(--space-1) var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--editor); color: var(--secondary); font-size: 11px; }
 .market-note { margin: 0; color: var(--secondary); font-size: 11px; }
 .market-failure { margin: 0; color: var(--warning); font-size: 11px; }
 .market-list { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; max-height: 46vh; overflow: auto; }
 .market-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--editor); }
 .market-row.is-installed { opacity: .92; }
-.market-avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%; color: var(--on-accent); font: 600 13px var(--font-brand); text-shadow: 0 1px 1px rgb(0 0 0 / 35%); }
+.market-avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--muted); }
 .market-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .market-name { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; color: var(--bright); font-size: 13px; font-weight: 600; }
 .market-version { color: var(--muted); font-size: 11px; font-weight: 400; }
-.market-badge { padding: 1px 6px; border-radius: 999px; background: var(--hover); color: var(--secondary); font-size: 10px; font-weight: 400; }
+.market-badge { padding: 1px 6px; border-radius: var(--radius-pill); background: var(--hover); color: var(--secondary); font-size: 10px; font-weight: 400; }
 .market-badge.is-update { background: var(--selected); color: var(--accent); }
 .market-badge.is-available { background: var(--selected); color: var(--accent); }
 .market-badge.is-incompatible { color: var(--warning); }
@@ -438,7 +493,7 @@ onMounted(() => { void refresh() })
 .market-link, .market-tag { padding: 0; border: 0; background: transparent; color: var(--secondary); font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .market-link:hover, .market-tag:hover { color: var(--bright); }
 .market-desc { margin: 0; color: var(--secondary); font-size: 11px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.market-meta { display: flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-meta { display: flex; align-items: center; gap: var(--space-1); margin: 0; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .market-install { flex-shrink: 0; }
 .spin { animation: tc-spin var(--dur-spin) var(--ease-linear) infinite; }
 </style>

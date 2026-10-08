@@ -99,8 +99,8 @@ test('多行命令：折成第一行 + 行数显示，执行用原文', () => {
 
 test('执行侧收得下执行上下文的目录（run.start 的 cwd 不再写死工作区根）', () => {
   const source = readFileSync(new URL('../src/runActions.ts', import.meta.url), 'utf8')
-  assert.match(source, /async function runExternalTool\(command: string, name: string, cwd\?: string\)/,
-    '外部工具那条通道要能接调用方给的目录')
+  assert.match(source, /async function runExternalTool\(command: string, name: string, cwd\?: string \| null\)/,
+    '外部工具那条通道要能接调用方给的目录（null = 用户没选上下文，与 undefined 同义退回工作区根）')
   assert.match(source, /cwd: cwd\?\.trim\(\) \|\| workspace\.value\.root/,
     '给了就用它、没给才退回工作区根')
 })

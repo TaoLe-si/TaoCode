@@ -49,13 +49,13 @@ async function copyAll() {
     <section class="command-palette errors-dialog" role="dialog" aria-modal="true" :aria-label="ERRORS_DIALOG_TITLE">
       <div class="palette-input">
         <span class="errors-heading">{{ ERRORS_DIALOG_TITLE }}（{{ errors.count }}）</span>
-        <button class="icon-button" :title="ERRORS_DIALOG_CLOSE" :aria-label="ERRORS_DIALOG_CLOSE" @click="emit('close')"><X :size="iconSize.action" /></button>
+        <button class="icon-button" :aria-label="ERRORS_DIALOG_CLOSE" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="errors-body">
         <!-- 簇清单：一条 = 一个去重键（上游左侧那一列 cluster 列表）。 -->
         <ul class="errors-clusters" role="listbox" aria-label="错误簇">
-          <li v-for="(cluster, i) in clusters" :key="cluster.key" role="option" :aria-selected="i === index">
-            <button class="errors-cluster" :class="{ active: i === index }" @click="index = i">
+          <li v-for="(cluster, i) in clusters" :key="cluster.key" role="presentation">
+            <button class="errors-cluster" type="button" role="option" :aria-selected="i === index" :class="{ active: i === index }" @click="index = i">
               <span class="errors-cluster-msg">{{ cluster.message }}</span>
               <span class="errors-cluster-count">{{ cluster.messages.length }}</span>
             </button>
@@ -78,7 +78,7 @@ async function copyAll() {
       <div class="palette-footer errors-actions">
         <span class="errors-note" role="status">{{ note }}</span>
         <button class="subtle-button" :disabled="!clusters.length" :title="'把全部错误簇复制到剪贴板'" @click="copyAll"><Copy :size="iconSize.chip" aria-hidden="true" />复制</button>
-        <button class="subtle-button" :title="'在文件管理器里打开宿主日志（IDEA: ShowLogAction.showLog）'" @click="emit('close'); void showLog()"><FileText :size="iconSize.chip" aria-hidden="true" />显示日志</button>
+        <button class="subtle-button" :title="'在文件管理器里打开宿主日志'" @click="emit('close'); void showLog()"><FileText :size="iconSize.chip" aria-hidden="true" />显示日志</button>
         <button class="subtle-button" @click="emit('close')">{{ ERRORS_DIALOG_CLOSE }}</button>
       </div>
     </section>
@@ -90,7 +90,7 @@ async function copyAll() {
 .errors-heading { flex: 1; color: var(--bright); font-weight: 500; }
 .errors-body { display: flex; gap: var(--space-3); min-height: 240px; padding: var(--space-2) var(--space-3); }
 .errors-clusters { display: flex; flex-direction: column; gap: 2px; width: 260px; margin: 0; padding: 0; overflow: auto; list-style: none; flex-shrink: 0; }
-.errors-cluster { display: flex; align-items: baseline; gap: var(--space-1); width: 100%; padding: var(--space-1) var(--space-2); color: var(--text); background: transparent; border: 1px solid transparent; border-radius: var(--radius-xs, 3px); font: inherit; font-size: 11px; text-align: left; }
+.errors-cluster { display: flex; align-items: baseline; gap: var(--space-1); width: 100%; padding: var(--space-1) var(--space-2); color: var(--text); background: transparent; border: 1px solid transparent; border-radius: var(--radius-xs); font: inherit; font-size: 11px; text-align: left; }
 .errors-cluster:hover { background: var(--elevated); border-color: var(--line-strong); }
 .errors-cluster.active { background: var(--hover); border-color: var(--line-strong); color: var(--bright); }
 .errors-cluster-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

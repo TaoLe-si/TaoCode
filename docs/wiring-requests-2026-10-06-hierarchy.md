@@ -111,3 +111,16 @@ const usageTree = computed(() => buildUsageTree(references.value))
 上游 `platform/…/DescriptiveNameUtil.java`，类名）。若将来 `documentHighlight` 带 kind，`usageViewGrouping`/`referenceContents` 可扩一个按 kind 的分档键——**现在无消费链路，不预先造模块**。
 
 **上游**：`FindUsagesProvider`/`LanguageFindUsages`/`DescriptiveNameUtil`（类名，行号见判词 `ixa/find-usages` 行）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1 已接线**：`src/App.vue:2335` 的 `v-for` 已消费 `row`（`row.segments` / `row.icon` / `row.position` / `row.trailing`，见 `:2341` 附近），与 `src/hierarchyView.ts:102/:111` 的 `hierarchyRowModel` 同源。
+- **W-2 已接线**：`src/App.vue:2329-2330` 已有范围下拉（`hierScope` + `pickHierScope` + `hierScopeOptions`），解构在 `:1405-1406`。
+- **W-3（引用面板换 `buildUsageTree` 树）** —— 已接（不同落点）：引用面板渲染已移到 `src/components/ToolWindowView.vue:222` 的 `<ReferencePanel :rows="ctx.referenceRows" …>`，数据源 `src/toolViewContext.ts:202` 的 `referenceRows`（= `src/referenceContents.ts:231` 的 `usageTreeRows`）。判据 `tests/usage-view-panel-rows.test.mjs` **pass 22 / fail 0**。App.vue 侧那一格（`:2319-2321`）现在是 `<ToolWindowView view="references">`，平表渲染已不存在 ⇒ 原请求的 old 段已不适用。
+
+结论：W-1/W-2/W-3 均已在真实链路里（W-3 换了落点），未改任何文件。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W-1/W-2/W-3 均已在真实链路里（W-3 换了落点），未改任何文件。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

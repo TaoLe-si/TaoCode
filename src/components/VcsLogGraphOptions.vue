@@ -2,8 +2,10 @@
 // 「图选项」—— 过滤栏的第五个部件，紧跟「路径」。模型与判据全在 `src/vcsLogGraphOptions.ts`
 // （菜单结构照 `VcsLogGraphOptionsChooserGroup.getChildren` 的逐行顺序）。
 import { computed } from 'vue'
-import { Check, ChevronDown, GitBranch } from 'lucide-vue-next'
+import { ChevronDown, GitBranch } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 import { LOG_GRAPH_OPTIONS_DESCRIPTION, LOG_GRAPH_OPTIONS_TITLE, logGraphOptionsModel, type LogGraphOptionState } from '../vcsLogGraphOptions'
 import type { GitLogSort } from '../bridge'
 
@@ -22,7 +24,7 @@ const rows = computed(() => logGraphOptionsModel({
 
 <template>
   <details class="filter graph-options">
-    <summary :class="{ applied: sort !== 'date' || firstParent || noMerges }"
+    <summary class="graph-options-summary" :class="{ applied: sort !== 'date' || firstParent || noMerges }"
       :title="`${LOG_GRAPH_OPTIONS_TITLE}（${LOG_GRAPH_OPTIONS_DESCRIPTION}）`" :aria-label="LOG_GRAPH_OPTIONS_TITLE">
       <GitBranch :size="iconSize.dense" aria-hidden="true" /><ChevronDown :size="iconSize.dense" class="caret" aria-hidden="true" />
     </summary>
@@ -35,7 +37,7 @@ const rows = computed(() => logGraphOptionsModel({
         </button>
         <button v-else type="button" class="menu-button row" :role="row.kind === 'checkbox' ? 'menuitemcheckbox' : 'menuitemradio'"
           :aria-checked="!!row.on" :title="row.description" @click="row.run?.()">
-          <span class="menu-item-icon"><Check v-if="row.on" :size="iconSize.menu" /></span><span>{{ row.title }}</span>
+          <span class="menu-item-icon"><IdeaCheckedIcon v-if="row.on" :size="iconSize.menu" /></span><span>{{ row.title }}</span>
         </button>
       </template>
     </form>
@@ -44,11 +46,11 @@ const rows = computed(() => logGraphOptionsModel({
 
 <style scoped>
 .filter { flex-shrink: 0; font-size: 11px; }
-summary { display: inline-flex; align-items: center; gap: var(--space-1); list-style: none; cursor: pointer; padding: 4px; }
-summary::-webkit-details-marker { display: none; }
+.graph-options-summary { display: inline-flex; align-items: center; gap: var(--space-1); list-style: none; cursor: pointer; padding: var(--space-1); }
+.graph-options-summary::-webkit-details-marker { display: none; }
 .caret { flex-shrink: 0; color: var(--muted); }
-summary.applied { color: var(--accent); }
-.popup { position: absolute; top: 29px; right: 0; z-index: 5; width: max-content; min-width: 200px; display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
-.group-title { padding: 4px var(--space-2) 2px; color: var(--muted); font-size: 10px; }
+.graph-options-summary.applied { color: var(--accent); }
+.popup { position: absolute; top: 29px; right: 0; z-index: 5; width: max-content; min-width: 200px; display: flex; flex-direction: column; gap: 2px; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.group-title { padding: var(--space-1) var(--space-2) 2px; color: var(--muted); font-size: 10px; }
 .row { display: flex; align-items: center; gap: var(--space-2); width: 100%; justify-content: flex-start; text-align: left; white-space: nowrap; }
 </style>

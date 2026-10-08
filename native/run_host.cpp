@@ -226,6 +226,12 @@ struct Manager::Impl {
         int last_code = 0;
         bool running = false;
         bool started = false;
+        // 退出码通道（IDEA `ProcessAdapter.processTerminated` / `ExecutionListener`）：
+        // `finished` = 至少跑完过一段（exitCode 才有意义）；`aborted` = 最后一段是被
+        // stop/同名重启结束掉的（不是自己跑完的）—— 两者分开报，UI 才能区分"跑完退出 1"
+        // 与"被停止"。`running` 为真时 exitCode 报 null（还没结束）。
+        bool finished = false;
+        bool aborted = false;
     };
 
     Emit emit;
@@ -280,7 +286,13 @@ struct Manager::Impl {
                     const auto found = instances.find(id);
                     if (found != instances.end()) {
                         remaining = found->second->steps.size();
-                        found->second->last_code = code;
+                        // `stop_instance` 可能已经把这个实例标成 aborted（杀树后读线程才回报
+                        // 退出码，通常是非 0 的终止码）。被停止的实例要保留 exitCode=-1 +
+                        // aborted=true，不能被这条迟到的回调改写成"自己跑完退出 N"。
+                        if (!found->second->aborted) {
+                            found->second->last_code = code;
+                            found->second->finished = true;  // 这一段真的自己跑完了
+                        }
                         found->second->pending = true;   // 即使没有后续步骤也要过一遍（drain 会清标志）
                         if (remaining == 0) found->second->running = false;
                     }
@@ -305,6 +317,11 @@ struct Manager::Impl {
         }
         if (instance.running) {
             instance.running = false;
+            // 被停止 = 不是自己跑完的：exitCode 记 -1、aborted 置真。这条与 `run.exit`
+            // 事件里的 `aborted:true` 是同一件事，快照里也要能看到（UI 重取清单时不靠事件流）。
+            instance.last_code = -1;
+            instance.finished = true;
+            instance.aborted = true;
             if (announce)
                 post({{"event", "run.exit"}, {"instance", instance.id}, {"code", -1}, {"remaining", std::size_t{0}}, {"aborted", true}});
         }
@@ -315,6 +332,9 @@ struct Manager::Impl {
             const std::size_t skipped = instance.steps.size();
             instance.steps.clear();
             instance.running = false;
+            instance.last_code = code;
+            instance.finished = true;
+            instance.aborted = true;  // 链被中止：后续步骤没跑
             post({{"event", "run.output"}, {"instance", instance.id},
                   {"dataB64", base64_encode("\r\n==> 链已中止：上一步以退出码 " + std::to_string(code)
                                             + " 结束，跳过 " + std::to_string(skipped) + " 个后续步骤 <==\r\n")}});
@@ -333,6 +353,9 @@ struct Manager::Impl {
         } catch (const WorkspaceError& error) {
             instance.steps.clear();
             instance.running = false;
+            instance.last_code = -1;
+            instance.finished = true;
+            instance.aborted = true;
             post({{"event", "run.output"}, {"instance", instance.id},
                   {"dataB64", base64_encode("\r\n==> 无法启动：" + std::string(error.what()) + " <==\r\n")}});
             post({{"event", "run.exit"}, {"instance", instance.id}, {"code", -1},
@@ -340,6 +363,9 @@ struct Manager::Impl {
         } catch (const std::exception&) {
             instance.steps.clear();
             instance.running = false;
+            instance.last_code = -1;
+            instance.finished = true;
+            instance.aborted = true;
             post({{"event", "run.output"}, {"instance", instance.id},
                   {"dataB64", base64_encode(std::string("\r\n==> 无法启动后续步骤 <==\r\n"))}});
             post({{"event", "run.exit"}, {"instance", instance.id}, {"code", -1}, {"remaining", std::size_t{0}}});
@@ -459,9 +485,13 @@ Json Manager::instances() const {
         }
         Json ports = Json::array();
         for (const auto port : ports_of(tree_pids, listeners)) ports.push_back(port);
+        // 退出码通道：在跑时 exitCode 报 null（还没结束），结束过就是最后一段的退出码；
+        // `aborted` 区分"自己跑完"与"被停止/链中止"（上游 ProcessAdapter 把这两件事分开报）。
+        Json exit_code = instance->running || !instance->finished ? Json(nullptr) : Json(instance->last_code);
         list.push_back({{"id", id}, {"label", instance->label}, {"running", instance->running},
                         {"pid", static_cast<std::int64_t>(pid)}, {"children", std::move(children)},
-                        {"tree", std::move(tree)}, {"ports", std::move(ports)}});
+                        {"tree", std::move(tree)}, {"ports", std::move(ports)},
+                        {"exitCode", std::move(exit_code)}, {"aborted", instance->aborted}});
     }
     return list;
 }

@@ -132,3 +132,16 @@ import {
 （`ProjectCodeVisionModelImpl.kt:52` → `CodeVisionSettings.setProviderEnabled` → 存进 `editor.xml`），
 所以"重启后还记得"是上游行为。接法是在 `src/App.vue` 的 `patchEditorSettings`（`src/App.vue:668`）那一处，
 把 `codeVisionSettingsPatch()` 的四个键并进 patch —— **App.vue 只有 appvue 半区能改**，本批不动，仅登记。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **L-1 / L-2** —— 目标 `src/workspaceLifecycle.ts` / `src/settingsPersistence.ts`（非本 lane）。复核：`docHoverPolicyFromSettings` 已在 `workspaceLifecycle.ts:247` 接（同类形状），Code Vision 的启动读回需 owner 确认。
+- **L-3** —— 目标 `src/components/CodeVisionSettingsPage.vue`（本 lane 可改面）。登记为待办（需 owner 确认 `syncRuntime` 形状）。
+- **L-4** —— 登记。
+
+结论：零接线（L-1/L-2 非本 lane，L-3 登记）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（L-1/L-2 非本 lane，L-3 登记）。」。
+本 lane 本轮复核：**L-3 已在真实链路** —— `src/components/CodeVisionSettingsPage.vue` 已 import `codeVisionVisibleEntryLimit` 且在 `syncRuntime()` 里刷 `codeVisionSettings.visibleEntries`（watch 串含第四键）。L-1/L-2 需 `src/workspaceLifecycle.ts` / `settingsPersistence.ts` owner；L-4 需 appvue 半区。

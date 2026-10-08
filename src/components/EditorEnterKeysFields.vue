@@ -26,10 +26,7 @@ defineProps<{ settings: EditorSettings; busy?: boolean }>()
 </script>
 
 <template>
-  <label class="checkbox-row"><input v-model="settings.autoInsertPairQuote" type="checkbox" aria-describedby="editor-pair-quote-hint" /><span>插入成对引号</span></label>
-  <p id="editor-pair-quote-hint" class="field-hint restore-hint">上游 “Insert pair quote”（<code>EditorSmartKeysConfigurable.kt:49-51</code>），默认开 = <code>CodeInsightSettings.java:140</code>。关掉后键入引号只写那一个字符，不再自动补收尾的那个。</p>
-  <label class="checkbox-row"><input v-model="settings.insertBraceOnEnter" type="checkbox" aria-describedby="editor-pair-brace-hint" /><span>插入成对的 `}`</span></label>
-  <p id="editor-pair-brace-hint" class="field-hint restore-hint">上游 “Insert pair '}'”（<code>EditorSmartKeysConfigurable.kt:69-72</code>），默认开 = <code>CodeInsightSettings.java:130</code>：在未配对的 <code>{</code> 之后回车时补上收尾的大括号。</p>
-  <label class="checkbox-row"><input v-model="settings.closeCommentOnEnter" type="checkbox" aria-describedby="editor-close-comment-hint" /><span>闭合块注释</span></label>
-  <p id="editor-close-comment-hint" class="field-hint restore-hint">上游 “Close block comment”（<code>EditorSmartKeysConfigurable.kt:74-76</code>），默认开 = <code>CodeInsightSettings.java:132</code>：块注释没闭合时回车在行尾补收尾标记。</p>
+  <label class="checkbox-row"><input v-model="settings.autoInsertPairQuote" type="checkbox" /><span>插入成对引号</span></label>
+  <label class="checkbox-row"><input v-model="settings.insertBraceOnEnter" type="checkbox" /><span>插入成对的 `}`</span></label>
+  <label class="checkbox-row"><input v-model="settings.closeCommentOnEnter" type="checkbox" /><span>闭合块注释</span></label>
 </template>

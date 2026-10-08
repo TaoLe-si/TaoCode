@@ -10,7 +10,7 @@
 import type { EncodingKey } from './bridge.ts'
 
 /** 与 `src/bridge.ts` 的 `encodingKeys` 同一份合法值（判据交叉核对，防止两份清单漂移）。 */
-export const SESSION_ENCODINGS: readonly EncodingKey[] = ['utf-8', 'gbk', 'cp1252', 'system', 'utf-16le', 'utf-16be']
+export const SESSION_ENCODINGS: readonly EncodingKey[] = ['utf-8', 'gbk', 'cp1252', 'system', 'utf-32be', 'utf-32le', 'utf-16le', 'utf-16be']
 
 /** 一个会话条目：标签位置 + 可选草稿 + 可选编码。 */
 export interface SessionTabEntry {

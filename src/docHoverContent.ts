@@ -28,9 +28,12 @@ import {
 } from './hoverDocumentation.ts'
 
 /**
- * 桥接 `lsp.request` 的 hover 回包。本仓登记的类型是 `LspHoverResult { available, contents }`
- * （`src/bridge.ts:126`，保留文件），**没有** range 那一格；这里按上游 LSP 的原始形状
- * 多读一个可选字段，服务器/native 什么时候透传过来就什么时候生效，不硬造。
+ * 桥接 `lsp.request` 的 hover 回包。`src/bridge.ts:126` 的 `LspHoverResult` 现在登记了
+ * `range?: LspRange`（2026-10-06 收掉 C-3：native 那一条链早就透传了，
+ * 受版本控制的判据在 `native/lsp_coding_test.cpp:210-216`，缺的只是前端类型）。
+ * 这里**不换成**那个严格类型：`range` 是服务器/native 边界上的外来的、可能残缺的数据
+ * （只有 `start` 没有 `end`、坐标不是数字），这一份 looser 的形状就是那道校验；
+ * 收紧成 `LspRange` 等于把校验删掉。
  * 上游对应：`LspRequestExecutor.kt:213-221`（`it.range = hover.range?.let { … toHostRange … }`）。
  */
 interface LspHoverPayload {
@@ -74,7 +77,12 @@ export function hoverRangeFromPayload(payload: LspHoverPayload): DocHoverRange |
     endLine: Number(end.line), endCharacter: Number(end.character),
   }
   if ([range.startLine, range.startCharacter, range.endLine, range.endCharacter].some(value => !Number.isFinite(value))) return null
-  // 零长/反向区间在上游等价于「没给 range」（`TextRangeAndMarkupContent.kt:47` 的 `length > 0` 判据）。
+  // 零长/反向区间在上游等价于「没给 range」：
+  // `platform/lsp-impl/src/impl/features/documentation/LspDocumentationTargetProvider.kt:47`
+  // 的 `takeIf { it.length > 0 && it.endOffset <= hostPsiFile.textLength }`。
+  // 订正留痕（2026-10-06 hlcache300）：这里原写 `TextRangeAndMarkupContent.kt:47` —— 实开那个文件只有 43 行
+  // （里面唯一的构造逻辑 `fromHover` 在 `:14-41`），既没有第 47 行、也没有 `length > 0` 这条判据；
+  // 判据的真出处是上面那条（同一个 package，见下面 `presentationFromRange` 的注释）。
   if (range.endLine < range.startLine) return null
   if (range.endLine === range.startLine && range.endCharacter <= range.startCharacter) return null
   return range

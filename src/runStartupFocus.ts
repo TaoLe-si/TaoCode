@@ -51,15 +51,18 @@
 //  `platform/execution/resources/messages/ExecutionBundle.properties:175-176`
 //  「Open run/debug tool window when started」/「Focus run/debug tool window when started」，
 //  另有 `:347-348` 「Activate tool window」/「Focus tool window」是 Run/Debug 配置页上的同义标签）：
-//   · 声明 `platform/execution/src/com/intellij/execution/RunnerAndConfigurationSettings.java:242`
-//     （`isActivateToolWindowBeforeRun`）、`:246`（setter）、`:256`（`isFocusToolWindowBeforeRun`）。
+//   · 声明 `platform/execution/src/com/intellij/execution/RunnerAndConfigurationSettings.java`
+//     `:235`（`setActivateToolWindowBeforeRun`）、`:242`（`isActivateToolWindowBeforeRun`）、
+//     `:249`（`setFocusToolWindowBeforeRun`）、`:256`（`isFocusToolWindowBeforeRun`）
+//     —— 四个方法都在**每条配置**的接口上。（订正：本文件旧注释写的「`:242`（isActivate…）、`:246`（setter）」
+//     里那条 `:246` 打开后是 javadoc 的一行、不是 setter，真身在 `:235`；2026-10-06 execui 逐行核过。）
 //   · 默认 `platform/execution-impl/src/com/intellij/execution/impl/RunnerAndConfigurationSettingsImpl.kt:108-109`
 //     —— `isActivateToolWindowBeforeRun = true`、`isFocusToolWindowBeforeRun = false`
 //     ⇒ **默认「打开面板」为真、「夺焦」为假**，与 `RunContentDescriptor.java:50`
 //     （`myActivateToolWindowWhenAdded = true`）、`:52`（`mySelectContentWhenAdded = true`）、
 //     `:55`（`myAutoFocusContent = false`）三行默认一致。
 //   · 存档属性名 `RunnerAndConfigurationSettingsImpl.kt:61-62`（`activateToolWindowBeforeRun` /
-//     `focusToolWindowBeforeRun`），读档 `:242-244`（**缺 `activate` 属性按 true**：`value == null || value.toBoolean()`；
+//     `focusToolWindowBeforeRun`），读档 `:243-244`（**缺 `activate` 属性按 true**：`value == null || value.toBoolean()`；
 //     缺 `focus` 属性按 false：`getAttributeBooleanValue`），写档 `:317-321`（只在非默认时落盘）。
 //     本仓的 `resolveRunStartupFocusFlags()` 就是照这两行读档语义写的：旧存档缺键补上游默认，不按字段数量判损坏。
 //   · 落到 descriptor：`platform/execution-impl/src/com/intellij/execution/impl/ExecutionManagerImpl.kt:290-293`
@@ -82,14 +85,42 @@
 //     —— **`isAutoFocusContent` 不在搬运清单里** ⇒ 夺焦与否只看设置，与「有没有已有标签」无关。
 //     这就是判据第三档「设置开但实例已有」的上游答案。
 //
-// 本仓落点：`src/runActions.ts` 的 `startRun` 用 `activateToolWindow` 决定要不要 `showOutput('run')`
-// （默认 true ⇒ 与接线前逐字相同）。`takeFocus` / `selectView` 的动作面在保留文件
-// （`src/App.vue` 的 `focusToolWindowContent`、`src/components/RunConsole.vue` 的标签切换）里，
-// 本代理改不到 ⇒ 可照抄的整段替换代码写在 `docs/wiring-requests-2026-10-06-exec2.md` W1/W2。
+// ── 单一真源判决（2026-10-06 execui，主代理记在案的那条架构问题） ─────────────────────────
+// 问题：本模块原先自带一份 **localStorage 载体**（`taocode.runStartupFocus`），而这两个开关在上游
+// 是**挂在每条运行配置**上的设置项 ⇒ 两边都落就是两个真源，用户在两处改时行为以谁为准说不清。
+// 结论：**上游只有一处存放，本仓的存放处是运行配置记录**（`RunConfig` 的两个字段），载体已删除。
+// 证据（每条都亲自打开过；两套 UI ≠ 两个源）：
+//   · 写字只经由那两个 setter：`RunnerAndConfigurationSettingsImpl.kt:212-222` 是唯一的字段写点。
+//   · 老面板取值/回写：`BeforeRunStepsPanel.java:170-171`（建勾）、`:214-217`（reset 读记录）、
+//     `:238-243`（`need…` 读勾），回到记录那一步在
+//     `ConfigurationSettingsEditorWrapper.java:143-144` `settingsToApply.set…BeforeRun(...)`。
+//   · 新 UI 的两个 tag：`BeforeRunFragment.java:28-42`，getter/setter lambda 也是同一对方法 ⇒
+//     **两套界面写的是同一个对象**，不是两处存放。
+//   · 界面之外还有谁写？全树 grep `setActivateToolWindowBeforeRun`/`setFocusToolWindowBeforeRun`
+//     只剩三处，且都是「把别处的值灌进同一条记录」而非另开存储：外部系统任务
+//     `ExternalSystemUtil.java:820`（builder 的一次性参数）、ForkedDebuggerThread.java:306、
+//     以及测试 `RunConfigurationUsageCollectorTest.java:589`。读侧（`ExecutionManagerImpl.kt:291-292`、
+//     `RunConfigurationTypeUsagesCollector.java:219-220`、`ExternalSystemRunnableState.java:391-392`、
+//     `ShRunConfigurationProfileState.java:66`、dashboard 的 DTO 转发）都是**从这条记录读**。
+//   · 唯一的「兜底链」是模板继承，不是第二个源：`RunnerAndConfigurationSettingsImpl.kt:455-461`
+//     `importRunnerAndConfigurationSettings(template)` 把模板记录上的同两个字段拷进新配置 ⇒
+//     优先级是 **配置记录 → 模板记录 → 硬默认（true/false）**，三级都从同一个入口
+//     （本文件的 `resolveRunStartupFocusFlags`）解析，合并规则只有一处定义。
+//     本仓对应：模板那一级在 `src/runConfigTemplates.ts`（`applyTemplate`），面板与 `startRun` 都读
+//     `runStartupFocusFlagsOf(config)`；没有任何全局副本。
+//   · 原载体**从来没有生产写入方**（`writeRunStartupFocus` 的全部引用只出现在它自己的判据里，
+//     生产代码只调过 `readRunStartupFocus` ⇒ 用户从未真的在里面存过值），所以删掉它不丢任何用户设置，
+//     也就不需要迁移脚本；这条由 `tests/run-startup-focus.test.mjs` 的「唯一真源」那两条判据钉住
+//     （模块里不许再出现 localStorage / `taocode.runStartupFocus`）。
+//
+// 本仓落点：`src/runActions.ts` 的 `startRun` 用 `runStartupFocusFlagsOf(config)` 取那两个值，
+// `activateToolWindow` 决定要不要 `showOutput('run')`（默认 true ⇒ 与接线前逐字相同）；
+// 面板的读写在 `src/components/RunConfigurationsDialog.vue`（配置的 Configuration 页 + 类型模板页各一组，
+// 与上游「两套 UI、一处存放」同形）。`takeFocus` 的键盘焦点动作面仍在保留文件
+// （`src/App.vue:340` 的 `focusToolWindowContent`）⇒ 可照抄的整段在
+// `docs/wiring-requests-2026-10-06-execui.md` W1。
 // `createNewTab` 本仓恒为真：每个实例由宿主给一个新 id（`native/run_host.cpp` 的并行实例），
 // 「已结束标签的复用」在这里没有对应物 ⇒ 只把判定算出来并**在请求里**交给宿主，不在前端假装有复用。
-
-import type { StorageLike } from './runToolWindowLayout.ts'
 
 /** 上游 `RunnerAndConfigurationSettingsImpl.kt:108`：`isActivateToolWindowBeforeRun = true`。 */
 export const ACTIVATE_TOOL_WINDOW_DEFAULT = true
@@ -164,8 +195,10 @@ export interface RunStartupFocusFlags {
 }
 
 /**
- * 缺键补默认，形状与 `RunnerAndConfigurationSettingsImpl.kt:242-244` 一致：
- * `activate` 缺省为 true、`focus` 缺省为 false；非布尔的脏值退回默认而不是抛、也不判整份存档坏。
+ * 那条设置的**唯一读取入口**：`source` 就是运行配置记录本身（`RunConfig`）。
+ * 缺键补默认，形状与 `RunnerAndConfigurationSettingsImpl.kt:243-244` 一致：
+ * `activate` 缺省为 true、`focus` 缺省为 false；非布尔的脏值退回默认而不是抛、也不判整份存档坏
+ * （本仓出过「按字段数量判损坏把用户锁在项目外」的事故，这一条按**逐键**补）。
  */
 export function resolveRunStartupFocusFlags(source: unknown): RunStartupFocusFlags {
   const raw = source && typeof source === 'object' && !Array.isArray(source)
@@ -179,34 +212,34 @@ export function resolveRunStartupFocusFlags(source: unknown): RunStartupFocusFla
   }
 }
 
-/** 与 `src/runToolWindowLayout.ts` 的 `taocode.runnerLayout` 同一套本地载体（设置页在保留文件里，见请求 W2）。 */
-export const RUN_STARTUP_FOCUS_KEY = 'taocode.runStartupFocus'
-
-/** 本仓惯例的存储载体（`src/consoleEncoding.ts:61-70` 同款：不传就退到 `localStorage`，取不到就当没有）。 */
-function focusStore(store: StorageLike | undefined): StorageLike | undefined {
-  if (store) return store
-  try { return typeof localStorage !== 'undefined' ? localStorage : undefined } catch { return undefined }
+/**
+ * 读**某条运行配置**上的那两个开关（= 上游 `RunnerAndConfigurationSettings.isActivateToolWindowBeforeRun()`
+ * / `isFocusToolWindowBeforeRun()`，`RunnerAndConfigurationSettings.java:242`/`:256`）。
+ *
+ * 命名成单独一个入口是为了让「设置住在哪」在调用点上看得出来：参数是**配置记录**，
+ * 不是任何全局载体。传 undefined（还没选中配置 / 自动发现的临时目标）⇒ 上游默认。
+ */
+export function runStartupFocusFlagsOf(config: unknown): RunStartupFocusFlags {
+  return resolveRunStartupFocusFlags(config)
 }
 
-/** 读回两个开关；没有记录、存储坏了、记录坏了都退回上游默认。 */
-export function readRunStartupFocus(store?: StorageLike): RunStartupFocusFlags {
-  try {
-    const raw = focusStore(store)?.getItem(RUN_STARTUP_FOCUS_KEY)
-    if (raw === null || raw === undefined) return resolveRunStartupFocusFlags(undefined)
-    return resolveRunStartupFocusFlags(JSON.parse(raw) as unknown)
-  } catch {
-    return resolveRunStartupFocusFlags(undefined)
-  }
+/**
+ * 写那两个开关（= 上游 `setActivateToolWindowBeforeRun(value)` / `setFocusToolWindowBeforeRun(value)`，
+ * `RunnerAndConfigurationSettings.java:235`/`:249`，实现
+ * `RunnerAndConfigurationSettingsImpl.kt:212-222`）。
+ *
+ * **与上游同一条落盘规则**：只把**非默认**的值留在记录里
+ * （`RunnerAndConfigurationSettingsImpl.kt:317-321` —— `if (!isActivateToolWindowBeforeRun) setAttribute(…, "false")` /
+ * `if (isFocusToolWindowBeforeRun) setAttribute(…, "true")`），
+ * 所以「用户又勾回默认」不会让配置记录越写越大，也不会留下一条与「从没设过」行为不同的键。
+ * 返回**新对象**（不改入参）：调用方是面板的保存路径，Vue 侧要的是换引用而不是原地改。
+ */
+export function withRunStartupFocusFlags<C extends Partial<RunStartupFocusFlags>>(config: C, flags: RunStartupFocusFlags): C {
+  const next: Record<string, unknown> = { ...config }
+  if (flags.activateToolWindowBeforeRun !== ACTIVATE_TOOL_WINDOW_DEFAULT) next.activateToolWindowBeforeRun = flags.activateToolWindowBeforeRun
+  else delete next.activateToolWindowBeforeRun
+  if (flags.focusToolWindowBeforeRun !== FOCUS_TOOL_WINDOW_DEFAULT) next.focusToolWindowBeforeRun = flags.focusToolWindowBeforeRun
+  else delete next.focusToolWindowBeforeRun
+  return next as C
 }
 
-/** 写回（只在非默认时落键，学 `RunnerAndConfigurationSettingsImpl.kt:317-321`，旧存档不会被越写越大）。 */
-export function writeRunStartupFocus(store: StorageLike | undefined, flags: RunStartupFocusFlags): void {
-  const stored: Partial<RunStartupFocusFlags> = {}
-  if (flags.activateToolWindowBeforeRun !== ACTIVATE_TOOL_WINDOW_DEFAULT) {
-    stored.activateToolWindowBeforeRun = flags.activateToolWindowBeforeRun
-  }
-  if (flags.focusToolWindowBeforeRun !== FOCUS_TOOL_WINDOW_DEFAULT) {
-    stored.focusToolWindowBeforeRun = flags.focusToolWindowBeforeRun
-  }
-  try { focusStore(store)?.setItem(RUN_STARTUP_FOCUS_KEY, JSON.stringify(stored)) } catch { /* 存储不可用只影响持久化 */ }
-}

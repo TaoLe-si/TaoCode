@@ -8,14 +8,22 @@ import {
 import { expandAllToLevel, expandCaretToLevel, foldAllCommand, foldAtCaret, foldBlockAtCaret, foldDocComments,
   foldRecursively, toggleFoldAtCaret, toggleFoldSelection, unfoldAllCommand, unfoldAtCaret, unfoldDocComments,
   unfoldRecursively } from './editorFolding.ts'
+// 展开到级别那族**两段式（chord）键位**的权威表（键名 + 命令名）在 src/foldingKeymap.ts；
+// 本模块把它接成真正的 CodeMirror `KeyBinding[]`（`run` 指向 `editingCommands` 里同名命令），
+// 让"键位 ↔ 命令"只有这一份真相。宿主 `src/components/CodeEditor.vue`（保留文件）取用这一份的
+// 接线写在 `docs/wiring-requests-2026-10-06-foldchord.md`（W-1）。
+import { foldingLevelChords } from './foldingKeymap.ts'
 // 查找/替换**不在这个表里**：编辑器内查找栏是自绘的（src/editorSearch*.ts +
 // src/editorFindController.ts），命令覆盖在 CodeEditor.vue 的 editorActions 里。
 // 这里只剩多光标那一条 CodeMirror 命令。
 import { selectMatches, selectNextOccurrence } from '@codemirror/search'
 import { EditorSelection, type StateCommand } from '@codemirror/state'
-import type { Command, EditorView } from '@codemirror/view'
+import type { Command, EditorView, KeyBinding } from '@codemirror/view'
 // Unwrap/Remove（上游 Code 菜单的 `UnwrapAction`）：文本子集实现在 src/unwrap.ts。
 import { unwrapCommand } from './unwrap.ts'
+// 自动缩进整行（上游 `AutoIndentLinesHandler`，Code 菜单 Ctrl+Alt+I）：规则在 src/autoIndentLines.ts。
+import { autoIndentLinesCommand } from './autoIndentLines.ts'
+import { transposeCommand } from './editorTextCommands.ts'
 // 「完成当前语句」（上游 `EditorCompleteStatement`/`SmartEnterAction`）：文本子集在 src/smartEnter.ts。
 import { completeStatement } from './smartEnter.ts'
 // 注释切换（上游 `CommentByLineCommentHandler`/`CommentByBlockCommentHandler`）：文本子集在
@@ -193,10 +201,11 @@ const codeBlockCommand = (forward: boolean, select: boolean): Command => view =>
 }
 
 // 用自定义折叠标记包围选区。上游这一项在 Ctrl+Alt+T 的「Surround With」列表里，
-// **每个 provider 一行**（`CustomFoldingSurroundDescriptor.java:217-227`）；本仓那个列表在
-// `src/surroundTemplates.ts`（别的桶名下）⇒ 这里先按本仓默认那一族标记落地
-// （provider 表里 id 为空的那一条 `//<region>`，与 `src/surround.ts` 的「折叠区域」模板同一族），
-// 列表侧的接线写在交接请求里。
+// **每个 provider 一行**（`CustomFoldingSurroundDescriptor.java:217-227`）；那三行现在由
+// `src/customFoldingSurround.ts` 的 `customFoldingSurroundRows()` 从 provider 表生成，
+// 列表侧的接线在 `src/surroundTemplates.ts`（按当前文件的注释词法重包）。
+// 这一条命令是**菜单行**用的快捷档：落 provider 表里 id 为空的那一条（`//<region>` 一族，
+// 与 `src/customFoldingProviders.ts:90` 的 `description` 同一个标题）。
 const surroundRegionCommand: Command = (view: EditorView) => {
   const { state } = view
   if (state.readOnly) return false
@@ -277,8 +286,23 @@ export const editingCommands: Record<string, Command> = {
   // IDEA's Code menu: 自动缩进 (Auto Indent, Ctrl+Alt+I) re-indents the selection
   // by one step per CodeMirror's indentUnit.
   'indent.selection': indentMore, 'indent.selection.less': indentLess,
+  // 自动缩进整行（上游 `AutoIndentLinesHandler`，Code 菜单「Auto-Indent Lines」= Ctrl+Alt+I）：
+  // **重算**行首空白（按括号结构深度），不是加一级 —— 规则与光标收尾在 src/autoIndentLines.ts。
+  // 与 `indent.selection`（= `indentMore`，加一级）是两条不同的动作；菜单行与「查找操作」已接住这一条，
+  // 编辑器内 Ctrl-Alt-i 仍绑着 `indent.selection`（宿主 `src/components/CodeEditor.vue` 是保留文件，键位改绑见接线请求）。
+  'indent.auto': autoIndentLinesCommand,
+  'text.transpose': transposeCommand,
   // 复制/剪切命令在 src/editorClipboard.ts（那里能 import 剪贴板通道而不污染本模块的零依赖）。
 }
+
+// 展开到级别的两段式键位表（`Ctrl-* 1..5` → `unfold.level1..5`）—— 从 `foldingKeymap.ts` 那张
+// 权威表接成 CodeMirror 认的 `KeyBinding[]`，`run` 就是上面 `editingCommands` 里的同名命令。
+// 宿主 `src/components/CodeEditor.vue`（保留文件）取这一份替掉它现在那条写错的单段 `Ctrl-*`（接线请求 W-1）。
+export const foldingKeymap: KeyBinding[] = foldingLevelChords.map(binding => ({
+  key: binding.key,
+  preventDefault: true,
+  run: editingCommands[binding.command]!,
+}))
 
 // 命令分派（编辑器组件只保留一行包装）：表里没有的名字返回 false，调用方据此提示"这个操作没做事"。
 export function runEditorCommand(view: EditorView | undefined, table: Record<string, Command>, name: string): boolean {

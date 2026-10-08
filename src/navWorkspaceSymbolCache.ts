@@ -85,4 +85,14 @@ export class NavWorkspaceSymbolCache<V extends WorkspaceSymbolCacheValue = Works
   cachedQuery(): string | null {
     return this.storedValue === null ? null : this.storedQuery
   }
+
+  /**
+   * 槽里那份结果的**只读快照**（空槽给空数组）—— 给「转到符号/类」的 EP 贡献者读
+   * （上游 `LspWorkspaceSymbolContributor.kt:73` 的 `getWorkspaceSymbolsCaching(query)` 那一步
+   * 就是从这里取，见 `src/gotoByNameContributors.ts`）。返回的是同一个数组引用，
+   * 调用方**不得**改它（与上游 `getWorkspaceSymbolsCaching` 交回同一份 List 同义）。
+   */
+  snapshot(): V {
+    return this.storedValue ?? ([] as unknown as V)
+  }
 }

@@ -92,6 +92,29 @@ int main() {
         return 1;
     }
 
+    // 部分提交那一族用**自己的**临时仓库：目录名带进程号（同机并发不撞），用例之间只按文件名字分
+    // 区间，不靠先后顺序也不靠时序 —— 上面那个共享仓库留过一次脏文件，把后面那条"提交完工作区要
+    // 干净"的全局判据挡红过（见 git_test.cpp 里 unstage 那条的收尾注释），所以这一族不再蹭它。
+    const auto scope = fs::temp_directory_path() / ("taocode-git-scope-" + std::to_string(GetCurrentProcessId()));
+    fs::remove_all(scope, ec);
+    fs::create_directories(scope);
+    bool scope_ready = true;
+    try {
+        git(scope, L"init -q");
+        git(scope, L"config user.email test@example.com");
+        git(scope, L"config user.name Test");
+        git(scope, L"config core.autocrlf false");  // keep LF bytes exactly as written
+        git(scope, L"config commit.gpgsign false");
+        put(scope / "sc-keep.txt", "keep one\n");
+        put(scope / "sc-pick.txt", "pick one\n");
+        put(scope / "sc-pair.txt", "pair content that stays long enough for git to call it a rename\n");
+        git(scope, L"add -A");
+        git(scope, L"commit -q -m sc-base");
+    } catch (const std::exception& error) {
+        std::cerr << "SCOPE SETUP FAIL: " << error.what() << '\n';
+        scope_ready = false;
+    }
+
     run("clean tree has no changes and reports a branch", [&] {
         const auto changes = taocode::git::status(root);
         check(changes.empty(), "expected clean tree");
@@ -244,6 +267,27 @@ int main() {
         taocode::git::revert(root, "a.txt");
     });
 
+    // 按 ref 取回**非栈顶**那一条（搁架面板任意一行的「取出」）：`git stash pop stash@{n}`。
+    // 收尾把两条都弹掉，别让储藏漂到后面的用例。
+    run("stash_pop takes an explicit stash@{n} ref (non-top entry)", [&] {
+        put(root / "a.txt", "older-wip\n");
+        taocode::git::stash_save(root, "older");
+        put(root / "a.txt", "newer-wip\n");
+        taocode::git::stash_save(root, "newer");
+        const auto entries = taocode::git::stash_list(root).at("entries");
+        check(entries.size() >= 2, "two stashes on the stack");
+        check(entries[0].at("ref").get<std::string>() == "stash@{0}", "list is stack order (top first)");
+        // 取回**第二条**（older）：证明按 ref 取回的正是那一条，而不是栈顶。
+        taocode::git::stash_pop(root, "stash@{1}");
+        check(read_text(root / "a.txt") == "older-wip\n", "popped the older stash by its ref");
+        taocode::git::revert(root, "a.txt");
+        // 剩下栈顶（newer）还在，继续按 ref 弹掉，收尾干净。
+        taocode::git::stash_pop(root, "stash@{0}");
+        check(read_text(root / "a.txt") == "newer-wip\n", "popped the remaining stash by its ref");
+        taocode::git::revert(root, "a.txt");
+        check(taocode::git::stash_list(root).at("entries").empty(), "both stashes consumed");
+    });
+
     run("create_branch and merge integrate a topic branch", [&] {
         const auto base = taocode::git::head(root);
         check(!base.empty() && base[0] != '(', "current head is a named branch, got: " + base);
@@ -375,6 +419,203 @@ int main() {
             left += " " + change.path + "(X" + change.index_status + "Y" + change.work_status +
                     (change.untracked ? " untracked" : "") + (change.staged ? " staged" : "") + ")";
         check(rest.empty(), "工作区重新干净，还剩:" + left);
+    });
+
+    // ── 部分提交（「提交文件…」，上游 `CheckinFiles` = `VcsActions.xml:187`）的端到端判据 ──
+    // 这四条跑在**上面那个专用临时仓库**里：只建一次、每条用自己的文件名，不共享 `root`、不靠时序。
+    const auto scoped_commit = [&](const std::string& message, const std::vector<std::string>& paths) {
+        taocode::git::commit(scope, message, false, false, "", "", paths);
+    };
+    const auto find_change = [](const std::vector<Change>& changes, const std::string& path) {
+        for (const auto& change : changes) if (change.path == path) return &change;
+        return static_cast<const Change*>(nullptr);
+    };
+
+    // 判据本体：**选择子集 ⇒ 只提交子集**。两篇都已暂存、其中一篇还带一半未暂存的改动，
+    // 只提交被选的那一篇 ⇒ HEAD 里只有它，没被选的那一篇仍原样留在暂存区（一条不丢）。
+    run("partial commit: only the selected subset lands, the other stays staged", [&] {
+        check(scope_ready, "专用临时仓库没建起来，这一族判据全部作废");
+        put(scope / "sc-keep.txt", "keep two\n");
+        put(scope / "sc-pick.txt", "pick two\n");
+        git(scope, L"add -A");                        // 两篇都已暂存
+        put(scope / "sc-pick.txt", "pick three\n");   // 被选的这篇再改一次 ⇒ MM（暂存 + 未暂存混着）
+        const auto before = taocode::git::status(scope);
+        const auto* keep_before = find_change(before, "sc-keep.txt");
+        const auto* pick_before = find_change(before, "sc-pick.txt");
+        check(keep_before && keep_before->staged, "前提：sc-keep.txt 已暂存");
+        check(pick_before && pick_before->staged && pick_before->work_status == "M",
+              "前提：sc-pick.txt 是 MM（暂存一半、工作区还有一半）");
+        scoped_commit("sc: only pick", {"sc-pick.txt"});
+        const auto patch = taocode::git::show_commit(scope, "HEAD").at("patch").get<std::string>();
+        check(patch.find("sc-pick.txt") != std::string::npos, "这次提交里有被选的那一篇，got: " + patch);
+        check(patch.find("sc-keep.txt") == std::string::npos, "这次提交里没有没被选的那一篇");
+        // 混用暂存/未暂存那一档的实测口径：--only 取**工作区内容**，所以被选这篇的两半一起进去
+        // （与上游一致：上游把被选项的当前内容 addPathsForce 进 index，`GitFileUtils.kt:171-178`）。
+        check(patch.find("pick three") != std::string::npos,
+              "被选那一篇连没暂存的那一半一起提交（工作区内容才是提交内容），got: " + patch);
+        const auto after = taocode::git::status(scope);
+        const auto* keep = find_change(after, "sc-keep.txt");
+        check(keep != nullptr && keep->staged && keep->index_status == "M",
+              "没被选的那一篇仍留在暂存区，一条不动");
+        check(find_change(after, "sc-pick.txt") == nullptr, "被选那一篇提交完整个从变更列表里消失");
+        const auto kept_log = taocode::git::log(scope, "sc-keep.txt", 5).at("commits");
+        check(!kept_log.empty() && kept_log[0].at("subject").get<std::string>() == "sc-base",
+              "反向验证：没被选的那一篇最近一次提交还是 sc-base（不是这次），got: " + kept_log.dump());
+    });
+
+    // 未跟踪的被选项：git 不认陌生 pathspec（实测 `error: pathspec '…' did not match any file(s)
+    // known to git`）⇒ native 只对**未跟踪的那几条** add；同时"只提交子集"要连未跟踪的一起成立 ——
+    // 另一篇未跟踪的文件不能顺手被 add 进来。
+    run("partial commit: an untracked selection is added without dragging the other one in", [&] {
+        check(scope_ready, "专用临时仓库没建起来");
+        put(scope / "sc-new.txt", "brand new\n");
+        put(scope / "sc-other.txt", "other new\n");
+        scoped_commit("sc: new only", {"sc-new.txt"});
+        const auto patch = taocode::git::show_commit(scope, "HEAD").at("patch").get<std::string>();
+        check(patch.find("sc-new.txt") != std::string::npos && patch.find("new file mode") != std::string::npos,
+              "未跟踪的被选项作为新文件进这次提交，got: " + patch);
+        check(patch.find("sc-other.txt") == std::string::npos, "另一篇未跟踪的文件没被顺手带进去");
+        const auto after = taocode::git::status(scope);
+        const auto* other = find_change(after, "sc-other.txt");
+        check(other && other->untracked && !other->staged, "另一篇仍然是未跟踪（也没被 add 过）");
+    });
+
+    // 重命名**必须成对**：上游一条 `ChangedPath` 同时带 beforePath/afterPath
+    // （`GitCheckinEnvironment.kt:403-404`）。单边提交实测写出坏历史（只给新路径 ⇒ `A` + HEAD 里旧路径
+    // 还在；只给旧路径 ⇒ `D` + 新内容留在 index）。这里还要顺带证明"旧路径交给 git 但不 add"是可行的：
+    // 实测 `git add -- <已 mv 走的旧路径>` 直接 fatal 128，`--ignore-errors` 压不住。
+    run("partial commit: a rename goes as a pair or not at all", [&] {
+        check(scope_ready, "专用临时仓库没建起来");
+        git(scope, L"mv sc-pair.txt sc-renamed.txt");
+        bool one_sided = false;
+        std::string reason;
+        try { scoped_commit("sc: rename new side only", {"sc-renamed.txt"}); }
+        catch (const taocode::WorkspaceError& error) {
+            one_sided = std::string(error.code) == "INVALID_REQUEST";
+            reason = error.what();
+        }
+        check(one_sided, "只给新路径的重命名必须被拒（否则写出\"新增一份 + 旧的还留在 HEAD\"的坏历史）");
+        check(reason.find("成对") != std::string::npos, "拒因要说清是成对问题，got: " + reason);
+        // 反向验证：旧路径那一侧单独给也要被拒（两种单边都是坏历史）。
+        bool old_only = false;
+        try { scoped_commit("sc: rename old side only", {"sc-pair.txt"}); }
+        catch (const taocode::WorkspaceError& error) { old_only = std::string(error.code) == "INVALID_REQUEST"; }
+        check(old_only, "只给旧路径的重命名同样要被拒");
+        // 两朵一起给 ⇒ 一次真正的重命名（上游那条 ChangedPath 的等价结果），而且不需要 add 旧路径。
+        scoped_commit("sc: renamed", {"sc-renamed.txt", "sc-pair.txt"});
+        const auto patch = taocode::git::show_commit(scope, "HEAD").at("patch").get<std::string>();
+        check(patch.find("sc-renamed.txt") != std::string::npos, "重命名的新路径在这次提交里，got: " + patch);
+        check(patch.find("new file mode") == std::string::npos,
+              "这次提交不是\"新增一份副本\"：没有 new file mode，got: " + patch);
+        const auto tree = taocode::git::status(scope);
+        check(find_change(tree, "sc-pair.txt") == nullptr && find_change(tree, "sc-renamed.txt") == nullptr,
+              "两朵路径提交完都从变更列表里消失");
+        const auto old_log = taocode::git::log(scope, "sc-pair.txt", 5).at("commits");
+        check(!old_log.empty() && old_log[0].at("subject").get<std::string>() == "sc: renamed",
+              "旧路径的历史跟着这次重命名走到底（HEAD 里它已经不在了），got: " + old_log.dump());
+    });
+
+    // pathspec 那一面：落在 `--` 之后所以读不成选项，但"必须是仓库相对的写法"要有人管。
+    // 上面那六条形状都是实测出来的口径（详见 native/git.cpp 的 checked_pathspec 注释）；
+    // 下面另两批是 2026-10-06 commitpaths 补的：通配/魔术那五档（W3）与两条上限的边界（W4）。
+    run("partial commit: pathspec must be a repo-relative POSIX path", [&] {
+        check(scope_ready, "专用临时仓库没建起来");
+        const std::vector<std::pair<std::string, std::string>> rejected = {
+            {"../sc-escape.txt", "越出仓库"},
+            {"--sc-option.txt", "读成命令行选项"},
+            {"C:/taocode/outside.txt", "仓外绝对路径"},
+            {"sc\\windows.txt", "反斜杠分隔符（git 的 pathspec 不认，实测只会报\"没有这个文件\"）"},
+            // NUL 不能写成字面量里的 \u0000：std::string 从 const char* 构造时会在第一个 NUL 处截断，
+            // 那条 case 就悄悄变成"sc-nul"。这里显式拼长度。
+            {std::string("sc-nul") + '\0' + ".txt", "控制字符（到 git 那一头 argv 会被截断）"},
+            {"sc-unknown.txt", "没有可提交的变更（上游 `NOT_CHANGED` 那一档动作直接不启用）"},
+        };
+        for (const auto& [path, label] : rejected) {
+            const auto tip_before = taocode::git::log(scope, "", 1).at("commits")[0].at("hash").get<std::string>();
+            bool refused = false;
+            std::string code;
+            try { scoped_commit("sc: must not run", {path}); }
+            catch (const taocode::WorkspaceError& error) { refused = true; code = error.code; }
+            check(refused, "非法 pathspec 要挡下来：" + label);
+            check(code == "INVALID_REQUEST", "挡下来的是 INVALID_REQUEST 而不是让 git 撞死：" + label + "，got: " + code);
+            check(taocode::git::log(scope, "", 1).at("commits")[0].at("hash").get<std::string>() == tip_before,
+                  "被拒的那一发既没调 git 也没生成提交：" + label);
+        }
+        // 一条 pathspec 被拒时**到底是哪一道闸**拒的：返回 (错误码, 错误消息)，没拒就返回空对。
+        // 为什么必须钉消息而不是只钉"被拒了"—— 本文件 `commit()` 的下面还有一道兜底：它拿 pathspec 与
+        // 变更行**按字面**比（`change.path == path || change.path.startswith(path + '/')`），
+        // 通配 `*.ts` 比不中任何一行 ⇒ **就算把 checked_pathspec 的通配/魔术闸整个摘掉，这一发照样抛
+        // INVALID_REQUEST**。2026-10-06 commitpaths 反向验证实测：只查 `refused` 时摘闸仍然 Passed
+        // （假绿），加了下面这三档（消息里要有新闸的标记、且不许漂到兜底那句）才会红。
+        const std::string fallback = "这个路径没有可提交的变更";
+        const auto refuse = [&](const std::vector<std::string>& paths) -> std::pair<std::string, std::string> {
+            try { scoped_commit("sc: must not run", paths); }
+            catch (const taocode::WorkspaceError& error) { return {error.code, error.what()}; }
+            return {};
+        };
+        const auto head_untouched = [&](const std::string& tip_before, const std::string& label) {
+            check(taocode::git::log(scope, "", 1).at("commits")[0].at("hash").get<std::string>() == tip_before,
+                  "被拒的那一发既没调 git 也没生成提交：" + label);
+        };
+        // 通配与魔术（2026-10-06 commitpaths 落地 W3）：五档与前端 src/commitChecks.ts 的
+        // PATHSPEC_MAGIC_RE = /[*?[]|:\(|^:/ 逐条同源。实测依据来自 partialcommit 那批的临时仓：
+        // `git commit --only -- '*.ts'` 一次提交走两篇、`-- 'foo[1].ts'` 连 `foo1.ts` 一起提交走
+        // ⇒ "只提交选中的路径"会提交得比选中的多，这是这一族最贵的错；上游不发 pathspec（改的是 index），
+        // 所以这道闸只能本仓自己补。前端那道挡的是面板这条路，挡不住宿主直接递进来的同一份形状。
+        for (const auto& [path, label] : std::vector<std::pair<std::string, std::string>>{
+                 {"*.ts", "通配星号"},
+                 {"a?.ts", "通配问号"},
+                 {"sc-bracket[1].ts", "字符类"},
+                 {":(exclude)sc-ok.txt", "pathspec 魔术：把选中的那一篇反向排除掉"},
+                 {":!sc-ok.txt", "魔术前缀的简写（开头的 `:` 就是魔术，不是文件名）"}}) {
+            const auto tip_before = taocode::git::log(scope, "", 1).at("commits")[0].at("hash").get<std::string>();
+            const auto [code, message] = refuse({path});
+            check(code == "INVALID_REQUEST", "通配/魔术 pathspec 要挡下来：" + label + "，got: " + code);
+            check(message.find("pathspec") != std::string::npos,
+                  "拒它的是 checked_pathspec 的**通配/魔术**那一道：" + label + "，got: " + message);
+            check(message.find(fallback) == std::string::npos,
+                  "不许漂到\"没有可提交的变更\"那道兜底上（摘掉新闸就是这一条先红）：" + label);
+            head_untouched(tip_before, label);
+        }
+        // 两条**上限**（2026-10-06 commitpaths W4）：闸一直在（native/git.cpp 的 `path.size() > 512`
+        // 与 `paths.size() > 500`），但此前没有任何一条用例打到它们 ⇒ 只证明得"前后端数字一样"，
+        // 证明不了"native 真按这个数拒"。两条都在调 git 之前拒，HEAD 一动不动。
+        const auto tip = taocode::git::log(scope, "", 1).at("commits")[0].at("hash").get<std::string>();
+        const auto [long_code, long_message] = refuse({std::string(513, 'a') + ".ts"});
+        check(long_code == "INVALID_REQUEST", "单条 pathspec 超过 512 字节要拒，got: " + long_code);
+        check(long_message.find(fallback) == std::string::npos,
+              "超长那一发拒在**长度**那道闸上，不是兜底那句：" + long_message);
+        // 数的是**字节**不是字符：171 个汉字 = 513 字节（UTF-8 每字 3 字节，源文件按 /utf-8 编），
+        // 按字符数才是 171 —— 前端 utf8ByteLength 同一口径，判据在 tests/commit-scope.test.mjs。
+        // 这一句钉在这儿，免得后来人把两边一起改回按字符数。
+        std::string wide_cjk;
+        for (int i = 0; i < 171; ++i) wide_cjk += "\xE4\xB8\xAD";  // U+4E2D「中」
+        check(wide_cjk.size() == 513, "这条用例自己得先是 513 字节，got: " + std::to_string(wide_cjk.size()));
+        const auto [cjk_code, cjk_message] = refuse({wide_cjk});
+        check(cjk_code == "INVALID_REQUEST", "513 **字节**的中文路径同样要拒（按字符数算它是 171，会被放行），got: " + cjk_code);
+        check(cjk_message.find(fallback) == std::string::npos, "中文超长那一发也不许漂到兜底那句");
+        // 条数上限的**边界**：501 条撞"条数"那一档（消息里有 500），500 条不撞 ——
+        // 两边用的都是不存在的文件，所以 500 那一发必然落进兜底那句，两档因此可分辨。
+        std::vector<std::string> too_many;
+        for (int i = 0; i < 501; ++i) too_many.push_back("sc-many-" + std::to_string(i) + ".ts");
+        const auto [many_code, many_message] = refuse(too_many);
+        check(many_code == "INVALID_REQUEST", "501 条 pathspec 要拒（与前端 MAX_COMMIT_PATHS = 500 同一个数），got: " + many_code);
+        check(many_message.find("500") != std::string::npos,
+              "拒的是**条数**那一档而不是兜底那句，got: " + many_message);
+        too_many.pop_back();  // 500 条 = 上限内
+        const auto [at_limit_code, at_limit_message] = refuse(too_many);
+        check(at_limit_code == "INVALID_REQUEST", "500 条那一发仍然要拒（文件不存在），got: " + at_limit_code);
+        check(at_limit_message.find("500") == std::string::npos,
+              "但拒它的不是条数那一档（否则上面那条可以是\"谁都拒\"），got: " + at_limit_message);
+        check(at_limit_message.find(fallback) != std::string::npos,
+              "500 条正好在上限内，一路走到\"没有可提交的变更\"那道兜底，got: " + at_limit_message);
+        check(taocode::git::log(scope, "", 1).at("commits")[0].at("hash").get<std::string>() == tip,
+              "这些上限/通配用例都没生成提交");
+        // 反向对照：同一个仓库里一条**合法**的相对 pathspec 照样提交得动（否则上面那些可以是"谁都拒"）。
+        put(scope / "sc-ok.txt", "ok\n");
+        scoped_commit("sc: ok", {"sc-ok.txt"});
+        check(taocode::git::show_commit(scope, "HEAD").at("patch").get<std::string>().find("sc-ok.txt")
+                  != std::string::npos, "合法路径照常提交");
     });
 
     run("git.user reads the repository author and can be overridden for one commit", [&] {        const auto configured = taocode::git::user(root);
@@ -606,6 +847,8 @@ int main() {
         }
     });
 
+    // 两个临时仓库都要收掉：`scope` 是这一族（部分提交）自己建的，带进程号，不留给下一次跑测。
+    fs::remove_all(scope, ec);
     fs::remove_all(root, ec);
     std::cout << passed << " passed, " << failures << " failed\n";
     return failures == 0 ? 0 : 1;

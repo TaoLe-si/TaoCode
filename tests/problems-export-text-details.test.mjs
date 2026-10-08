@@ -23,8 +23,10 @@ test('复选框有宿主：默认勾上（上游 setSelected(true)）', () => {
 })
 
 test('导出调用把开关传进 errorTreeText（不再吃缺省值）', () => {
-  assert.match(panel, /errorTreeText\(props\.problems, \{ details: exportDetails\.value \}\)/,
-    '`errorTreeText` 仍然只拿一个参数 ⇒ details=false 那一档不可达（W4 的核心缺陷）')
+  // 落地形状比本条初版多带一个 `groups`（导出要按分组树排），但本条要钉的那件事没变：
+  // **第二参里的 `details` 必须来自那颗开关**，缺了它 `details=false` 那一档就不可达。
+  assert.match(panel, /errorTreeText\([^\n]*, \{ details: exportDetails\.value/,
+    '`errorTreeText` 没有把 `details` 从开关传进去 ⇒ 只拿缺省值，details=false 那一档不可达（W4 的核心缺陷）')
 })
 
 test('模板里那颗复选框绑的是这个开关，且带无障碍名', () => {

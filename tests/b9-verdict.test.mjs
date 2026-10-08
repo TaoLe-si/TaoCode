@@ -250,30 +250,6 @@ function checkEvidence(name, evidence, source, label) {
  * 没被任何漂移命中的条目也判红 ⇒ 镜像行修好后，这张表必须跟着删干净。
  */
 const REGISTERED_DRIFT = [
-  {
-    name: 'ApplyNonConflictsAction',
-    path: 'platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt',
-    b7: '[x]',
-    b9: '[~]',
-    batch: '2026-10-06 fold3 lane（docs/batch-2026-10-06-merge3.md）把 B7 那一行按行为 [~] → [x]',
-    pending: 'docs/wiring-requests-2026-10-06-b89.md',
-    reason: '两桶按当前代码**确实应当同档 [x]**：B9 的镜像行仍写着「缺：自动接受全部不冲突改动」，'
-      + '而这一整条链在本仓已经落地（下面 repo 五条逐行开过）。漂移的原因是 settings-run 判决书不在'
-      + '本次可改面（改它要连带动头部四档和数与 §A/§B 小节标题，归 settings-run 那条 lane），'
-      + '所以按 (c) 档登记而不是改文档迁就测试。',
-    upstream: [
-      { file: 'platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt', line: 31, token: 'hasNonConflictedChanges' },
-      { file: 'platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt', line: 35, token: 'applyNonConflictedChanges' },
-    ],
-    repo: [
-      { file: 'src/mergeResolve.ts', line: 408, token: 'resolveConflictsInText' },
-      { file: 'src/mergeResolve.ts', line: 427, token: 'onlyNonConflicts' },
-      { file: 'src/mergeResolve.ts', line: 450, token: 'APPLY_NON_CONFLICTS_TEXT' },
-      { file: 'src/changesMenuActions.ts', line: 67, token: 'applyNonConflicts' },
-      { file: 'src/mergeResolveHost.ts', line: 43, token: 'applyNonConflictingChanges' },
-      { file: 'src/components/SourceControl.vue', line: 227, token: 'applyNonConflicts' },
-    ],
-  },
 ]
 
 test('与 B7 的 630 条重叠类逐条交叉核对（同档必须声明继承，异档必须给本域机械理由）', () => {

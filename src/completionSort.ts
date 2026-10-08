@@ -26,12 +26,12 @@
 /**
  * 本地贡献者条目的排序前缀。② 这一档按**降序**比（见上），所以要"排在服务端候选之后"
  * 就得用一个比所有可打印字符都小的前缀：`!`（0x21）。
- * 组号 `0`=文档词、`1`=命令条目；同组内靠后面的载荷排（出现次数 / 优先级）。
+ * 组号 `0`=文档词、`1`=命令条目、`2`=错误修复命令；同组内靠后面的载荷排（出现次数 / 优先级）。
  */
 export const LOCAL_SORT_PREFIX = '!'
 
 /** 本地条目的排序键。`group` 决定它在本组里的先后（见 `LOCAL_SORT_PREFIX`）。 */
-export function localSortKey(group: 0 | 1, payload: string): string {
+export function localSortKey(group: 0 | 1 | 2, payload: string): string {
   return `${LOCAL_SORT_PREFIX}${group}${payload}`
 }
 

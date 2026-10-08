@@ -61,9 +61,11 @@ function commentContentColumn(line: string): number | null {
 
 /**
  * 一条 TODO 的续行（`findContinuation` 的本仓等价物）。入参：文件按行切好的数组、
- * 标记所在行（**1 基**，与 `SearchMatch.line` 同口径）、标记起始列（**0 基**，与
- * `SearchMatch.column` 同口径）、模式表（用于「续行自己又是一个新 TODO」时停止，
- * `IndexPatternSearcher.java:309-312` 的 `break outer`）。
+ * 标记所在行（**1 基**，与 `SearchMatch.line` 同口径）、标记起始列（**0 基**的匹配起始
+ * **偏移**，对齐上游 `matcher.start()`；2026-10-06 todo2 读盘订正：`SearchMatch.column` 其实是
+ * **1 基**码点列 —— native/search.cpp:698 是 `code_points(...) + 1`，此前注释把它说成 0 基，
+ * 换算由调用方 `TodoPanel.vue` 的 `(item.column ?? 1) - 1` 做）、模式表（用于「续行自己又是一个
+ * 新 TODO」时停止，`IndexPatternSearcher.java:309-312` 的 `break outer`）。
  *
  * 逐条对照上游的停止条件（`IndexPatternSearcher.java:283-313`）：
  *   1. 续行必须比标记列更长，且标记列那一个字符是空白/行尾
@@ -123,11 +125,20 @@ export function todoDisplayText(head: string, additional: readonly string[]): To
 export interface MarkerRegion { start: number; length: number }
 
 /**
- * 一行文本里标记词的位置（`TodoHighlightVisitor.java:96-107`：拿 `getWordToHighlight()`
- * 在区间里 `indexOfIgnoreCase`）。这里收全部出现而不是第一处，预览里要把整条注释的
- * 标记都上色。正则写法（`TODO|FIXME`）退化成「逐条模式按字面找」—— 与本仓
- * `markerMatches` 的容错口径一致，坏正则不抛异常。
+ * 一行文本里标记词的位置（`TodoHighlightVisitor.java:91-93`：拿 `getWordToHighlight()`
+ * 在区间里 `Strings.indexOfIgnoreCase` 定位）。上游那个词是**从正则里抽出的字面词**
+ * （`IndexPattern.java:61-65` 取 `IndexPatternOptimizerImpl.java:22-24` 的字面表，内置两条
+ * 短路成 `todo` / `fixme`），抽不出来（`:92` 拿到 null）就整条不画。
+ *
+ * 订正（2026-10-06 todo2）：这里此前把模式 `split('|')` 之后按**字面串** `indexOf` 找，
+ * 于是出厂表里的 `\btodo\b.*` 当字面永远找不到 —— 预览的标记上色对出厂模式从不生效。
+ * 现在与 `markerMatches` 同一口径：模式**原样**当正则跑，取匹配串开头的词面段作为"标记词"
+ * （对 `\btodo\b.*` / `TODO:` 都得到 `todo` / `TODO`，与上游抽出的字面词同一个）；
+ * 匹配以非词字符开头就没有标记词，整条不画（同一道 null 门）。收全部出现而不是第一处，
+ * 预览里要把整条注释的标记都上色。正则写坏退化为整条字面包含，不抛异常。
  */
+const WORD_RUN = /^[0-9A-Za-z_]*/
+
 export function todoMarkerRegions(
   text: string, patterns: readonly { pattern: string; caseSensitive?: boolean }[],
 ): MarkerRegion[] {
@@ -135,15 +146,26 @@ export function todoMarkerRegions(
   for (const pattern of patterns) {
     const source = pattern.pattern.trim()
     if (!source) continue
-    const alternatives = source.split('|').map(part => part.trim()).filter(Boolean)
-    for (const word of alternatives) {
-      const needle = pattern.caseSensitive ? word : word.toLowerCase()
-      const haystack = pattern.caseSensitive ? text : text.toLowerCase()
+    const caseSensitive = pattern.caseSensitive === true
+    let expression: RegExp | null = null
+    try { expression = new RegExp(source, caseSensitive ? 'g' : 'gi') } catch { expression = null }
+    if (expression === null) {
+      // 坏正则：整条模式按字面找（与 markerMatches 的退化路径一致）。
+      const needle = caseSensitive ? source : source.toLowerCase()
+      const haystack = caseSensitive ? text : text.toLowerCase()
       let at = haystack.indexOf(needle)
       while (at >= 0) {
         regions.push({ start: at, length: needle.length })
         at = haystack.indexOf(needle, at + needle.length)
       }
+      continue
+    }
+    let match: RegExpExecArray | null
+    while ((match = expression.exec(text)) !== null) {
+      if (match[0] === '') { expression.lastIndex++; continue }  // 空匹配不原地打转
+      const word = WORD_RUN.exec(match[0])?.[0] ?? ''
+      // 没有词面开头的标记词 ⇒ 整条不画（上游 `:92` 的 null 门）。
+      if (word) regions.push({ start: match.index, length: word.length })
     }
   }
   return regions.sort((a, b) => a.start - b.start)

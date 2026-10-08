@@ -222,7 +222,7 @@ const unavailability = computed(() => [
     <div v-for="row in rows" :key="row.name" class="ssf-row" :class="{ broken: row.broken }">
       <div class="ssf-var">
         <code class="ssf-var-name">${{ row.name }}$</code>
-        <span v-if="row.occurrences > 1" class="ssf-occ" :title="'该变量在模板里出现 ' + row.occurrences + ' 次，修饰符只能写在第一处（上游同一条规则）'">×{{ row.occurrences }}</span>
+        <span v-if="row.occurrences > 1" class="ssf-occ" :title="'该变量在模板里出现 ' + row.occurrences + ' 次，修饰符只能写在第一处'">×{{ row.occurrences }}</span>
       </div>
       <ul class="ssf-summary">
         <li v-for="item in summaries(row.constraint)" :key="item.filter" :class="{ isdefault: item.isDefault }">
@@ -266,7 +266,7 @@ const unavailability = computed(() => [
         <input class="ssf-text" type="text" spellcheck="false" :value="whole.regexp" placeholder="给全部变量的名字正则，留空即不限制" aria-label="整模板名字正则" @input="whole.regexp = ($event.target as HTMLInputElement).value" />
         <label class="ssf-check"><input type="checkbox" :checked="whole.invert" :disabled="!whole.regexp" aria-label="取反整模板正则" @change="onInvertWhole" /><span>取反</span></label>
         <label class="ssf-check"><input type="checkbox" :checked="whole.unbounded" aria-label="全部变量不限次数" @change="whole.unbounded = ($event.target as HTMLInputElement).checked" /><span>不限次数</span></label>
-        <button class="ssf-apply" type="button" :disabled="!wholeEditable" :title="wholeEditable ? '把上面这一份修饰符写给模板里的每个变量' : '整模板档与当前后缀一致，没有要写的改动'" @click="applyWhole">应用到全部变量</button>
+        <button class="ssf-apply" type="button" :disabled="!wholeEditable" :title="wholeEditable ? '' : '整模板档与当前后缀一致，没有要写的改动'" @click="applyWhole">应用到全部变量</button>
       </fieldset>
     </div>
 
@@ -303,20 +303,20 @@ const unavailability = computed(() => [
 .ssf-var-name { font: 12px/1.4 var(--font-mono); color: var(--text); }
 .ssf-occ { font-size: 11px; color: var(--muted); cursor: help; }
 .ssf-summary { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; font-size: 11px; color: var(--muted); }
-.ssf-summary li { display: inline-flex; gap: 4px; align-items: baseline; }
+.ssf-summary li { display: inline-flex; gap: var(--space-1); align-items: baseline; }
 .ssf-summary li.isdefault .ssf-label { color: var(--muted); font-style: italic; }
 .ssf-filter { color: var(--secondary); }
 .ssf-label { font-family: var(--font-mono); color: var(--text); }
 .ssf-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
-.ssf-legend { float: left; width: 44px; padding: 0; margin-right: 4px; font-size: 11px; color: var(--secondary); }
-.ssf-field { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
-.ssf-field input, .ssf-text { height: var(--ctrl-height-sm); box-sizing: border-box; padding: 0 4px; font: 12px/1.4 var(--font-mono); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); }
+.ssf-legend { float: left; width: 44px; padding: 0; margin-right: var(--space-1); font-size: 11px; color: var(--secondary); }
+.ssf-field { display: inline-flex; align-items: center; gap: var(--space-1); font-size: 11px; color: var(--muted); }
+.ssf-field input, .ssf-text { height: var(--ctrl-height-sm); box-sizing: border-box; padding: 0 var(--space-1); font: 12px/1.4 var(--font-mono); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); }
 .ssf-field input { width: 46px; }
 .ssf-text { flex: 1 1 160px; min-width: 120px; }
-.ssf-check { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.ssf-check { display: inline-flex; align-items: center; gap: var(--space-1); font-size: 11px; color: var(--muted); }
 .ssf-check input { width: auto; margin: 0; }
 .ssf-check input:disabled + span { color: var(--line-strong); }
-.ssf-warn { grid-column: 2; margin: 0; font-size: 11px; color: var(--danger); }
+.ssf-warn { grid-column: 2; margin: 0; font-size: 11px; color: var(--error); }
 .ssf-warn-global { grid-column: unset; }
 .ssf-defs { align-items: start; }
 .ssf-text.defined { border-color: var(--accent); }

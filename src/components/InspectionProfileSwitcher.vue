@@ -26,7 +26,7 @@ function onChange(event: Event) {
 </script>
 
 <template>
-  <label v-if="names.length > 1" class="status-chip status-inspection-profile" :title="`检查配置档（上游 InspectionProfileManager.setRootProfile）${locked ? ' · 已锁定' : ''}`">
+  <label v-if="names.length > 1" class="status-chip status-inspection-profile" :title="`检查配置档${locked ? ' · 已锁定' : ''}`">
     <span class="status-inspection-profile-label">配置档</span>
     <select class="status-inspection-profile-select" :value="currentProfileName()" aria-label="检查配置档" @change="onChange">
       <option v-for="name in names" :key="name" :value="name">{{ name }}</option>

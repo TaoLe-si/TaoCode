@@ -29,20 +29,20 @@ watch(() => props.item, (item, _old, onCleanup) => {
 
 <template>
   <aside class="se-preview" aria-label="文件只读预览" :aria-busy="loading">
-    <p v-if="loading" role="status">正在读取预览…</p>
-    <p v-else-if="error" role="status">无法预览：{{ error }}</p>
+    <p v-if="loading" class="se-preview-message" role="status">正在读取预览…</p>
+    <p v-else-if="error" class="se-preview-message" role="status">无法预览：{{ error }}</p>
     <template v-else-if="preview">
-      <header :title="preview.path">{{ preview.path }} · {{ preview.origin === 'buffer' ? '编辑器缓冲区' : '磁盘' }}只读预览</header>
+      <header class="se-preview-meta" :title="preview.path">{{ preview.path }} · {{ preview.origin === 'buffer' ? '编辑器缓冲区' : '磁盘' }}只读预览</header>
       <SearchEverywherePreviewEditor :document="preview" />
-      <footer>全文可滚动 · 在搜索框按回车打开选中结果</footer>
+      <footer class="se-preview-note">全文可滚动 · 在搜索框按回车打开选中结果</footer>
     </template>
-    <p v-else>此结果没有可用预览。</p>
+    <p v-else class="se-preview-message">此结果没有可用预览。</p>
   </aside>
 </template>
 
 <style scoped>
 .se-preview { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-header, footer, p { padding: 8px 12px; margin: 0; font-size: 12px; }
-header { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-footer { opacity: .65; }
+.se-preview-meta, .se-preview-note, .se-preview-message { padding: var(--space-2) var(--space-3); margin: 0; font-size: 12px; }
+.se-preview-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-preview-note { opacity: .65; }
 </style>

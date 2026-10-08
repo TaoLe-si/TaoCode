@@ -119,7 +119,7 @@ function switchTabIn(pane: Pane, tab: Tab) {
   touchHistory(tab.path)
   // The caret only moves through the editor's own cursor event; re-selecting the tab
   // that already had focus would otherwise stamp line 1 into Recent Locations.
-  rememberPlace({ kind: '文件', path: tab.path, line: Math.max(0, tab.line - 1), label: tab.path })
+  rememberPlace({ kind: '文件', path: tab.path, line: Math.max(0, tab.line - 1), label: tab.path, pane: groups[pane] })
   // 真的换了文件才通知（重复点同一个标签不该再读一次盘）。
   if (tab.path !== previous) deps.onTabActivated?.(tab.path)
 }

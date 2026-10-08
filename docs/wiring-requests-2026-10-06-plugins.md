@@ -296,3 +296,23 @@ props 加 `marketRoot?: string`，初值 `props.marketRoot ?? DEFAULT_REPOSITORY
 ⇒ **上游指不到 ⇒ 不写这条请求**（规约 §1「指不到就写无法核实」、§3「不放假控件」）。
 本仓那句「插件目录：用户配置目录下的 `plugins`」（`src/components/PluginDialog.vue:391`）**保持不可点**，
 直到有人在上游树里真找到那条动作。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **P-1（打开插件页并定位到某插件）** —— 目标 `src/App.vue`（本 lane）+ `PluginDialog.vue` / `PluginMarketPanel.vue`（本 lane）。登记为待办（接收侧已做完，宿主入口未接）。
+- **P-2（`pluginMarketRoot` 持久键）** —— `src/settingsModel.ts`（保留）+ native，需 settings owner。
+- **P-3 / P-4** —— 维持未闭环（需宿主目录/安全决策）。
+- **P-5** —— 已撤销。
+
+结论：零接线（P-1 登记，P-2 转 owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（P-1 登记，P-2 转 owner）。」。
+P-1 复核仍未闭环：`grep pluginFocusId|openPluginsAndSelect src/` 0 命中，`App.vue` 的 `<PluginDialog>` 无 `:focus-plugin`。宿主入口需 `src/projectExtras.ts` 的模块侧（`pluginFocusId` ref + `openPluginsAndSelect`）—— 该文件不在本 lane 可改面，转 projectExtras owner。P-2 需 `src/settingsModel.ts` + native；P-3/P-4 native/安全决策。
+
+## 处理结果（EP 化收口 lane，2026-10-07）
+
+**P-1 已落（模块侧）**：`src/projectExtras.ts` 新增 `pluginFocusId`（ref）与 `openPluginsAndSelect(id)`，
+并已从返回对象带出。**宿主挂载点**（App.vue 解构两个键 + `<PluginDialog :focus-plugin="pluginFocusId">`、
+关闭清空）写在 `docs/wiring-requests-2026-10-07-epclose.md` W-1。P-2/P-3/P-4 结论不变。

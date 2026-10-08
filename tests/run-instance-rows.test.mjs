@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   activeRunInstance,
+  applyRunInstanceSnapshot,
   chooseReuseInstance,
   closeRunView,
   consoleBufferChars,
@@ -388,8 +389,11 @@ test('行模型不是只过自己测试的死代码：清单从它投影，判�
   assert.match(source, /stoppable: instanceStoppable\(instance\)/)
   assert.match(source, /tabDescription: runInstanceTabDescription\(instance\)/)
   assert.match(source, /exitText: runInstanceExitText\(instance\)/)
-  assert.match(source, /badge: stopCounterText\(count, place\)/)
   assert.match(source, /truncated: instance\.output\.length >= RUN_OUTPUT_LIMIT/)
+  // 停止动作的装配在 2026-10-06 拆到 `src/runStopAction.ts`（本文件贴 900 行上限）：
+  // `stopCounterText` 的调用点跟着搬过去，判据读新文件。
+  const stop = read('src/runStopAction.ts')
+  assert.match(stop, /badge: stopCounterText\(count, place\)/)
 })
 
 test('解码器确实按实例分（模块里那张 Map 是唯一事实来源）', () => {
@@ -419,4 +423,160 @@ test('关闭视图后标签条不列它，但行模型还在（清单看的是"�
   assert.deepEqual(rows.map(row => row.kill), [true, false])
   assert.deepEqual(runningListRows(0).map(row => row.id), [501, 502])
   assert.deepEqual(runningListRows(0).map(row => row.icon), ['kill', 'run'])
+})
+
+// ── 运行仪表盘的行也是从行模型投影（runinst2：三处同一个名字 / 同一份可停性） ────────────────
+//
+// 上游依据：标签条与清单读的是同一个字符串（`RunContentDescriptor.getDisplayName()`，
+// `platform/execution-impl/src/com/intellij/execution/ui/RunContentManagerImpl.kt:312` 把
+// content 的 displayName 设成它），运行状态则来自
+// `platform/lang-api/src/com/intellij/execution/dashboard/RunDashboardRunConfigurationStatus.java:59-77`。
+// ⇒ 一个实例在**任何**列表里都该是同一个名字、同一份「能不能停 / 是不是 Kill process」。
+
+/** 把行模型喂给仪表盘的同一个形状（宿主 `MainToolbar.vue:146` 就是这么映射 `runInstanceList()` 的）。 */
+const dashInput = instance => ({
+  id: instance.id, label: instance.label, running: instance.running, exit: instance.exit,
+  startedAt: instance.startedAt, pid: instance.pid,
+})
+
+test('记录被删掉后 id 与起跑下标分叉：仪表盘与标签条必须仍是同一个名字', () => {
+  reset()
+  handleRunStarted({ instance: 701, label: '' })
+  handleRunStarted({ instance: 702, label: '' })
+  // 关掉第一条的视图并让它的退出到达 ⇒ `forget()` 真把记录删掉（runInstances.ts:166-175、:275）。
+  closeRunView(701)
+  handleRunExit({ instance: 701, code: -1, aborted: true })
+  assert.deepEqual(runInstanceList().map(row => row.id), [702], '标签条只剩 702')
+  assert.deepEqual(runInstanceRows(0).map(row => row.title), ['运行 1'], '行模型按起跑下标数 ⇒ 运行 1')
+  // 拆之前仪表盘按 `运行 ${instance.id}` 数 ⇒ 同一条实例这里会叫「运行 702」。
+  const dash = runDashboardRows(runInstanceList().map(dashInput), Date.now())
+  assert.deepEqual(dash.map(row => row.title), ['运行 1'], '仪表盘必须跟着行模型，不自己按 id 数')
+})
+
+test('仪表盘的可停性 / kill 档 / 停止文案来自行模型（StopAction 的 canBeStopped 与两档文案）', () => {
+  reset()
+  handleRunStarted({ instance: 711, label: '服务' })
+  handleRunStarted({ instance: 712, label: '构建' })
+  // 只对 711 发过停止请求 ⇒ 上游那格换成 Kill process（ExecutionBundle.properties:203）。
+  markRunInstanceStopping(711)
+  const dash = runDashboardRows(runInstanceList().map(dashInput), Date.now())
+  assert.deepEqual(dash.map(row => row.kill), [true, false], '在结束途中那一格是 kill 档')
+  assert.deepEqual(dash.map(row => row.stoppable), [true, true], '本仓宿主恒能硬杀 ⇒ 两条都可停')
+  assert.deepEqual(dash.map(row => row.stopText), [STOP_LABELS.kill, STOP_LABELS.one('构建')],
+    '文案单源：`Stop ’{0}’`（:208）/ 正在结束那档 `Kill process`（:203）')
+  // 已结束的实例不进可停清单（StoppableRunDescriptors.kt:24-26 过滤已结束）。
+  handleRunExit({ instance: 712, code: 0 })
+  const after = runDashboardRows(runInstanceList().map(dashInput), Date.now())
+  assert.deepEqual(after.map(row => row.stoppable), [true, false])
+})
+
+test('仪表盘的区分描述用上游那句 pid 文案，结束后清空（:369-376 与 :401）', () => {
+  reset()
+  handleRunStarted({ instance: 721, label: '同一个配置' })
+  handleRunStarted({ instance: 722, label: '同一个配置' })
+  applyRunInstanceSnapshot([{ id: 721, pid: 4242 }, { id: 722, pid: 4243 }])
+  const dash = runDashboardRows(runInstanceList().map(dashInput), Date.now())
+  assert.deepEqual(dash.map(row => row.title), ['同一个配置', '同一个配置'], '上游同名不加 #2 后缀')
+  assert.deepEqual(dash.map(row => row.description), ['进程 ID：4242', '进程 ID：4243'],
+    '同名两行靠 pid 那句描述分辨（`process.id.tooltip`，ExecutionBundle.properties:204）')
+  handleRunExit({ instance: 721, code: 0 })
+  const done = runDashboardRows(runInstanceList().map(dashInput), Date.now())
+  assert.equal(done[0].description, '', '进程结束 ⇒ 描述清掉（RunContentManagerImpl.kt:401 的 content.description = null）')
+})
+
+// ── 退出码与 aborted 的归因（native/run_host.cpp 的 exitCode/aborted 两位） ──────────────
+//
+// 宿主快照（`run.instances`）与 `run.exit` 事件都带这两位；上游
+// `ProcessAdapter.processTerminated` / `ExecutionListener.processTerminated` 把
+// 「自己跑完退出 N」与「被停止/链中止」分开报 —— 本仓对应 `exit` + `aborted`。
+
+test('run.exit 的 aborted 落到记录：链中止报的是上一步真实非 0 码，也归 stopped（不是 failed）', () => {
+  reset()
+  handleRunStarted({ instance: 61, label: '链' })
+  handleRunStarted({ instance: 62, label: '自己失败' })
+  // 61：Before launch 链中止（宿主 advance 报上一步的真实非 0 码 + aborted:true）。
+  handleRunExit({ instance: 61, code: 3, aborted: true })
+  // 62：程序自己跑完退出 3（没有 aborted）。
+  handleRunExit({ instance: 62, code: 3 })
+  const rows = runInstanceRows(0)
+  const chain = rows.find(row => row.id === 61)
+  const own = rows.find(row => row.id === 62)
+  assert.equal(chain.exit, 3)
+  assert.equal(chain.aborted, true)
+  assert.equal(chain.state, 'stopped', '链中止 = 被结束掉的那一档（上游 TERMINATION_REQUESTED ⇒ STOPPED）')
+  assert.equal(chain.exitText, '已停止', '哨兵/中止那一档不写数字（-1 是宿主哨兵，不是进程报过的退出码）')
+  assert.equal(own.aborted, false)
+  assert.equal(own.state, 'failed', '自己跑完退出 3 ⇒ failed（与链中止分开）')
+  assert.equal(own.exitText, 'exit 3')
+})
+
+test('run.exit 没带 aborted 时行为与拆分前逐字一致（回归）', () => {
+  reset()
+  handleRunStarted({ instance: 63, label: 'a' })
+  handleRunStarted({ instance: 64, label: 'b' })
+  handleRunStarted({ instance: 65, label: 'c' })
+  handleRunExit({ instance: 63, code: 0 })
+  handleRunExit({ instance: 64, code: 2 })
+  handleRunExit({ instance: 65, code: -1, aborted: true })
+  const rows = runInstanceRows(0)
+  assert.deepEqual(rows.map(row => row.state), ['ok', 'failed', 'stopped'])
+  assert.deepEqual(rows.map(row => row.aborted), [false, false, true])
+})
+
+test('快照的 exitCode/aborted 只作补充：事件流报过就以事件流为准，在跑时的 null 不写成 0', () => {
+  reset()
+  handleRunStarted({ instance: 66, label: '快照' })
+  // 事件流还没到 ⇒ 快照填得上（宿主已经结束、事件在路上）。
+  applyRunInstanceSnapshot([{ id: 66, exitCode: 5, aborted: true }])
+  assert.equal(runInstances.get(66).exit, 5)
+  assert.equal(runInstances.get(66).aborted, true)
+  // 迟到的快照不能把已报过的退出码改回去（同 `running` 的取舍）。
+  applyRunInstanceSnapshot([{ id: 66, exitCode: 9 }])
+  assert.equal(runInstances.get(66).exit, 5, 'exit 已被事件流/前一次填过 ⇒ 快照不覆盖')
+  // 还在跑（exitCode 为 null）⇒ 不把 null 当成 0。
+  handleRunStarted({ instance: 67, label: '在跑' })
+  applyRunInstanceSnapshot([{ id: 67, exitCode: null, aborted: false }])
+  assert.equal(runInstances.get(67).exit, null)
+  assert.equal(runInstances.get(67).aborted, false)
+  // 老宿主没有这两位 ⇒ 行为不变。
+  handleRunStarted({ instance: 68, label: '老宿主' })
+  applyRunInstanceSnapshot([{ id: 68, pid: 100 }])
+  assert.equal(runInstances.get(68).exit, null)
+  assert.equal(runInstances.get(68).aborted, false)
+})
+
+test('外来纯输入（不在实例记录里）按本列表下标兜底，不臆造 kill', () => {
+  reset()
+  const dash = runDashboardRows([
+    { id: 9, label: '', running: true, exit: null, startedAt: 0 },
+    { id: 11, label: '', running: false, exit: 2, startedAt: 0 },
+  ], 0)
+  assert.deepEqual(dash.map(row => row.title), ['运行 1', '运行 2'], '兜底按下标 +1，不是按 id')
+  assert.deepEqual(dash.map(row => row.kill), [false, false], '记录不在 ⇒ 不猜「正在结束」')
+  assert.deepEqual(dash.map(row => row.stoppable), [true, false], '兜底退回 running')
+  assert.deepEqual(dash.map(row => row.description), ['', ''], '没有 pid 来源 ⇒ 空串，宿主那行不渲染')
+})
+
+test('单源核验：状态四档与文案在模块里只有一份实现（仪表盘只调用，不再各写一遍）', () => {
+  const dash = read('src/runDashboard.ts')
+  assert.match(dash, /return runInstanceState\(instance\.running, instance\.exit\)/, '档位委托给行模型')
+  assert.match(dash, /return runInstanceStatusText\(state, exit\)/, '文案委托给行模型')
+  assert.doesNotMatch(dash, /case 'running': return '正在运行'/, '仪表盘里不该再留一份四档 switch')
+  assert.match(dash, /new Map\(runInstanceRows\(\)\.map\(row => \[row\.id, row\]\)\)/, '行数据从 runInstanceRows 投影')
+})
+
+// —— 宿主那一头真的消费了行模型（接线请求 W-1，主代理接）——
+// 行模型把「能不能停 / 是不是 Kill process / 停止文案」三格都算好了，但仪表盘那条路径曾只读
+// `row.state === 'running'`，而且 `stopDashboardInstance` 没记「正在结束」⇒ **从仪表盘停的实例
+// 永远进不了 kill 档**（标签条与「正在运行」清单都早已接上：`runActions.ts:525`、`RunConsole.vue:422-428`）。
+// 这三条钉的是"接上了"这个形状：退回旧写法就红。
+test('仪表盘的停止格读行模型，且发请求前记「正在结束」（与工具条同一口径）', () => {
+  const toolbar = read('src/components/MainToolbar.vue')
+  assert.match(toolbar, /v-if="row\.stoppable"[\s\S]{0,240}@click="stopDashboardInstance\(row\.id\)"/,
+    '可停性取行模型的 stoppable（`StopAction.java:310-315` 的 canBeStopped），不再自己按 state 数')
+  assert.match(toolbar, /:title="row\.stopText"/, '文案单源 stopText（`Stop ’{0}’`:208 / `Kill process`:203 两档）')
+  assert.match(toolbar, /async function stopDashboardInstance\(id: number\) \{\s*markRunInstanceStopping\(id\)/,
+    '请求一发出就记 stopping —— 漏这一笔，宿主只在进程结束时回事件，kill 档在这条路径上从不出现')
+  assert.doesNotMatch(toolbar, /v-if="row\.state === 'running'"[\s\S]{0,240}stopDashboardInstance/,
+    '不许退回「只看 running」：正在结束那一档里按钮会消失，用户点不动第二次（硬杀）')
 })

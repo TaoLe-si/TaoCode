@@ -36,6 +36,9 @@
 import { camelHumpMatcher } from './completionCamelHump.ts'
 import { localSortKey } from './completionSort.ts'
 import type { ContributorItem, LocalCompletionContributor } from './completionContributors.ts'
+// `com.intellij.codeInsight.completion.error.intention` 的消费端（`ErrorFixCommandProvider`）：
+// 声明与出处见 `src/completionExtensionPoints.ts`，`collectCommands` 的 `errorFix` 那一格问它。
+import { errorFixCommands, type ErrorFixCommandInput } from './completionExtensionPoints.ts'
 
 /** `CommandCompletionSuffixProvider.kt:23`：`suffix()` 默认是 `.`。 */
 export const COMMAND_SUFFIX = '.'
@@ -175,6 +178,12 @@ export function commandLabel(title: string): string {
 
 /**
  * 列出这个位置可用的命令条目（上游 `CommandCompletionProvider.kt:237-259` 的过滤 + `createLookupElements`）。
+ *
+ * **2026-10-06 本 lane 补**：这里还是 `com.intellij.codeInsight.completion.error.intention` 的消费点 ——
+ * 上游 `DirectIntentionCommandProvider.kt:474` 在命令补全里把 `ErrorFixCommandProvider` 的命令接上
+ * （「这一行有错时给出修它的命令」那一档）。`errorFix` 传了就把它给的命令并进表里；
+ * 不传（或没有贡献）⇒ 本函数与本文件此前逐字相同。
+ *
  * 命令名过滤按上游那一把匹配器同档实现：`CamelHumpMatcher(prefix, false, true)`
  * （`caseSensitive=false` ⇒ `createMatcher` 不套大小写档，取 `MinusculeMatcher` 默认的忽略大小写，
  * `CamelHumpMatcher.java:130-147`）+ 留在表里的判据 `prefixMatches`（`:80-87`）
@@ -195,6 +204,7 @@ export function collectCommands(
   invocation: CommandInvocation,
   source: CommandActionSource,
   priorities: Readonly<Record<string, number>> = {},
+  errorFix?: ErrorFixCommandInput,
 ): CommandItem[] {
   // 没有前缀时不过滤（上游 `baseMatcher.prefixMatches` 对空前缀全过，`CommandCompletionProvider.kt:252`；
   // 本仓匹配器同一档：`completionCamelHump.ts:569` 的空前缀直接放行）。
@@ -217,6 +227,23 @@ export function collectCommands(
       priority,
     })
   }
+  // `com.intellij.codeInsight.completion.error.intention`：这一处有诊断时，把登记表里的
+  // 错误修复命令并进同一张表（上游 `DirectIntentionCommandProvider.kt:474`）。组号取 2 ⇒ 与
+  // 组 1 的命令条目用后一档排序串（同一批里按 priority/label 排），仍排在服务端候选之后。
+  if (errorFix) {
+    for (const command of errorFixCommands(errorFix)) {
+      const label = commandLabel(command.label)
+      if (!label || !matches(label)) continue
+      items.push({
+        label,
+        actionId: '',
+        sortText: localSortKey(2, `${String(command.priority ?? COMMAND_DEFAULT_PRIORITY).padStart(4, '0')}${label}`),
+        detail: command.detail ?? '',
+        commandFrom: invocation.start,
+        priority: command.priority ?? COMMAND_DEFAULT_PRIORITY,
+      })
+    }
+  }
   return items
 }
 
@@ -232,13 +259,17 @@ export const COMMAND_CONTRIBUTOR_ID = 'command-completion'
 export function commandCompletionContributor(
   source: CommandActionSource,
   priorities: Readonly<Record<string, number>> = {},
+  errorFixOf?: (context: { text: string; offset: number; language: string }) => ErrorFixCommandInput | null,
 ): LocalCompletionContributor {
   return {
     id: COMMAND_CONTRIBUTOR_ID,
     contribute: context => {
       const invocation = findCommandInvocation(context.text, context.offset)
       if (!invocation) return []
-      return collectCommands(invocation, source, priorities).map((item): ContributorItem => ({
+      // `com.intellij.codeInsight.completion.error.intention`：调用方能给出这一处的诊断就带上，
+      // 命令表里会多出错误修复命令（上游 `DirectIntentionCommandProvider.kt:474`）。
+      const errorFix = errorFixOf?.(context) ?? undefined
+      return collectCommands(invocation, source, priorities, errorFix).map((item): ContributorItem => ({
         label: item.label,
         sortText: item.sortText,
         detail: item.detail,

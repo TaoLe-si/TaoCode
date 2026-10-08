@@ -59,10 +59,6 @@ function toggleCue(id: AudioCueId, checked: boolean) {
 
 <template>
   <h3>外观与行为 › 音频提示</h3>
-  <p class="section-description">
-    对应 IDEA Settings › Appearance &amp; Behavior › Audio Cues（注册证据 <code>intellij.platform.ide.impl.xml:971-976</code>，
-    <code>groupId="appearance" groupWeight="140" id="ide.audiocues"</code>）。
-  </p>
   <fieldset class="settings-fields" :disabled="busy">
     <div class="input-row">
       <label for="audio-cues-mode">播放</label>
@@ -72,13 +68,7 @@ function toggleCue(id: AudioCueId, checked: boolean) {
         <option value="off">从不</option>
       </select>
     </div>
-    <p class="field-hint">
-      对应 <code>AudioCuesMode</code>（<code>AudioCuesSettings.kt:75-79</code>）的 auto / on / off 三档；
-      「自动」的判据在上游是 <code>ScreenReader.isActive()</code>（<code>:87</code>），
-      本仓用「系统设置 › 辅助功能与字体 › 支持屏幕阅读器」当探针（<code>src/audioCues.ts:65-75</code>）。
-      默认是<strong>关闭</strong>（上游默认 <code>AUTO</code>，差异记在 <code>src/settingsModel.ts</code> 的字段注释里）。
-    </p>
-    <p class="field-hint">逐条提示（关掉整档时不可勾）</p>
+    <p class="field-hint">逐条提示</p>
     <label v-for="cue in AUDIO_CUES" :key="cue.id" class="checkbox-row">
       <input
         type="checkbox"
@@ -90,12 +80,5 @@ function toggleCue(id: AudioCueId, checked: boolean) {
         @change="toggleCue(cue.id, ($event.target as HTMLInputElement).checked)"
       /><span>{{ cue.label }}</span>
     </label>
-    <p class="field-hint">
-      六个 cue 的 id 与优先级逐条抄 <code>IdeAudioCues.kt:13-39</code>（同一时刻只播优先级最高的那个）。
-      勾选框与键盘聚焦都会试听一声（<code>AudioCuesConfigurable.kt:49</code> 与 <code>:50-57</code>）——
-      试听走 <code>AudioCuePlayer.preview</code>（<code>AudioCuePlayer.kt:34-36</code>），**不受**上方「播放」档与
-      逐条停用表影响，正如上游那样：这里试听的是「这个音长什么样」，不是「现在会不会响」。
-      本仓播的是 WebAudio 合成音而非上游的 <code>sounds/*.wav</code>。
-    </p>
   </fieldset>
 </template>

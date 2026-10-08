@@ -2,6 +2,7 @@
 // rotation, paths() shape and the special-path list (IDEA ShowLogAction /
 // BrowseSpecialPathsAction 的对应物).
 #include "diagnostics.hpp"
+#include "thread_dump.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -203,6 +204,72 @@ int main() {
               "旧 zip 被打进了新包");
     });
 
+    run("日志级别：set_log_level 过滤更低级别；非法名被拒；持久化可读回", [&] {
+        const auto level_profile = root / L"profile-level";
+        taocode::diagnostics::init(level_profile, "9.9.9");
+        // 默认级别是 INFO：DEBUG 不落盘。
+        check(taocode::diagnostics::log_level(level_profile) == "INFO", "默认级别应当是 INFO");
+        const auto file = taocode::diagnostics::log_file(level_profile);
+        const auto before = read_lines(file).size();
+        taocode::diagnostics::event(level_profile, "DEBUG", "打开开关前的细节");
+        check(read_lines(file).size() == before, "INFO 级别下 DEBUG 不该落盘");
+        // 切到 DEBUG 之后落盘；WARN/ERROR 也落。
+        check(taocode::diagnostics::set_log_level(level_profile, "debug"), "小写的 debug 应当被接受");
+        check(taocode::diagnostics::log_level(level_profile) == "DEBUG", "级别应当持久化并可读回");
+        taocode::diagnostics::event(level_profile, "DEBUG", "打开开关后的细节");
+        check(read_all(file).find("打开开关后的细节") != std::string::npos, "DEBUG 级别下应当落盘");
+        // 切到 ERROR：INFO/WARN 都不落，ERROR 仍落（内部错误账也要记）。
+        check(taocode::diagnostics::set_log_level(level_profile, "ERROR"), "切到 ERROR");
+        const auto before_error = read_lines(file).size();
+        taocode::diagnostics::event(level_profile, "INFO", "不该写");
+        taocode::diagnostics::event(level_profile, "WARN", "也不该写");
+        check(read_lines(file).size() == before_error, "ERROR 级别下 INFO/WARN 都不该落盘");
+        taocode::diagnostics::event(level_profile, "ERROR", "该写");
+        check(read_all(file).find("该写") != std::string::npos, "ERROR 级别下 ERROR 应当落盘");
+        // 非法级别名被拒，且不覆盖已存的值。
+        check(!taocode::diagnostics::set_log_level(level_profile, "TRACE"), "认不出的级别名应当被拒");
+        check(taocode::diagnostics::log_level(level_profile) == "ERROR", "被拒的写入不该改动已存级别");
+        // 新 profile 重新 init 会读回上次存的级别。
+        const auto reread = root / L"profile-level2";
+        taocode::diagnostics::set_log_level(reread, "DEBUG");
+        taocode::diagnostics::init(reread, "9.9.9");
+        check(taocode::diagnostics::log_level(reread) == "DEBUG", "init 应当读回持久化的级别");
+        taocode::diagnostics::set_log_level(reread, "INFO");  // 收尾：别把全局级别留在 DEBUG
+    });
+
+    run("低内存检查：返回可用/总量/工作集/占用率，low 是布尔", [&] {
+        const auto info = taocode::diagnostics::low_memory();
+        check(info.contains("low") && info.at("low").is_boolean(), "low 是布尔");
+        check(info.at("availableMb").is_number_unsigned() && info.at("totalMb").is_number_unsigned(),
+              "可用/总量应当是数字");
+        check(info.at("workingSetMb").is_number_unsigned() && info.at("loadPercent").is_number_unsigned(),
+              "工作集/占用率应当是数字");
+        check(info.at("totalMb").get<std::uint64_t>() > 0, "本机总物理内存应当 > 0");
+        check(info.at("workingSetMb").get<std::uint64_t>() > 0, "当前进程工作集应当 > 0");
+        check(info.at("thresholdMb").get<std::uint64_t>() == taocode::diagnostics::kLowMemoryAvailableMb,
+              "默认阈值应当与常量一致");
+        // 把阈值抬到不可能达到的高度：必然判 low（系统可用内存不可能有 10 亿 MB）。
+        const auto forced = taocode::diagnostics::low_memory(1000000000ULL, 1000000000ULL);
+        check(forced.at("low").get<bool>(), "阈值抬高后应当判 low");
+    });
+
+    run("线程转储：抓到当前线程的栈（含 TaoCode 模块帧），写文件带线程数", [&] {
+        const auto text = taocode::diagnostics::thread_dump();
+        check(text.find("线程转储") != std::string::npos, "转储标题缺失");
+        check(text.find("Thread ") != std::string::npos, "至少要列出当前线程");
+        check(text.find("共 ") != std::string::npos, "要有线程计数收尾");
+        // 当前线程至少有一帧，且帧地址来自本模块（测试 exe 也是模块名+偏移）。
+        check(text.find("+0x") != std::string::npos, "帧应当写成 模块名+0x偏移");
+        const auto written = taocode::diagnostics::write_thread_dump(profile);
+        check(written.threads >= 1, "写文件时线程数应当 >= 1");
+        check(!written.path.empty(), "应当写出一个转储文件");
+        const auto body = read_all(fs::path(written.path));
+        check(body.find("线程转储") != std::string::npos, "文件里应当是转储正文");
+        // 空 profile：不写文件，但仍抓到线程（不抛）。
+        const auto bare = taocode::diagnostics::write_thread_dump(fs::path());
+        check(bare.path.empty() && bare.threads >= 1, "空 profile 不写文件但仍报线程数");
+    });
+
     run("troubleshooting 文本含版本 / 平台 / 内存 / 日志路径 / 目录清单", [&] {
         const auto info = taocode::diagnostics::troubleshooting(profile, root / L"bin", "9.9.9");
         const auto text = info.at("text").get<std::string>();
@@ -212,6 +279,13 @@ int main() {
         check(text.find(taocode::diagnostics::log_file(profile).string()) != std::string::npos, "没有日志路径");
         check(text.find("配置目录") != std::string::npos && text.find("特殊目录") != std::string::npos,
               "没有目录清单");
+        // 本轮补的三节：低内存 / 日志级别 / 线程转储。
+        check(text.find("内存：") != std::string::npos, "没有低内存一节");
+        check(text.find("日志级别：") != std::string::npos, "没有日志级别一行");
+        check(info.contains("lowMemory") && info.at("lowMemory").at("low").is_boolean(), "没有结构化 lowMemory");
+        check(info.at("logLevel").is_string(), "没有结构化 logLevel");
+        check(info.contains("threadDump") && info.at("threadDump").at("threads").get<int>() >= 1,
+              "没有结构化 threadDump");
     });
 
     std::error_code cleanup;

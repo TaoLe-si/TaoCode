@@ -4,7 +4,7 @@
 // 而这句话光写在注释里防不住两件事 ——
 //   · 有人（或下一批代理）往表里塞一条上游根本没有的宏，界面上就真的会出现它；
 //   · 有人把上游注册过的宏**悄悄地不做**，清单既不实现也不登记，用户无从知道那一格为什么不动。
-// 所以这里把两边都钉住：实现侧 21 条 + 登记侧 12 条 = 上游那 33 条，多一条红、少一条也红。
+// 所以这里把两边都钉住：实现侧 25 条 + 登记侧 8 条 = 上游那 33 条，多一条红、少一条也红。
 //
 // 33 条的出处（逐条抄自 `platform/lang-impl/resources/intellij.platform.lang.impl.xml:1031-1063`，
 // 顺序照 XML；T4 在参考树在位时再把这份抄写和文件本身核一遍）：
@@ -32,7 +32,7 @@ const REF = 'D:/Backup/Downloads/intellij-community-master/intellij-community-ma
 const REGISTRY_XML = 'platform/lang-impl/resources/intellij.platform.lang.impl.xml'
 const PKG = 'com.intellij.codeInsight.template.macro.'
 
-/** 上游 33 条注册里**本仓已实现**的那 21 条：`impl` 是 XML 里的实现类名（去包名），后面三项是用户可见的那份文案。 */
+/** 上游 33 条注册里**本仓已实现**的那 25 条：`impl` 是 XML 里的实现类名（去包名），后面三项是用户可见的那份文案。 */
 const UPSTREAM_IMPLEMENTED = [
   { impl: 'CurrentDateMacro', name: 'date', presentableName: 'date()', defaultValue: '11.11.1111' },
   { impl: 'CurrentTimeMacro', name: 'time', presentableName: 'time()', defaultValue: '11.11.1111' },
@@ -55,9 +55,13 @@ const UPSTREAM_IMPLEMENTED = [
   { impl: 'SubstringBeforeMacro', name: 'substringBefore', presentableName: 'substringBefore(String, Delimiter)', defaultValue: 'a' },
   { impl: 'RegExMacro', name: 'regularExpression', presentableName: 'regularExpression(String, Pattern, Replacement)', defaultValue: 'a' },
   { impl: 'EnumMacro', name: 'enum', presentableName: 'enum(...)', defaultValue: '' },
+  { impl: 'CommentMacro$LineCommentStart', name: 'lineCommentStart', presentableName: 'lineCommentStart()', defaultValue: 'a' },
+  { impl: 'CommentMacro$BlockCommentStart', name: 'blockCommentStart', presentableName: 'blockCommentStart()', defaultValue: 'a' },
+  { impl: 'CommentMacro$BlockCommentEnd', name: 'blockCommentEnd', presentableName: 'blockCommentEnd()', defaultValue: 'a' },
+  { impl: 'CommentMacro$AnyCommentStart', name: 'commentStart', presentableName: 'commentStart()', defaultValue: 'a' },
 ]
 
-/** 上游注册了、本仓**没有**求值原料的那 12 条：只要求名字对上，落点与理由在 `DEFERRED_TEMPLATE_MACROS` 里。 */
+/** 上游注册了、本仓**没有**求值原料的那 8 条：只要求名字对上，落点与理由在 `DEFERRED_TEMPLATE_MACROS` 里。 */
 const UPSTREAM_UNIMPLEMENTED = [
   { impl: 'CurrentUserMacro', name: 'user' },
   { impl: 'ClipboardMacro', name: 'clipboard' },
@@ -66,17 +70,13 @@ const UPSTREAM_UNIMPLEMENTED = [
   { impl: 'CompleteMacro', name: 'complete' },
   { impl: 'ShowParameterInfoMacro', name: 'showParameterInfo' },
   { impl: 'CompleteSmartMacro', name: 'completeSmart' },
-  { impl: 'CommentMacro$LineCommentStart', name: 'lineCommentStart' },
-  { impl: 'CommentMacro$BlockCommentStart', name: 'blockCommentStart' },
-  { impl: 'CommentMacro$BlockCommentEnd', name: 'blockCommentEnd' },
-  { impl: 'CommentMacro$AnyCommentStart', name: 'commentStart' },
   { impl: 'CommentMacro$AnyCommentEnd', name: 'commentEnd' },
 ]
 
 
 test('宏表与登记清单合起来正好是上游那 33 条注册，一条不多一条不少', () => {
-  assert.equal(LIVE_TEMPLATE_MACROS.length, 21, '实现侧条数')
-  assert.equal(DEFERRED_TEMPLATE_MACROS.length, 12, '登记侧条数')
+  assert.equal(LIVE_TEMPLATE_MACROS.length, 25, '实现侧条数')
+  assert.equal(DEFERRED_TEMPLATE_MACROS.length, 8, '登记侧条数')
   const table = LIVE_TEMPLATE_MACROS.map(macro => macro.upstream).sort()
   const deferred = DEFERRED_TEMPLATE_MACROS.map(macro => macro.upstream).sort()
   const expected = UPSTREAM_IMPLEMENTED.concat(UPSTREAM_UNIMPLEMENTED).map(entry => entry.impl).sort()
@@ -100,7 +100,7 @@ test('本仓没有实现上游没注册的宏；名字、下拉文案与空结�
   }
 })
 
-test('登记侧的 12 条：有名字、有具体理由、且真的没被实现', () => {
+test('登记侧的 8 条：有名字、有具体理由、且真的没被实现', () => {
   for (const expected of UPSTREAM_UNIMPLEMENTED) {
     const found = DEFERRED_TEMPLATE_MACROS.find(macro => macro.upstream === expected.impl)
     assert.ok(found, `${expected.impl} 应当登记在 DEFERRED_TEMPLATE_MACROS 里`)
@@ -111,7 +111,7 @@ test('登记侧的 12 条：有名字、有具体理由、且真的没被实现'
   }
 })
 
-test('设置页里的宏清单 = 上游 Expression 下拉那份（去重 + 排序），不含登记侧的 12 条', () => {
+test('设置页里的宏清单 = 上游 Expression 下拉那份（去重 + 排序），不含登记侧的 8 条', () => {
   // EditVariableDialog.java:103-111：全量宏 → 按上下文过滤 → getPresentableName() → sorted() → 去重。
   // 本仓没有上下文表（isAcceptableInContext 的默认档恒为 true，Macro.java:44-46），于是只剩后三步。
   const derived = [...new Set(LIVE_TEMPLATE_MACROS.map(macro => macro.presentableName))].sort()
@@ -151,5 +151,5 @@ test('消费链路：宏真的进展开、设置页真的读同一张表', () =>
   assert.match(page, /LIVE_TEMPLATE_MACROS[\s\S]{0,200}presentableName/, '设置页渲染的清单不是宏表本身')
   assert.match(page, /unknownMacroCall/, '看着像宏调用但没注册的那一格要提示用户')
   assert.ok(!page.includes('DEFERRED_TEMPLATE_MACROS as ') && !/import \{[^}]*DEFERRED_TEMPLATE_MACROS/.test(page),
-    '登记侧的 12 条不许被渲染成可用宏')
+    '登记侧的 8 条不许被渲染成可用宏')
 })

@@ -5,10 +5,12 @@
 //
 // 本仓现状：`src/inlayHints.ts` 有「按类型开关 + 显示文本 + 点击命令」的纯规则，但**渲染前的
 // 归位与去重**没有：LSP 服务器可能在同一位置同时发参数名与类型提示，两个 `InlayWidget`
-// 会叠在一起。这个模块补渲染前的最后一道纯规则（开关过滤 → 排序 → 去重 → 同位置优先级 → 行内上限），
+// 会叠在一起。这个模块补渲染前的最后一道纯规则（开关过滤 → 排除清单过滤 → 排序 → 去重 → 同位置优先级 → 行内上限），
 // 并返回被隐藏条目的计数 —— 用户看不到假象，测试也能钉住"谁被藏了、为什么"。
+// 排除清单那条的规则本体在 `src/inlayHintExcludeList.ts`（上游 `ParameterHintExcludeListService` 那一族）。
 
-import { shouldShowInlayHint, type InlayHintLike, type InlayHintToggles, DEFAULT_INLAY_HINT_TOGGLES } from './inlayHints.ts'
+import { inlayHintGroup, shouldShowInlayHint, type InlayHintLike, type InlayHintToggles, DEFAULT_INLAY_HINT_TOGGLES } from './inlayHints.ts'
+import { compileExcludePatterns } from './inlayHintExcludeList.ts'
 
 /** 同位置冲突时的优先级：参数名（可操作）> 类型 > 其它。数字越小越优先。 */
 export function inlayHintPriority(hint: InlayHintLike): number {
@@ -37,6 +39,8 @@ export interface InlayLayoutResult {
   hidden: {
     /** 被按类型开关关掉的条数。 */
     toggle: number
+    /** 被**参数提示排除清单**关掉的条数（只算 `kind = 2` 那一组，规则见 `src/inlayHintExcludeList.ts`）。 */
+    exclude: number
     /** 与更靠前条目完全重复（同位置同文本）的条数。 */
     duplicate: number
     /** 同位置不同文本、优先级更低被压掉的条数。 */
@@ -52,7 +56,7 @@ function positionKey(hint: InlayHintLike): string {
 }
 
 /**
- * 渲染前的归位：非法条目先丢；再按开关过滤；稳定排序（行 → 列 → 输入顺序）；
+ * 渲染前的归位：非法条目先丢；再按开关过滤；再按**参数提示排除清单**过滤；稳定排序（行 → 列 → 输入顺序）；
  * 同位置完全重复只留一条；同位置不同文本按优先级留一条；最后每行截到上限。
  */
 export function layoutInlayHints(
@@ -60,8 +64,12 @@ export function layoutInlayHints(
   toggles: InlayHintToggles = DEFAULT_INLAY_HINT_TOGGLES,
   options: InlayLayoutOptions = {},
 ): InlayLayoutResult {
-  const hidden = { toggle: 0, duplicate: 0, conflict: 0, overflow: 0 }
+  const hidden = { toggle: 0, exclude: 0, duplicate: 0, conflict: 0, overflow: 0 }
   const maxPerLine = Number.isInteger(options.maxPerLine) ? Math.max(1, options.maxPerLine as number) : 6
+  // 清单先编译一次（上游同一条链是 `getMatchers`：`ParameterHintExcludeListService.kt:96-105` 编译 + 缓存，
+  // 每条提示只问编译好的 matcher）。排除只对**参数提示**那一组生效 —— 上游的清单就叫
+  // parameter hints exclude list（`settings.inlay.parameter.hints.exclude.list`），类型提示另有档位。
+  const excluded = compileExcludePatterns(toggles.parameterHintExcludeList)
   const valid: Array<{ hint: InlayHintLike; index: number }> = []
   const list = Array.isArray(hints) ? hints : []
   for (let index = 0; index < list.length; ++index) {
@@ -69,6 +77,7 @@ export function layoutInlayHints(
     if (!hint || !Number.isInteger(hint.line) || hint.line < 0 || !Number.isInteger(hint.character) || hint.character < 0) continue
     if (typeof hint.label !== 'string' || hint.label === '') continue
     if (!shouldShowInlayHint(hint, toggles)) { ++hidden.toggle; continue }
+    if (inlayHintGroup(hint.kind) === 'parameter' && excluded(hint.label)) { ++hidden.exclude; continue }
     valid.push({ hint, index })
   }
   valid.sort((left, right) =>
@@ -98,7 +107,7 @@ export function layoutInlayHints(
 
 /** 被隐藏条数合计（状态栏/调试用；全 0 时不显示任何提示）。 */
 export function hiddenInlayCount(result: InlayLayoutResult): number {
-  return result.hidden.toggle + result.hidden.duplicate + result.hidden.conflict + result.hidden.overflow
+  return result.hidden.toggle + result.hidden.exclude + result.hidden.duplicate + result.hidden.conflict + result.hidden.overflow
 }
 
 /** 一行有几条可见提示（渲染层按行分组时用）。 */

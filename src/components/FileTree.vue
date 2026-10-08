@@ -6,11 +6,16 @@ import { isSyntheticLibraryRow, SDK_ENTRY_PATH } from '../externalLibraries'
 import { lspDiagnostics, type Entry } from '../bridge'
 import { createProjectTreeModel, type ProjectTreeRow, type SyntheticNode } from '../projectTreeModel'
 import type { ProjectTreeSortSettings } from '../projectTreeSort'
-import { decorationClass, decorationOf, decorationTitle, severityCounts, type TreeDecoration } from '../projectTreeDecorations'
+import { nodeDecorationFor, severityCounts } from '../projectTreeDecorations'
+import { fileIconFor, type ProjectViewNodeDecoration } from '../ideViewExtensionPoints.ts'
+import { fileIconComponent } from '../fileIconNames.ts'
+import { Puzzle } from 'lucide-vue-next'
 import { treeClickOpensFile, treeOpenUsesPreviewTab, visibleSyntheticNodes, type ProjectViewBehavior } from '../projectViewBehavior'
 import { getCommandProcessor } from '../pvCommandProcessor.ts'
+import { runFileUndoRedo } from '../undoProviderHost.ts'
 import { reportText } from '../pvFileUndoProvider.ts'
-import { firstSpeedSearchHit, lastSpeedSearchHit, nextSpeedSearchHit, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
+import { speedSearchElement, speedSearchHitForStep, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
+import { treeNodeActionFor } from '../treeNodeActions.ts'
 import SpeedSearchBar from './SpeedSearchBar.vue'
 import { iconSize } from '../uiIcons'
 
@@ -19,7 +24,7 @@ const props = defineProps<{
   entries: Entry[]; active?: string; depth?: number; synthetic?: SyntheticNode[]
   indentGuides?: boolean; compactIndents?: boolean; expandWithSingleClick?: boolean
   fileColor?: (path: string, isDirectory: boolean) => string | null
-  workspaceKey?: string; projectName?: string
+  workspaceKey?: string; projectName?: string; rootPathTitle?: string
   sortSettings?: ProjectTreeSortSettings
   /** 项目视图自己的三条行为（IDEA `additionalGearActions` 那一组）。 */
   behavior?: ProjectViewBehavior
@@ -83,34 +88,81 @@ function rowTitle(row: ProjectTreeRow): string {
   if (row.synthetic) return row.synthetic.label
   if (row.entry.path === SDK_ENTRY_PATH) return `JDK · ${row.entry.name}`
   if (isSyntheticLibraryRow(row.entry.path)) return row.entry.path.slice(row.entry.path.indexOf(':') + 1)
-  return row.entry.path === '' ? props.workspaceKey ?? row.entry.name : row.entry.path
+  return row.entry.path === '' ? props.rootPathTitle ?? props.projectName ?? row.entry.name : row.entry.path
 }
 /**
- * 节点装饰（上游 `ProjectViewNodeDecorator` 的 "Highlight files with errors"）：
- * `lspDiagnostics` 里有错误/警告的文件在树里换色，title 补上计数。
- * 只装饰真实文件行 —— 目录与合成行（NUL 前缀）不参与。
+ * 一个文件的诊断严重度计数（`lspDiagnostics` 是响应式 Map，这里有它才随诊断刷新）。
+ * 与 `src/projectTreeDecorations.ts` 共用「1 = 错误 / 2 = 警告」口径（同一份 `severityCounts`）。
  */
-const decorations = computed(() => {
-  const map = new Map<string, { kind: TreeDecoration; title: string }>()
-  for (const [path, items] of lspDiagnostics) {
-    const counts = severityCounts(items)
-    const kind = decorationOf(counts.errors, counts.warnings)
-    if (kind !== 'none') map.set(path, { kind, title: decorationTitle(counts.errors, counts.warnings) })
-  }
+const diagnosticCounts = computed(() => {
+  const map = new Map<string, ReturnType<typeof severityCounts>>()
+  for (const [path, items] of lspDiagnostics) map.set(path, severityCounts(items))
   return map
 })
-function decorationOfRow(row: ProjectTreeRow) {
-  if (row.synthetic || row.entry.kind !== 'file' || row.entry.path.startsWith('\u0000')) return undefined
-  return decorations.value.get(row.entry.path)
+/**
+ * 节点装饰（上游 `ProjectViewNodeDecorator`）：**每一行都过一遍 EP**，不是只过有诊断的文件 ——
+ * 上游 `CompoundProjectViewNodeDecorator.decorate` 对树里每个节点都调用装饰器，第三方插件
+ * （原版 IDEA 插件按 `com.intellij.projectViewNodeDecorator` 挂的那一支）就是靠这一趟给任意
+ * 文件/目录加呈现。内建那支在计数为 0 时什么都不设，所以「没有诊断的行外貌不变」。
+ * 合成行（NUL 前缀）不参与，与既有口径一致。
+ *
+ * 组装点收在 `src/projectTreeDecorations.ts` 的 `nodeDecorationFor`（**不是**在这里直接调 EP）：
+ * 内建诊断那支是随包登记进同一条 EP 的一支，与第三方装饰器走同一条就地叠呈现的路径，
+ * 「诊断 → errors/warnings」这个输入组装也只有那一处（此处不再自己拼第二遍）。
+ */
+function decorationOfRow(row: ProjectTreeRow): ProjectViewNodeDecoration {
+  if (row.synthetic || row.entry.path.startsWith('\u0000')) return {}
+  const counts = row.entry.kind === 'file' ? diagnosticCounts.value.get(row.entry.path) : undefined
+  return nodeDecorationFor({
+    id: row.entry.path, name: row.entry.name, path: row.entry.path,
+    isDirectory: row.entry.kind === 'directory',
+    errors: counts?.errors ?? 0, warnings: counts?.warnings ?? 0,
+  })
 }
 function titleOf(row: ProjectTreeRow): string {
   const decoration = decorationOfRow(row)
-  return rowTitle(row) + (decoration ? decoration.title : '')
+  const base = decoration.presentableText ? rowTitle(row).replace(row.entry.name, decoration.presentableText) : rowTitle(row)
+  return base + (decoration.tooltipSuffix ?? '')
 }
+/**
+ * 行上的类名：**只取装饰器组装出来的那一份**（内建诊断那支把严重度折成 `tree-decoration-*`，
+ * 第三方装饰器可再叠自己的类）。此前这里又按同一档严重度自己拼了一遍同样的后缀 ⇒ 同一个类名
+ * 在行上出现两次（`tree-decoration-error tree-decoration-error`）。
+ */
 function rowClassOf(row: ProjectTreeRow): string {
-  const decoration = decorationOfRow(row)
-  return decoration ? decorationClass(decoration.kind) : ''
+  return decorationOfRow(row).className ?? ''
 }
+/**
+ * 行首图标的自定义档（上游 `com.intellij.fileIconProvider` 的 `getIcon(file, flags, project)`）：
+ * 第三方按同一 id 挂的 provider 可以给某个文件/目录换图标。没有 provider 认领时返回 null ⇒
+ * 模板落回本仓既有的 lucide 图标表（内建的合成根两支在 `src/workspaceLifecycle.ts` 登记）。
+ * 合成行的图标名是 `libraries/scratches/plugin` 三档，先按它们画，认不出再问 EP。
+ */
+const FLAG_OPEN = 8
+function customIconOf(row: ProjectTreeRow) {
+  // 内建合成图标名（libraries/scratches/plugin）由各自的模板分支画，别在这里吞掉。
+  if (row.synthetic) return null
+  return fileIconComponent(fileIconFor({
+    path: row.entry.path,
+    isDirectory: row.entry.kind === 'directory',
+    flags: props.active === row.entry.path ? FLAG_OPEN : 0,
+  }))
+}
+/**
+ * 一行的呈现（主模板只做一次 `v-for`）：把「装饰类名 / tooltip / 呈现文本 / 自定义图标」
+ * 先在脚本里算一遍。四个消费点（class、title、name、icon）都读这里，模板里不再重复调 EP。
+ */
+const rowsView = computed(() => {
+  const view = new Map<string, { className: string; title: string; name: string; icon: ReturnType<typeof customIconOf> }>()
+  for (const row of rows.value) {
+    view.set(row.entry.path, {
+      className: rowClassOf(row), title: titleOf(row), icon: customIconOf(row),
+      name: decorationOfRow(row).presentableText ?? row.entry.name,
+    })
+  }
+  return view
+})
+const viewOf = (row: ProjectTreeRow) => rowsView.value.get(row.entry.path)
 function activate(entry: Entry, event: MouseEvent) {
   model.select(entry.path, event)
   void model.focus(entry.path)
@@ -153,12 +205,19 @@ function doubleClick(entry: Entry) {
 function undoRedoFileOperation(kind: 'undo' | 'redo') {
   const processor = getCommandProcessor(props.workspaceKey ?? '')
   const scope = [...selection]
-  void processor[kind](scope).then(result => {
+  // 走 `com.intellij.undoProvider` 那条链（`src/undoProviderHost.ts`）：围绕这次撤销/重做按上游
+  // `UndoManagerImpl.onCommandStarted/onCommandFinished`（`:278-290`）通知全部撤销提供者 ——
+  // 出厂的 `FileUndoProvider` 与第三方按同一 id 挂的那几支走同一条路径。
+  void runFileUndoRedo(processor, props.workspaceKey ?? '', kind, scope).then(result => {
     if (!result.ok && result.report) emit('error', reportText(result.report))
     else if (result.ok) void model.refresh()
   })
 }
 function onRowKeydown(entry: Entry, event: KeyboardEvent) {
+  // 树节点的展开/折叠动作（上游 `ide/actions/tree` 那一族，`$default.xml:27-35` 的裸小键盘键：
+  // `*` 全部展开 / `+` 展开 / `-` 折叠）。判定与上限在 `src/treeNodeActions.ts`，这里只认键面。
+  const treeAction = treeNodeActionFor(event.code, { ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, meta: event.metaKey })
+  if (treeAction) { event.preventDefault(); void model.runTreeNodeAction(treeAction); return }
   if (event.key === 'Z' && event.ctrlKey && !event.altKey && !event.metaKey) {
     // Ctrl+Shift+Z = 重做，Ctrl+Z = 撤销（两个键位都在上游键位表里，没有第三种组合）。
     event.preventDefault()
@@ -216,7 +275,12 @@ async function gotoHit(index: number) {
 }
 async function onSearchInput(value: string) {
   searchQuery.value = value
-  const index = firstSpeedSearchHit(searchLabels(), searchQuery.value)
+  // 上游打字走的是 `findElement`（`SpeedSearchBase.java:519-537`）：**从当前选中行（含它自己）**
+  // 往后扫、走完再回绕，而不是永远从第 0 行重扫 —— 在一行能命中、下一行不能命中的列表里
+  // 继续打字才不会把高亮甩走。
+  const labels = searchLabels()
+  const current = rows.value.findIndex(row => row.entry.path === selected.value)
+  const index = speedSearchElement(labels, searchQuery.value, current)
   if (index >= 0) await gotoHit(index)
 }
 function openSpeedSearch() {
@@ -240,9 +304,7 @@ async function onSearchKeydown(event: KeyboardEvent) {
   event.preventDefault()
   const labels = searchLabels()
   const current = rows.value.findIndex(row => row.entry.path === selected.value)
-  const target = step.kind === 'first' ? firstSpeedSearchHit(labels, query)
-    : step.kind === 'last' ? lastSpeedSearchHit(labels, query)
-    : nextSpeedSearchHit(labels, query, current, step.kind === 'next' ? 1 : -1)
+  const target = speedSearchHitForStep(labels, query, current, step.kind)
   if (target >= 0) await gotoHit(target)
 }
 // Existing public method signatures are retained. workspaceKey is an optional
@@ -260,9 +322,9 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
         <button
           :ref="element => bindRow(row.entry.path, element)"
           class="tree-entry" role="treeitem"
-          :class="[{ selected: selection.has(row.entry.path), 'indent-guides': indentGuides, 'tree-synthetic': !!row.synthetic }, rowClassOf(row)]"
+          :class="[{ selected: selection.has(row.entry.path), 'indent-guides': indentGuides, 'tree-synthetic': !!row.synthetic }, viewOf(row)?.className]"
           :style="[indentStyle(row.level), indentGuides ? guideStyle() : undefined, { '--tree-file-color': !row.synthetic && !row.entry.path.startsWith('\u0000') ? fileColor?.(row.entry.path, row.entry.kind === 'directory') ?? undefined : undefined }]"
-          :title="titleOf(row)"
+          :title="viewOf(row)?.title"
           :aria-level="row.level + 1"
           :aria-expanded="row.entry.kind === 'directory' ? expanded.has(row.entry.path) : undefined"
           :aria-selected="selection.has(row.entry.path)"
@@ -282,6 +344,12 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
           <span v-else class="tree-spacer" />
           <Package v-if="row.synthetic?.icon === 'libraries'" :size="iconSize.toolbar" class="synthetic-icon" />
           <NotebookPen v-else-if="row.synthetic?.icon === 'scratches'" :size="iconSize.toolbar" class="synthetic-icon" />
+          <!-- `com.intellij.treeStructureProvider` 挂上来的**新合成容器**：本仓没有它的专属图标样式，
+               沿用「插件贡献」的 Puzzle，与内建的两个合成根区分开（不冒充库也不冒充 scratch）。 -->
+          <Puzzle v-else-if="row.synthetic?.icon === 'plugin'" :size="iconSize.toolbar" class="synthetic-icon" />
+          <!-- 文件图标提供者（`com.intellij.fileIconProvider`）：第三方按 id 挂的 provider 认领了这个
+               路径时用它的图标名。本仓没有 `Icon`，图标名到 lucide 一一对应；认不出的名字退回内建那几张表。 -->
+          <component v-else-if="viewOf(row)?.icon" :is="viewOf(row)?.icon" :size="iconSize.toolbar" class="synthetic-icon" />
           <!-- 外部库的两类叶子各有各的图标，和普通文件图标分开 —— 上游 SDK 行是
                `SdkType.getIcon()`（`NamedLibraryElementNode.java:52-59`），jar 根是它库自己的
                文件图标（`:43-50`），都不跟工作区里的 .java/.ts 共用。Coffee 取 IDEA 里 JDK
@@ -291,7 +359,7 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
           <Folder v-else-if="row.entry.kind === 'directory'" :size="iconSize.toolbar" class="folder-icon" />
           <FileCode2 v-else-if="/\.(java|kt|cpp|hpp|c|h|ts|js|vue)$/.test(row.entry.name)" :size="iconSize.toolbar" class="code-icon" />
           <FileText v-else :size="iconSize.toolbar" class="muted" />
-          <span class="tree-name">{{ row.entry.name }}</span><span v-if="loading.has(row.entry.path)">…</span>
+          <span class="tree-name">{{ viewOf(row)?.name ?? row.entry.name }}</span><span v-if="loading.has(row.entry.path)">…</span>
         </button>
         <div v-if="expanded.has(row.entry.path) && (row.synthetic ? row.synthetic.entries.length === 0 : row.entry.path === '' && projectName !== undefined && !depth ? entries.length === 0 : model.children.get(row.entry.path)?.length === 0)" class="empty-folder" :style="indentStyle(row.level + 1)">{{ row.synthetic ? '（空）' : '空目录' }}</div>
       </li>
@@ -300,10 +368,17 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
 </template>
 
 <style scoped>
-.tree-synthetic { color: var(--secondary); font-style: italic; }
 .synthetic-icon { color: var(--syntax-meta); flex-shrink: 0; }
-.tree-expander { display: inline-flex; flex-shrink: 0; }
+.tree-expander,
+.tree-spacer { display: inline-flex; flex: 0 0 var(--icon-size-dense); width: var(--icon-size-dense); justify-content: center; }
 .tree-entry:not(.selected):not(:hover) { background-color: var(--tree-file-color, transparent); }
+.tree-entry:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); position: relative; z-index: 1; }
+.tree-entry:focus-visible:not(.selected) { background-color: var(--hover); }
+.tree-entry > .synthetic-icon,
+.tree-entry > .folder-icon,
+.tree-entry > .code-icon,
+.tree-entry > .muted { color: var(--secondary); }
+.tree-entry.selected > svg { color: var(--accent); }
 /* 节点装饰（ProjectViewNodeDecorator 的 "Highlight files with errors"）：错误/警告只改文件名颜色。 */
 .tree-decoration-error .tree-name { color: var(--error); }
 .tree-decoration-warning .tree-name { color: var(--warning); }

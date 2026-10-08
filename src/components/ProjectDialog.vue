@@ -189,7 +189,7 @@ onBeforeUnmount(() => {
 <template>
   <dialog
     ref="dialog" class="help-dialog project-dialog" role="dialog" aria-modal="true" tabindex="-1"
-    :aria-labelledby="`${id}-title`" :aria-describedby="`${id}-description`"
+    :aria-labelledby="`${id}-title`"
     :style="dialogSize ? { width: `${dialogSize.width}px`, height: `${dialogSize.height}px` } : undefined"
     @cancel.prevent="close" @keydown.stop="onKeydown"
   >
@@ -198,8 +198,6 @@ onBeforeUnmount(() => {
       <button type="button" class="icon-button" :disabled="locked" aria-label="关闭项目对话框" :title="locked ? '请等待操作结束，克隆可通过下方按钮取消' : '关闭（Esc）'" @click="close"><X :size="iconSize.action" aria-hidden="true" /></button>
     </header>
     <form :id="`${id}-form`" ref="formElement" class="project-form" :aria-busy="locked" @submit.prevent="submit">
-      <p :id="`${id}-description`" class="dialog-description">{{ mode === 'create' ? '选择位置与模板，在本地创建项目文件夹。' : '将 Git 仓库克隆到指定的本地文件夹。' }}</p>
-      <p v-if="!isDesktop" class="preview-banner dialog-notice">浏览器仅供布局预览：字段可以填写，但不能访问磁盘、新建或克隆项目；示例文件只存在于内存，不会在此模拟成功。</p>
       <p v-if="mode === 'clone' && !gitAvailable" class="git-warning" role="status">未检测到可用的 Git。请安装 Git 并确保它在 PATH 中可用，然后重新打开 TaoCode。安装 Git 后才能克隆。</p>
       <div v-if="error" class="notice error form-error" role="alert"><span>{{ error }}</span></div>
 
@@ -249,7 +247,6 @@ onBeforeUnmount(() => {
       <div v-if="mode === 'clone' || wizardStep === 1" class="destination-block">
         <span :id="`${id}-destination-label`">最终路径</span>
         <output :aria-labelledby="`${id}-destination-label`">{{ destination || '填写父目录和名称后显示' }}</output>
-        <span v-if="!isDesktop" class="field-hint">此路径仅用于预览，不会写入磁盘。</span>
         <p v-if="pathTooLong" class="field-error" role="alert">{{ pathTooLong }}</p>
       </div>
       <section v-if="mode === 'create' && wizardStep === 2" class="wizard-review" :aria-labelledby="`${id}-review-title`">
@@ -261,18 +258,17 @@ onBeforeUnmount(() => {
           <div><dt>最终路径</dt><dd>{{ destination }}</dd></div>
         </dl>
         <p class="field-hint">{{ templateHint }}</p>
-        <p v-if="!isDesktop" class="field-hint">此路径仅用于预览，不会写入磁盘。</p>
       </section>
       <section v-if="mode === 'clone'" class="clone-progress" :aria-labelledby="`${id}-progress-title`">
         <div class="progress-heading"><h3 :id="`${id}-progress-title`"><GitBranch :size="iconSize.control" aria-hidden="true" />克隆输出</h3><span role="status">{{ cancelling ? '正在请求取消…' : busy ? '克隆中…' : '' }}</span></div>
         <div ref="progressLog" class="progress-log" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Git 克隆日志" tabindex="0" @scroll="trackProgressScroll">
           <div v-for="(line, index) in progress" :key="index" class="progress-line">{{ line }}</div>
-          <p v-if="!progress.length" class="log-empty">{{ busy ? '等待 Git 输出…' : '提交克隆后，实际 Git 输出会显示在这里。' }}</p>
+          <p v-if="!progress.length && busy" class="log-empty">等待 Git 输出…</p>
         </div>
       </section>
     </form>
     <footer class="dialog-footer">
-      <span class="operation-status" role="status">{{ cancelling ? '正在取消，请等待克隆进程结束。' : busy ? mode === 'create' ? '正在创建，请勿关闭此窗口。' : '克隆进行中，可以请求取消。' : !isDesktop ? '仅布局预览，无法提交' : '' }}</span>
+      <span class="operation-status" role="status">{{ cancelling ? '正在取消，请等待克隆进程结束。' : busy ? mode === 'create' ? '正在创建，请勿关闭此窗口。' : '克隆进行中，可以请求取消。' : '' }}</span>
       <div class="footer-actions">
         <button v-if="mode === 'create' && wizardStep > 0" type="button" class="subtle-button" :disabled="locked" @click="goBack">上一步</button>
         <button type="button" class="subtle-button" :disabled="cancelling || (busy && mode === 'create')" @click="cancelOperation">{{ cancelling ? '正在取消克隆…' : busy && mode === 'clone' ? '取消克隆' : '取消' }}</button>
@@ -295,8 +291,6 @@ onBeforeUnmount(() => {
 .dialog-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-shrink: 0; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--line); }
 .project-dialog .dialog-title { margin: 0; padding: 0; font: 600 17px/1.5 var(--font-ui); color: var(--bright); }
 .project-form { min-height: 0; min-width: 0; overflow: auto; padding: var(--space-4) var(--space-5); }
-.dialog-description { margin: 0 0 var(--space-4); color: var(--secondary); }
-.dialog-notice { margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-xs); font-size: 12px; overflow-wrap: anywhere; }
 .git-warning { margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-3); color: var(--warning); background: var(--warning-bg); border: 1px solid var(--line); border-radius: var(--radius-xs); }
 .form-error { border: 1px solid var(--error); border-radius: var(--radius-xs); margin-bottom: var(--space-4); }
 .project-fields { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; margin: 0; padding: 0; border: 0; }
@@ -317,10 +311,10 @@ onBeforeUnmount(() => {
 .wizard-review dd { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--text); font: 12px/1.7 var(--font-mono); overflow-wrap: anywhere; }
 .form-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .form-field label { color: var(--bright); font-weight: 600; }
-.form-field input, .form-field select { width: 100%; min-width: 0; min-height: 34px; padding: var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: inherit; }
+.form-field input, .form-field select { width: 100%; min-width: 0; min-height: var(--ctrl-height); padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: inherit; }
 .form-field input::placeholder { color: var(--muted); }
 .form-field input:disabled, .form-field select:disabled { color: var(--muted); background: var(--panel); }
-.form-field select:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.form-field select:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .form-field input[aria-invalid='true'] { border-color: var(--error); }
 .field-hint { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .field-error { margin: 0; color: var(--error); font-size: 11px; }
@@ -334,7 +328,7 @@ onBeforeUnmount(() => {
 .progress-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2); color: var(--muted); font-size: 11px; }
 .progress-heading h3 { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--secondary); font-size: 12px; font-weight: 500; }
 .progress-log { min-width: 0; max-height: 150px; min-height: 65px; overflow: auto; padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); font: 11px/1.7 var(--font-mono); }
-.progress-log:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.progress-log:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .progress-line { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-empty { margin: 0; color: var(--muted); font-family: var(--font-ui); }
 .dialog-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-3); flex-shrink: 0; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--line); }

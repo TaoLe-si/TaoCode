@@ -13,6 +13,9 @@
 //     （导入期的 warmup 重试、同一个文档开第二个编辑器）直接复用已构建的 `DecorationSet`，
 //     不再重建 `RangeSet` —— 上游 `LspPullResult.Unchanged` 的「保留内容不重画」。
 //   · `StateField` 自己的 `layer.decorations`：CodeMirror 的高亮层，编辑时跟着走。
+//     作废那一步走的是**按特性注册表**（`invalidatePulledResults()`，
+//     `src/semanticHighlighting.ts:325-328`），不是直接点某一份缓存 —— 上游同一条也是从注册表扇出去的
+//     （`platform/lsp-impl/src/impl/features/highlightingCommon/LspHighlightingCacheRegistry.kt:54-56`）。
 //
 // ## 编辑后**跟着走**而不是整层清空（留痕：原写「文档一变就整份作废」）
 // 原来的理由是「把旧 decoration map 到新位置只会把颜色留在错误的 token 上」。上游不是这么做的：
@@ -24,7 +27,8 @@
 // 下一次权威结果整份覆盖。用户可见的差别是：打字时语义颜色不再闪断 400ms。
 import { RangeSetBuilder, StateEffect, StateField, type ChangeSet, type EditorState, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
-import { semanticHighlightClasses, semanticHighlightingCache, semanticRevisionOf } from './semanticHighlighting.ts'
+import { invalidatePulledResults, semanticHighlightClasses, semanticHighlightingCache, semanticRevisionOf } from './semanticHighlighting.ts'
+import { remapHighlightRanges } from './lspHighlightingCache.ts'
 import type { SemanticToken } from './semanticTokens.ts'
 
 export const setSemanticTokens = StateEffect.define<readonly SemanticToken[]>()
@@ -77,25 +81,20 @@ function decorate(marks: readonly SemanticMark[]): DecorationSet {
 }
 
 /**
- * 编辑后的区间：两端都**朝内容内侧**映射（`mapPos(from, +1)` 让起点跳到插入文本之后、
- * `mapPos(to, -1)` 让终点停在插入文本之前）—— 这正是 CodeMirror 自己映射 decoration 的做法。
- * 与上游四条分支的对应（`LspCachedHighlighting.kt:38-80`，本仓 `src/lspHighlightingCache.ts:8-12`）：
+ * 编辑后的区间：**两端都朝内容内侧**映射，映射后零宽（这段被编辑吃掉了）就丢掉不画。
+ * 规则本体在 `src/lspHighlightingCache.ts` 的 `remapHighlightRanges()`（documentHighlight 那一族
+ * 走的是同一份实现，两份装饰层不该各写一遍上游那四条分支），这里只接 `SemanticMark` ↔ `TextRange`。
+ * 与上游四条分支的对应（`LspCachedHighlighting.kt:55-87`，四条分别在 `:65-68`/`:70-75`/`:77-82`/`:84-85`；
+ * 本仓 `src/lspHighlightingCache.ts:8-12` 记着那四条）：
  *   · 编辑在区间之前 ⇒ 整体右移（②）；编辑在区间之后 ⇒ 不动（①）；
  *   · 编辑落在区间内部 ⇒ 区间随插入变长/随删除变短（③ 的 grown）；
- *   · 编辑把区间吃掉 ⇒ 映射后零宽，下面 `to <= from` 那条把它删掉（④ 的 `iterator.remove()`）。
- * 边界上取「内侧」而不是「外侧」，是为了不把插在 token 前后的字符染进这个 token ——
- * 上游的 ② 也是这个口径（编辑在区间开始处算「在区间之前」，整体右移）。
+ *   · 编辑把区间吃掉 ⇒ 映射后零宽，`remapHighlightRanges` 里那条 `end <= start` 把它删掉（④ 的 `iterator.remove()`）。
+ * 边界上取「内侧」而不是「外侧」，是为了不把插在 token 前后的字符染进这个 token。
  */
 function remapMarks(marks: readonly SemanticMark[], changes: ChangeSet): SemanticMark[] {
-  const mapped: SemanticMark[] = []
-  for (const mark of marks) {
-    const from = changes.mapPos(mark.from, 1)
-    const to = changes.mapPos(mark.to, -1)
-    // 映射后零宽 = 这段被编辑吃掉了（上游 `applyPendingEdits` 的「部分相交就删掉这一条」）。
-    if (to <= from) continue
-    mapped.push({ from, to, cls: mark.cls })
-  }
-  return mapped
+  return remapHighlightRanges(marks, changes,
+    mark => ({ start: mark.from, end: mark.to }),
+    (mark, span) => ({ from: span.start, to: span.end, cls: mark.cls }))
 }
 
 /** 两份 token 列表是否逐条相同（`Unchanged` 的判定；修饰符按名字序列比）。 */
@@ -137,7 +136,13 @@ export const semanticTokensState = StateField.define<SemanticLayer>({
   update: (layer, transaction) => {
     if (transaction.docChanged) {
       // 修订变了：旧文档的快照作废（下一次读必然 miss ⇒ 重新取），区间跟着编辑平移后继续画。
-      semanticHighlightingCache.invalidate(transaction.startState.doc)
+      // 作废走 `invalidatePulledResults()` 而不是直接点这一份缓存 —— 上游那份"一个文件的陈旧"
+      // 就是从注册表扇给每条按特性缓存的（`LspHighlightingCacheRegistry.kt:54-56`
+      // `allCaches.forEach { if (it.supportsPull) it.forceFullRepull(file) }`，
+      // 调用点是 `LspClientImpl.kt:223-233` 的 `invalidateServerResults`）。
+      // 今天注册表里只有 semanticTokens 一条，所以两种写法等价；等第二条按特性缓存登记进来时，
+      // 这一行不用再改。
+      invalidatePulledResults(transaction.startState.doc)
       const marks = remapMarks(layer.marks, transaction.changes)
       return { revision: semanticRevisionOf(transaction.state.doc), marks, decorations: decorate(marks) }
     }

@@ -62,7 +62,10 @@ test('每一种已声明的类型都能存得下去（schema 不再硬编码第�
   for (const entry of RUN_CONFIG_TYPES) {
     const config = entry.id === 'compound'
       ? { name: '复合', type: 'compound', command: '', configurations: [leaf.name] }
-      : { name: `配置-${entry.id}`, type: entry.id, command: 'echo hi', program: 'a.exe', adapter: 'cpp' }
+      : entry.id === JAR_RUN_CONFIG_TYPE_ID
+        // jar 那一型多一道入口校验（args 里必须有 `-jar <路径>`），通用夹具喂不出合法记录。
+        ? { name: `配置-${entry.id}`, type: entry.id, command: '', program: 'C:/jdk/bin/java.exe', args: ['-jar', 'build/app.jar'] }
+        : { name: `配置-${entry.id}`, type: entry.id, command: 'echo hi', program: 'a.exe', adapter: 'cpp' }
     const saved = normalizeRunConfigurations([leaf, config])
     assert.ok(saved.some(item => item.name === config.name), `${entry.id} 应当过得了 schema`)
   }
@@ -131,7 +134,7 @@ test('运行目标只有提醒没有致命（上游找不到目标就回落本�
 
 test('类型标签与编辑器一致，未知类型退回原 id（不编一个标签）', () => {
   assert.equal(runConfigTypeLabel('compound'), '复合配置')
-  assert.equal(runConfigTypeLabel('jar'), 'jar', '本仓还没接 JAR 类型 ⇒ 不显示假标签')
+  assert.equal(runConfigTypeLabel('jar'), 'JAR Application', 'JAR 已接 ⇒ 取上游 bundle 原文（ExecutionBundle.properties:55）')
   assert.equal(typeof targetOptionLabel, 'function')
 })
 
@@ -215,8 +218,8 @@ test('JAR 那一族五处一致：表单 / schema / 持久化 / 执行参数 / �
   assert.match(thrownMessage(() => normalizeRunConfigurations([jarConfig({ args: ['-jar'] })])), /没有 JAR 路径/)
   assert.match(thrownMessage(() => normalizeRunConfigurations([jarConfig({ args: [], command: 'java' })])), /没有 JAR 路径/,
     '只在命令格里写了 java（没有 -jar 那一截）同样是缺入口')
-  assert.match(thrownMessage(() => normalizeRunConfigurations([jarConfig()])), /宿主还没接/,
-    '形状没问题的 jar 记录仍要被 gate 挡下（宿主白名单不认 jar ⇒ 现在存不下去，不能建得出再炸）')
+  assert.ok(normalizeRunConfigurations([jarConfig()]).some(item => item.name === '跑 app.jar'),
+    '形状齐的 jar 记录存得下去（宿主两处已接 ⇒ pending 摘掉；此前它被 gate 挡在「宿主还没接」那一句）')
   // ④ 执行参数：VM 参数 → -jar 路径 → 程序参数（与 jarRunArgs 同形），缺入口就抛而不是给一条空命令行。
   assert.deepEqual(jarRunConfigParams(jarConfig()), { program: 'C:/jdk/bin/java.exe', args: ['-jar', 'build/app.jar'], shell: false })
   assert.equal(jarRunConfigPath(jarConfig({ args: [], command: 'java -jar "build/my app.jar" --port 8080' })), 'build/my app.jar')
@@ -243,12 +246,13 @@ test('JAR 缺入口时**表单实时校验**与**启动链路**都报错，不�
   assert.equal(checkRunConfiguration(jarConfig(), [jarConfig()]), null, '形状齐的 jar 记录在编辑器层没有拦路问题')
   // 启动：`runConfigClosure` 落 schema 同一道门（src/runConfigTree.ts 里那句 normalizeRunConfigurations）。
   assert.match(thrownMessage(() => runConfigClosure(jarConfig({ args: ['-jar'] }), [])), /没有 JAR 路径/)
-  assert.match(thrownMessage(() => runConfigClosure(jarConfig(), [])), /宿主还没接/)
+  assert.deepEqual(runConfigClosure(jarConfig(), []).map(entry => entry.name), ['跑 app.jar'],
+    '宿主两处已接 ⇒ 形状齐的 jar 过得了启动链路里 schema 那道门（此前停在「宿主还没接」）')
 })
 
-test('宿主没接 JAR 时左树不列 jar 配置（宁可不出现，也不放一个点不动的假类型节点）', () => {
-  assert.deepEqual(buildRunConfigTree([jarConfig()]).map(group => group.id), [],
-    'gate 关着 ⇒ 树里不出现 jar 类型节点（表单的「添加」菜单同理，两处读的都是 RUN_CONFIG_TYPES）')
+test('宿主两处接了 JAR 之后左树要列出 jar 类型节点（pending 摘掉 ⇒ 树、添加菜单、类型下拉三处同源）', () => {
+  assert.deepEqual(buildRunConfigTree([jarConfig()]).map(group => group.id), ['jar'],
+    'gate 摘掉 ⇒ 树里必须出现 jar 类型节点（表单的「添加」菜单同理，两处读的都是 RUN_CONFIG_TYPES）')
   assert.deepEqual(buildRunConfigTree([{ name: 'shell 一条', type: 'shell', command: 'echo hi' }]).map(group => group.id), ['shell'])
 })
 

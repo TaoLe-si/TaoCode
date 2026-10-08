@@ -186,3 +186,11 @@ import { applyIgnoredPatterns, loadIgnoredPatterns } from './fileTypeIgnoredList
   `:language="associationOf(tab.path, tab.content)"`，内部走 `src/fileTypeDetection.ts:142` 查进程内注册表；
   本轮反向验证（见 `docs/batch-2026-10-06-bucket15.md` §4）钉住了这条链。
 - 「按内容 CRC 判定设置文件真变了」：**早就接了** —— `src/gradleHost.ts:43` import `calculateSettingsFilesCrc`、`:616-619` 用。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1 已接线**：`src/App.vue:160-161` 两条 import、`:254-257` `nameDialogTemplates`（内建 16 kind + 自定义模板）、`:1793-1796` `applyNameDialog` 的 user 模板分支（`createFileFromTemplate`）、`:2570-2571` `<select>` 走 `v-for`。16 行硬编码 option 已撤，净减行。
+- **W2（`externalTools` schema 放开）跳过** —— 目标 `native/settings_schema.cpp`，本 lane 禁改 `native/**`（除 `main.cpp` 本就禁）。需 native owner 处理。
+- **W3 已接线（形状订正）**：`src/main.ts:6` import `loadIgnoredPatterns`、`:30` 调 `loadIgnoredPatterns()`（该函数自己已 `applyToManager`，无需再套 `applyIgnoredPatterns`），在 `createApp(...).mount()` 之前。
+
+结论：W1/W3 早已接线，未改任何文件。

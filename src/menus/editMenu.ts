@@ -130,8 +130,7 @@ export interface EditMenuContext {
     // `platform/platform-resources-en/src/messages/ActionsBundle.properties:1946`）。
     // `$default.xml` 里没有它的键位 ⇒ 只给菜单行，不编快捷键。
     ctx.editable('paragraph.fill', '填充段落', '', 'fill paragraph 填充段落 折行'),
-    // 排序行 / 反串行（上游 `EditorSortLines`/`EditorReverseLines`，`PlatformActions.xml:495-496`
-    // 就在 `FillParagraph`(:494) 之后；`EditorTranspose`(:497) 本仓没有 ⇒ 不渲染假行）。
+    // 排序行 / 反串行（上游 `EditorSortLines`/`EditorReverseLines`，`PlatformActions.xml:495-496`）。
     // 文案是 `platform/platform-resources-en/src/messages/ActionsBundle.properties:173-174`
     // （`Sort Lines` / `Reverse Lines`）的直译：本地参考树里没有随 IDE 发货的中文包
     // （`plugins/localization-zh` 不在 community 源里），所以不引用中文行号、也不假称取自中文包。
@@ -139,6 +138,7 @@ export interface EditMenuContext {
     // `EditorSortLines` 绑过键），等 `$default.xml` 那一族真的进了本仓键位表再填。
     ctx.editable('line.sort', '排序行', '', 'sort lines 排序行 排序'),
     ctx.editable('line.reverse', '反串行', '', 'reverse lines 反串行 倒序'),
+    ctx.editable('text.transpose', '转置', '', 'transpose 转置'),
     // 删除重复行（上游 `EditorUniqueLines`，`ActionsBundle.properties:175` = `Delete Duplicate Lines`）。
     // **本仓菜单落点与上游不同**：上游只把它挂在编辑器动作组（`PlatformActions.xml:240`），
     // EditMenu 里没有这一行，用户在 IDEA 里靠 Find Action（Ctrl+Shift+A）够到它 ——
@@ -157,9 +157,10 @@ export interface EditMenuContext {
     ctx.editable('block.startSelect', '在保持选区的情况下将文本光标移至代码块开始', 'Ctrl Shift [', 'code block start selection 代码块开始 选区'),
     ctx.editable('block.endSelect', '在保持选区的情况下将文本光标移至代码块结束', 'Ctrl Shift ]', 'code block end selection 代码块结束 选区'),
     // 用自定义折叠标记包围选区（上游是 Ctrl+Alt+T「环绕方式(_S)…」列表里的一族，
-    // `CustomFoldingSurroundDescriptor.java:217-227` 每个 provider 一行）。本仓那个列表在
-    // `src/surroundTemplates.ts`（别的桶名下）⇒ 先给一条走默认标记（`//<region>`）的菜单行，
-    // 列表侧接线见交接请求。
+    // `CustomFoldingSurroundDescriptor.java:217-227` 每个 provider 一行）。那三行现在就在
+    // 那个列表里（`src/customFoldingSurround.ts` 的 `customFoldingSurroundRows()` 从 provider 表
+    // 生成，`src/surroundTemplates.ts` 按当前文件的注释词法重包）；这一条菜单行走的是
+    // provider 表里 id 为空的那一族（插入 `//<region Description>`，Java 一档的注释前缀）。
     ctx.editable('fold.surroundRegion', '用折叠区域标记包围', '', 'surround region folding 折叠区域 包围'),
     ctx.editable('line.delete', '删除行', 'Ctrl Y', 'delete line 删除行'),
     ctx.editable('line.moveUp', '上移行', 'Alt Shift ↑', 'move line up 上移行'),

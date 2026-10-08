@@ -2,7 +2,7 @@
 // ExternalProjectsView / ProjectNode: each linked build owns project → Tasks/Dependencies nodes.
 // Missing Tooling API/action capabilities are documented in parity-runtime-remaining.md, not fake controls.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Boxes, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileCode2, RefreshCw, Settings, Square, Unlink, Wrench } from 'lucide-vue-next'
+import { Boxes, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileCode2, RefreshCw, Settings, Square, Unlink, Wrench } from 'lucide-vue-next'
 import { gradleSync } from '../bridge.ts'
 import {
   AUTO_RELOAD_GROUP_TITLE, BUILD_TOOLS_GROUP_ID, GRADLE_CONFIGURABLE_ID, GRADLE_DEPENDENCIES_NODE_NAME,
@@ -11,6 +11,11 @@ import {
   type GradleLinkedProject, type GradleSyncResult, type GradleTaskNode,
 } from '../gradle.ts'
 import { iconSize } from '../uiIcons'
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
+// 构建事件与进度树（上游 `BuildEventDispatcher`/`BuildProgress`/`BuildRootProgressImpl` 的有界子集）：
+// 同步就是一类 build，把 CLI 输出折成按任务分组的进度树（`src/buildEvents.ts`）。
+import { buildProgressTree, flattenProgress, gradleBuildEvents, progressPercent } from '../buildEvents.ts'
 // 任务激活（上游 `TaskActivationState` / `ExternalSystemTaskActivator` / `ConfigureTasksActivationDialog`）：
 // 状态按工作区根持久化在 src/externalProjectModel.ts，对话框树的折叠与命令在
 // src/externalTasksActivation.ts，宿主是本面板（工程/任务右键「配置任务激活…」）。
@@ -265,6 +270,44 @@ onBeforeUnmount(() => { if (ticker) clearInterval(ticker); if (typeof window !==
 const syncSeconds = computed(() => Math.max(0, Math.round((now.value - gradleSync.startedAt) / 1000)))
 const outputTail = computed(() => gradleSync.running ? gradleOutputTail(gradleSync.output, 6) : [])
 const tailOpen = ref(true)
+/**
+ * 同步输出的**进度树**（上游 `BuildTreeConsoleView` 按 `parentId` 渲染的那棵树）：
+ * 从 `gradleSync.output` 折出任务边界与结论；折不出任务时返回 null，模板退回平铺尾部。
+ * 同步进行中不发根节点结论（`running` 那一档）。
+ */
+const buildProgress = computed(() => buildProgressTree(gradleBuildEvents({
+  output: gradleSync.output,
+  startedAt: gradleSync.startedAt || Date.now(),
+  label: gradleSync.command || 'Gradle 同步',
+  running: gradleSync.running,
+  finishedAt: gradleSync.at || undefined,
+})))
+/** 进度树里深度 > 0 的任务行（根节点就是整次同步，不重复画）。 */
+const buildTaskRows = computed(() => buildProgress.value
+  ? flattenProgress(buildProgress.value).filter(row => row.depth > 0).map(row => ({
+    id: row.node.id,
+    depth: row.depth,
+    message: row.node.message,
+    result: row.node.result,
+    percent: progressPercent(row.node),
+  }))
+  : [])
+const rootPercent = computed(() => buildProgress.value ? progressPercent(buildProgress.value) : -1)
+/** 节点结论 → 一行文案（上游 `BuildTreeConsoleView` 的收尾行；未结束是空串）。 */
+function buildResultLabel(result: { kind: string; message?: string } | null | undefined): string {
+  if (!result) return ''
+  if (result.kind === 'success') return '成功'
+  if (result.kind === 'failure') return `失败${result.message ? `：${result.message}` : ''}`
+  if (result.kind === 'cancelled') return '已取消'
+  return '已跳过'
+}
+/** 结论 → 标记字符（成功/失败/跳过/进行中）。 */
+function buildResultMark(result: { kind: string }): string {
+  if (result.kind === 'success') return '✓'
+  if (result.kind === 'failure') return '✕'
+  if (result.kind === 'cancelled') return '■'
+  return '–'
+}
 const syncedAt = computed(() => props.result.at ? new Date(props.result.at).toLocaleTimeString('zh-CN', { hour12: false }) : '')
 // —— 依赖分析器（上游 `DependencyAnalyzerManager.getOrCreate` 打开虚拟文件编辑器页）——
 // 入口是对选中 build 的「依赖分析…」；数据就是面板已经加载的 `gradle dependencies`。
@@ -277,10 +320,10 @@ const analyzerModuleName = computed(() => (analyzerBuild.value?.directory || '�
   <div class="gradle-panel" @keydown="onKeydown">
     <div class="panel-heading"><span><Boxes :size="iconSize.control" />Gradle</span><span class="heading-count">{{ syncedAt }}</span></div>
     <div class="gradle-toolbar" role="group" aria-label="Gradle 工具条">
-      <button class="subtle-button" :disabled="!ready || busy" title="同步全部链接工程（RefreshAllProjects）" @click="emit('sync')"><RefreshCw :size="iconSize.menu" />同步</button>
-      <button v-if="busy" class="subtle-button" title="取消当前命令和待运行队列" @click="emit('cancel')"><Square :size="iconSize.menu" />取消</button>
-      <button class="subtle-button" :disabled="!ready || busy || !linkedProjects.includes(selectedDirectory)" title="取消链接选中的 Gradle 工程" @click="emit('unlink', selectedDirectory)"><Unlink :size="iconSize.menu" />取消链接</button>
-      <button class="subtle-button" :disabled="!analyzerBuild?.dependenciesLoaded" title="依赖分析器（DependencyAnalyzerAction）：按坐标成组的已解析依赖与用法" @click="analyzerOpen = true"><Boxes :size="iconSize.menu" />依赖分析…</button>
+      <button class="subtle-button" :disabled="!ready || busy" @click="emit('sync')"><RefreshCw aria-hidden="true" :size="iconSize.menu" />同步</button>
+      <button v-if="busy" class="subtle-button" title="取消当前命令和待运行队列" @click="emit('cancel')"><Square aria-hidden="true" :size="iconSize.menu" />取消</button>
+      <button class="subtle-button" :disabled="!ready || busy || !linkedProjects.includes(selectedDirectory)" title="取消链接选中的 Gradle 工程" @click="emit('unlink', selectedDirectory)"><Unlink aria-hidden="true" :size="iconSize.menu" />取消链接</button>
+      <button class="subtle-button" :disabled="!analyzerBuild?.dependenciesLoaded" @click="analyzerOpen = true"><Boxes aria-hidden="true" :size="iconSize.menu" />依赖分析…</button>
       <span class="gradle-separator" aria-hidden="true" />
       <button class="icon-button" title="全部展开" aria-label="全部展开" @click="expandAll"><ChevronsUpDown :size="iconSize.control" /></button>
       <button class="icon-button" title="全部折叠" aria-label="全部折叠" @click="collapseAll"><ChevronsDownUp :size="iconSize.control" /></button>
@@ -290,7 +333,7 @@ const analyzerModuleName = computed(() => (analyzerBuild.value?.directory || '�
           <button role="menuitem" @click="emit('openSettings', BUILD_TOOLS_GROUP_ID)">公共设置</button>
           <button role="menuitem" @click="emit('openSettings', GRADLE_CONFIGURABLE_ID)">Gradle</button>
           <div class="gradle-menu-rule" role="separator" />
-          <button v-for="row in gearRows" :key="row.id" role="menuitemcheckbox" :aria-checked="row.checked === true" @click="gearAction(row)"><span class="gradle-menu-check"><Check v-if="row.checked" :size="iconSize.dense" :aria-hidden="true" /></span>{{ row.title }}</button>
+          <button v-for="row in gearRows" :key="row.id" role="menuitemcheckbox" :aria-checked="row.checked === true" @click="gearAction(row)"><span class="gradle-menu-check"><IdeaCheckedIcon v-if="row.checked" :size="iconSize.dense" :aria-hidden="true" /></span>{{ row.title }}</button>
         </div>
       </div>
     </div>
@@ -299,36 +342,49 @@ const analyzerModuleName = computed(() => (analyzerBuild.value?.directory || '�
     <p v-if="!ready" class="gradle-empty">浏览器预览不能运行 Gradle 同步，请在桌面端打开一个项目。</p>
     <p v-if="gradleSync.running" class="gradle-running"><RefreshCw :size="iconSize.dense" />正在跑：<code>{{ gradleSync.command }}</code><span aria-live="polite">已 {{ syncSeconds }} 秒</span></p>
     <p v-else-if="message" class="gradle-note">{{ message }}</p>
+    <!-- 构建进度树（上游 BuildTreeConsoleView）：按任务分组的同步进度；任务边界折不出来时退回平铺尾部。 -->
+    <div v-if="buildTaskRows.length" class="gradle-build-tree" role="tree" aria-label="同步进度">
+      <div class="gradle-build-head"><span class="gradle-build-title">{{ buildProgress?.message }}</span>
+        <span v-if="buildProgress?.result" class="gradle-build-result" :class="{ failed: buildProgress.result.kind === 'failure' }">{{ buildResultLabel(buildProgress.result) }}</span>
+        <span v-if="rootPercent >= 0" class="gradle-build-pct">{{ rootPercent }}%</span>
+      </div>
+      <p v-for="row in buildTaskRows" :key="row.id" class="gradle-build-row" role="treeitem" :style="{ paddingLeft: `${row.depth * 12}px` }" :title="row.message">
+        <span class="gradle-build-mark" :class="row.result ? `is-${row.result.kind}` : 'is-running'" aria-hidden="true">{{ row.result ? buildResultMark(row.result) : '…' }}</span>
+        <span class="gradle-build-task">{{ row.message }}</span>
+        <span v-if="row.result && row.result.upToDate" class="gradle-build-updated">最新</span>
+        <span v-if="row.percent >= 0" class="gradle-build-pct">{{ row.percent }}%</span>
+      </p>
+    </div>
     <div v-if="outputTail.length" class="gradle-tail">
       <button class="gradle-group-toggle" :aria-expanded="tailOpen" @click="tailOpen = !tailOpen">同步输出</button>
       <pre v-if="tailOpen" class="gradle-tail-body">{{ outputTail.join('\n') }}</pre>
     </div>
     <div class="gradle-body" role="tree" aria-label="Gradle 链接工程">
       <section v-for="{ build, ignored, nodes } in trees" :key="build.directory" class="gradle-section" role="treeitem" :aria-expanded="!collapsed.has(key(build.directory))">
-        <button class="gradle-group-toggle" :class="{ selected: selectedDirectory === build.directory }" @click="selectedDirectory = build.directory; toggle(collapsed, key(build.directory))" @contextmenu.prevent="openMenu($event, 'project', build.directory)">
-          <component :is="collapsed.has(key(build.directory)) ? ChevronRight : ChevronDown" :size="iconSize.dense" /><Boxes :size="iconSize.inline" />{{ build.directory || '工作区根项目' }}<span v-if="ignored" class="gradle-ignored">已忽略</span>
+        <button class="gradle-group-toggle" :class="{ selected: selectedDirectory === build.directory }" :aria-current="selectedDirectory === build.directory ? 'true' : undefined" @click="selectedDirectory = build.directory; toggle(collapsed, key(build.directory))" @contextmenu.prevent="openMenu($event, 'project', build.directory)">
+          <component aria-hidden="true" :is="collapsed.has(key(build.directory)) ? ChevronRight : ChevronDown" :size="iconSize.dense" /><Boxes aria-hidden="true" :size="iconSize.inline" />{{ build.directory || '工作区根项目' }}<span v-if="ignored" class="gradle-ignored">已忽略</span>
         </button>
         <div v-if="!collapsed.has(key(build.directory))" role="group" class="gradle-children">
           <p v-if="build.detection" class="gradle-detail">{{ build.detection.distributionVersion ? `Gradle ${build.detection.distributionVersion}` : '本机/包装器' }} · {{ build.detection.buildFiles.join('、') }}</p>
           <p v-if="build.detectionError || build.result.error" class="gradle-error">{{ build.detectionError || build.result.error }}</p>
           <p v-else-if="build.message" class="gradle-note">{{ build.message }}</p>
-          <p v-if="!nodes.length" class="gradle-empty-inline">{{ busy ? '同步中…工程结构要等这一次跑完。' : '还没有工程模型；点「同步」拉取。' }}</p>
+          <p v-if="!nodes.length" class="gradle-empty-inline">{{ busy ? '同步中…工程结构要等这一次跑完。' : '还没有工程模型。' }}</p>
           <div v-for="node in nodes" :key="node.project.path" role="treeitem" :aria-expanded="!collapsed.has(key(build.directory, node.project.path))" class="gradle-module">
             <button class="gradle-group-toggle" @click="toggle(collapsed, key(build.directory, node.project.path))" @contextmenu.prevent="openMenu($event, 'project', build.directory)">
-              <component :is="collapsed.has(key(build.directory, node.project.path)) ? ChevronRight : ChevronDown" :size="iconSize.dense" /><Wrench :size="iconSize.inline" />{{ node.project.name }}<span class="gradle-path">{{ node.project.path }}</span>
+              <component aria-hidden="true" :is="collapsed.has(key(build.directory, node.project.path)) ? ChevronRight : ChevronDown" :size="iconSize.dense" /><Wrench aria-hidden="true" :size="iconSize.inline" />{{ node.project.name }}<span class="gradle-path">{{ node.project.path }}</span>
             </button>
             <div v-if="!collapsed.has(key(build.directory, node.project.path))" role="group" class="gradle-children">
               <h4>Tasks</h4>
               <p v-if="!node.taskGroups.length" class="gradle-empty-inline">{{ busy ? '同步中…任务表要等这一次跑完。' : '没有报告的任务。' }}</p>
               <div v-for="group in node.taskGroups" :key="group.group">
-                <button class="gradle-group-toggle" :aria-expanded="expandedGroups.has(key(build.directory, node.project.path, group.group))" @click="toggle(expandedGroups, key(build.directory, node.project.path, group.group))"><component :is="expandedGroups.has(key(build.directory, node.project.path, group.group)) ? ChevronDown : ChevronRight" :size="iconSize.dense" />{{ group.group }}</button>
+                <button class="gradle-group-toggle" :aria-expanded="expandedGroups.has(key(build.directory, node.project.path, group.group))" @click="toggle(expandedGroups, key(build.directory, node.project.path, group.group))"><component aria-hidden="true" :is="expandedGroups.has(key(build.directory, node.project.path, group.group)) ? ChevronDown : ChevronRight" :size="iconSize.dense" />{{ group.group }}</button>
                 <ul v-if="expandedGroups.has(key(build.directory, node.project.path, group.group))" class="gradle-list" role="group">
                   <li v-for="task in group.tasks" :key="task.name" role="treeitem"><button class="gradle-task" :title="taskActivationTitle(task, build.directory)" @dblclick="runTask(task, build.directory)" @keydown.enter="runTask(task, build.directory)" @contextmenu.stop="openMenu($event, 'task', build.directory, task.name)">{{ task.name }}</button><span class="gradle-desc">{{ task.description }}</span></li>
                 </ul>
               </div>
-              <button class="gradle-group-toggle" :aria-expanded="dependenciesOpen.has(build.directory)" @click="toggleDependencies(build)"><component :is="dependenciesOpen.has(build.directory) ? ChevronDown : ChevronRight" :size="iconSize.dense" />{{ GRADLE_DEPENDENCIES_NODE_NAME }}</button>
+              <button class="gradle-group-toggle" :aria-expanded="dependenciesOpen.has(build.directory)" @click="toggleDependencies(build)"><component aria-hidden="true" :is="dependenciesOpen.has(build.directory) ? ChevronDown : ChevronRight" :size="iconSize.dense" />{{ GRADLE_DEPENDENCIES_NODE_NAME }}</button>
               <div v-if="dependenciesOpen.has(build.directory)" role="group">
-                <p v-if="!build.dependenciesLoaded" class="gradle-empty-inline">{{ busy ? (/dependencies\b/.test(gradleSync.command) ? '正在加载依赖…' : '依赖加载已排队，等待当前命令。') : '依赖尚未加载；折叠后展开可重试。' }}</p>
+                <p v-if="!build.dependenciesLoaded" class="gradle-empty-inline">{{ busy ? (/dependencies\b/.test(gradleSync.command) ? '正在加载依赖…' : '依赖加载已排队，等待当前命令。') : '依赖尚未加载。' }}</p>
                 <p v-else-if="!node.scopes.length" class="gradle-empty-inline">{{ query ? '没有匹配的已加载依赖。' : '此项目没有报告的依赖配置。' }}</p>
                 <div v-for="scope in node.scopes" :key="scope.configuration">
                   <button class="gradle-group-toggle" :title="scope.description" :aria-expanded="Boolean(query) || expandedScopes.has(key(build.directory, node.project.path, scope.configuration))" @click="toggle(expandedScopes, key(build.directory, node.project.path, scope.configuration))">{{ scope.configuration }}<span v-if="scope.unresolved">(n)</span></button>
@@ -343,11 +399,10 @@ const analyzerModuleName = computed(() => (analyzerBuild.value?.directory || '�
         </div>
       </section>
     </div>
-    <p class="gradle-hint">双击或 Enter 运行任务；右键可保存配置。依赖过滤只搜索已加载的模型。</p>
     <div v-if="menu" class="gradle-menu gradle-context" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
       <template v-for="row in menuRows" :key="row.id">
         <div v-if="row.separatorBefore" class="gradle-menu-rule" role="separator" />
-        <button role="menuitem" :disabled="!row.enabled" :title="row.disabledReason || row.title" @click="menuAction(row)"><span class="gradle-menu-check"><Check v-if="row.checked" :size="iconSize.dense" :aria-hidden="true" /></span>{{ row.title }}</button>
+        <button role="menuitem" :disabled="!row.enabled" :title="row.disabledReason || row.title" @click="menuAction(row)"><span class="gradle-menu-check"><IdeaCheckedIcon v-if="row.checked" :size="iconSize.dense" :aria-hidden="true" /></span>{{ row.title }}</button>
       </template>
     </div>
     <ExternalTasksActivationDialog v-if="activationOpen" :builds="activationNodes" :summary="activationSummary"
@@ -365,10 +420,9 @@ const analyzerModuleName = computed(() => (analyzerBuild.value?.directory || '�
         <label class="task-editor-field"><span>参数：</span><input v-model="taskEdit.scriptParameters" aria-label="参数" /></label>
         <label class="task-editor-field"><span>环境变量：</span><textarea v-model="taskEdit.envText" rows="3" aria-label="环境变量" placeholder="每行一个 KEY=VALUE" /></label>
         <p v-if="taskEditEnvInvalid.length" class="gradle-error">无效的环境变量行：{{ taskEditEnvInvalid.join('、') }}</p>
-        <p class="gradle-note">任务名与参数拼进命令行；VM 选项与环境变量在直接运行时走带环境的 Gradle 通道（输出在「同步输出」）。</p>
         <div class="task-editor-actions">
-          <button class="subtle-button" @click="taskEditOpen = false">取消</button>
           <button class="subtle-button" :disabled="taskEditTaskNames.length === 0 && taskEdit.tasksText.trim() !== ''" @click="saveTaskEditor">确定</button>
+          <button class="subtle-button" @click="taskEditOpen = false">取消</button>
         </div>
       </section>
     </div>
@@ -379,32 +433,58 @@ const analyzerModuleName = computed(() => (analyzerBuild.value?.directory || '�
 
 <style scoped>
 .gradle-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; }
-.heading-count { margin-left:auto; color:var(--muted); font-size:10px; }
-.gradle-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-1); padding:var(--space-2); border-bottom:1px solid var(--line); }
-.gradle-separator { width:1px; height:14px; background:var(--line); }
+.gradle-panel > .panel-heading { background:var(--panel); border-bottom-color:var(--line-strong); }
+.heading-count { margin-left:auto; color:var(--muted); font:10px var(--font-mono); font-variant-numeric:tabular-nums; }
+.gradle-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-1); padding:var(--space-2) var(--space-3); border-bottom:1px solid var(--line-strong); background:var(--rail); }
+.gradle-separator { width:1px; height:var(--ctrl-height-sm); background:var(--line-strong); }
 .gradle-settings { position:relative; }
-.gradle-search { display:flex; align-items:center; gap:4px; padding:var(--space-2); font-size:11px; }
-.gradle-search input { min-width:0; flex:1; background:var(--editor); color:var(--text); border:1px solid var(--line); }
-.gradle-summary, .gradle-detail, .gradle-note, .gradle-hint, .gradle-empty-inline { margin:0; padding:2px var(--space-2); color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
-.gradle-error { margin:0; padding:2px var(--space-2); color:var(--error); white-space:pre-line; font-size:11px; }
-.gradle-running { display:flex; flex-wrap:wrap; gap:4px; margin:0; padding:var(--space-2); font-size:11px; }
-.gradle-body { flex:1; min-height:0; overflow:auto; }
-.gradle-section { border-bottom:1px solid var(--line); padding:2px 0; }
-.gradle-children { padding-left:12px; }
-.gradle-group-toggle { display:flex; align-items:center; gap:3px; width:100%; border:0; padding:2px 4px; text-align:left; background:transparent; color:var(--text); font-size:11px; cursor:pointer; }
+.gradle-search { display:flex; align-items:center; gap:var(--space-1); min-height:var(--ctrl-height); margin:var(--space-2) var(--space-3) 0; padding:var(--space-1) var(--space-2); border:1px solid var(--line-strong); border-radius:var(--radius-xs); background:var(--editor); color:var(--secondary); font-size:11px; }
+.gradle-search:focus-within { border-color:var(--accent); }
+.gradle-search input { min-width:0; flex:1; padding:0; border:0; outline:0; background:transparent; color:var(--text); font:inherit; }
+.gradle-summary { margin:var(--space-2) var(--space-2) 0; padding:var(--space-1) var(--space-2); border-left:2px solid var(--accent); background:var(--panel); color:var(--secondary); font-size:11px; overflow-wrap:anywhere; }
+.gradle-detail, .gradle-note, .gradle-empty-inline { margin:0; padding:var(--space-1) var(--space-3); color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+.gradle-empty-inline { border-left:2px solid var(--line); }
+.gradle-empty { margin:var(--space-2); padding:var(--space-2) var(--space-3); border-left:2px solid var(--warning); background:var(--panel); color:var(--secondary); font-size:11px; line-height:1.5; }
+.gradle-error { margin:var(--space-1) 0; padding:var(--space-2) var(--space-3); border-left:2px solid var(--error); background:var(--panel); color:var(--error); white-space:pre-line; font-size:11px; }
+.gradle-running { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-2); margin:var(--space-2); padding:var(--space-2) var(--space-3); border-left:2px solid var(--accent); background:var(--panel); color:var(--secondary); font-size:11px; }
+.gradle-running svg { flex-shrink:0; color:var(--accent); }
+.gradle-body { flex:1; min-height:0; overflow:auto; padding:0 var(--space-2); }
+.gradle-section { border-bottom:1px solid var(--line); padding:var(--space-1) 0; }
+.gradle-children { padding-left:var(--space-4); }
+.gradle-group-toggle { display:flex; align-items:center; gap:var(--space-2); width:100%; min-height:var(--ctrl-height-sm); border:0; border-radius:0; padding:var(--space-1) var(--space-2); text-align:left; background:transparent; color:var(--text); font-size:11px; cursor:pointer; transition:background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
 .gradle-group-toggle:hover, .gradle-task:hover { background:var(--hover); }
-.gradle-group-toggle.selected { background:var(--selected); }
-.gradle-list { margin:0; padding:0 4px; list-style:none; font:11px/1.7 var(--font-mono); }
-h4 { margin:2px 4px; font-size:11px; color:var(--bright); }
-.gradle-task { border:0; background:transparent; color:var(--text); font:inherit; cursor:pointer; }
-.gradle-path, .gradle-desc { margin-left:4px; color:var(--muted); font-size:10px; }
+.gradle-group-toggle.selected { background:var(--selected); color:var(--bright); box-shadow:inset 2px 0 0 var(--accent); }
+.gradle-section > .gradle-group-toggle { color:var(--bright); font-weight:650; }
+.gradle-module { border-top:1px solid var(--line); }
+.gradle-module > .gradle-group-toggle { color:var(--secondary); font-weight:600; }
+.gradle-module > .gradle-children > .gradle-group-toggle, .gradle-module > .gradle-children > div > .gradle-group-toggle { color:var(--secondary); font-weight:600; }
+.gradle-list { margin:0; padding:0 var(--space-2); list-style:none; font:11px/1.7 var(--font-mono); }
+.gradle-list > li { display:flex; align-items:center; gap:var(--space-2); min-width:0; min-height:var(--ctrl-height-sm); padding:var(--space-1) var(--space-2); border-bottom:1px solid var(--line); color:var(--text); }
+.gradle-list > li:last-child { border-bottom:0; }
+.gradle-list > li > svg { flex-shrink:0; color:var(--muted); }
+.gradle-body h4 { margin:var(--space-2) var(--space-2) var(--space-1); padding-bottom:var(--space-1); border-bottom:1px solid var(--line); color:var(--secondary); font-size:11px; font-weight:650; }
+.gradle-task { border:0; border-radius:var(--radius-xs); padding:var(--space-1); background:transparent; color:var(--bright); font:inherit; text-align:left; cursor:pointer; }
+.gradle-path, .gradle-desc { min-width:0; margin-left:var(--space-1); color:var(--muted); font-size:10px; overflow-wrap:anywhere; }
 .gradle-tail-body { margin:0; padding:var(--space-2); font:10px/1.6 var(--font-mono); white-space:pre-wrap; overflow-wrap:anywhere; }
-.gradle-menu { position:absolute; z-index:40; display:flex; flex-direction:column; min-width:160px; padding:4px; background:var(--panel); border:1px solid var(--line); box-shadow:var(--popup-shadow); }
-.gradle-menu button { border:0; padding:4px; color:var(--text); background:transparent; text-align:left; font-size:11px; }
+.gradle-build-tree { margin:var(--space-2); padding:var(--space-2) var(--space-3); border:1px solid var(--line); border-left:2px solid var(--accent); border-radius:0; background:var(--panel); font-size:11px; }
+.gradle-build-head { display:flex; align-items:center; gap:var(--space-2); padding-bottom:var(--space-1); border-bottom:1px solid var(--line); color:var(--muted); }
+.gradle-build-title { flex:1; min-width:0; font-weight:600; color:var(--text); overflow-wrap:anywhere; }
+.gradle-build-result.failed { color:var(--error); }
+.gradle-build-pct { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
+.gradle-build-row { display:flex; align-items:center; gap:var(--space-2); min-height:var(--ctrl-height-sm); margin:0; padding:var(--space-1) 0; }
+.gradle-build-mark { flex:0 0 10px; text-align:center; }
+.gradle-build-mark.is-success { color:var(--success); }
+.gradle-build-mark.is-failure { color:var(--error); }
+.gradle-build-mark.is-running { color:var(--accent); }
+.gradle-build-mark.is-cancelled, .gradle-build-mark.is-skipped { color:var(--muted); }
+.gradle-build-task { flex:1; min-width:0; overflow-wrap:anywhere; }
+.gradle-build-updated { color:var(--muted); font-size:10px; }
+.gradle-menu { position:absolute; z-index:40; display:flex; flex-direction:column; min-width:160px; padding: var(--space-1); background:var(--popup-background); color:var(--popup-foreground); border:var(--popup-border); border-radius:var(--popup-radius); box-shadow:var(--popup-shadow); }
+.gradle-menu button { border:0; padding: var(--space-1); color:var(--text); background:transparent; text-align:left; font-size:11px; }
 .gradle-menu button:hover { background:var(--hover); }
 .gradle-menu button:disabled { color:var(--muted); cursor:default; }
 .gradle-menu button:disabled:hover { background:transparent; }
-.gradle-menu-rule { height:1px; margin:4px 2px; background:var(--line); }
+.gradle-menu-rule { height:1px; margin: var(--space-1) 2px; background:var(--line); }
 .gradle-menu-check { display:inline-block; width:12px; color:var(--accent,var(--bright)); }
 .gradle-ignored { margin-left:auto; color:var(--muted); font-size:10px; }
 .gradle-settings-menu { right:0; top:100%; }
@@ -413,7 +493,7 @@ h4 { margin:2px 4px; font-size:11px; color:var(--bright); }
 .task-editor h3 { margin:0; font-size:13px; }
 .task-editor-field { display:flex; align-items:flex-start; gap:var(--space-2); font-size:12px; }
 .task-editor-field span { flex:0 0 96px; color:var(--muted); }
-.task-editor-field input, .task-editor-field textarea { flex:1; min-width:0; background:var(--editor); color:var(--text); border:1px solid var(--line); padding:4px; font:12px/1.5 var(--font-mono); }
+.task-editor-field input, .task-editor-field textarea { flex:1; min-width:0; background:var(--editor); color:var(--text); border:1px solid var(--line); padding: var(--space-1); font:12px/1.5 var(--font-mono); }
 .task-editor-field input[readonly] { color:var(--muted); }
 .task-editor-actions { display:flex; justify-content:flex-end; gap:var(--space-1); }
 </style>

@@ -6,14 +6,17 @@
 // 更新项目 / 重置 HEAD / 推送 / 储藏。它们共享 `branchPopupOpen` / `blameLines` / `clipboardDiff`
 // 三类结果状态，并且都走同一条 `git.*` 原生通道。
 // 状态栏的分支 widget（`refreshGitWidget`）留在 App.vue：它是 30 秒轮询的常驻部件，不是动作。
-import { computed, nextTick, ref } from 'vue'
-import { request, type DiffRow, type GitAheadBehind, type GitBlame, type GitBlameLine } from './bridge.ts'
+import { computed, nextTick, ref, watch } from 'vue'
+import { fsChanges, request, type DiffRow, type GitAheadBehind, type GitBlame, type GitBlameLine } from './bridge.ts'
 import { blameAnnotations, type BlameAnnotation } from './blameAnnotations.ts'
+import { BlameCache, loadBlameLines } from './blameCache.ts'
 import { buildDiffRows, generateUnifiedDiff } from './diffText.ts'
 // 「比较对象…」（上游 `CompareFilesAction` 的单文件分支）。
 import { SELECT_FILE_TO_COMPARE, defaultCompareSelection, LAST_USED_FILE_KEY } from './compareFiles.ts'
 import { errorMessage } from './errors.ts'
 import type { Tab } from './editorTab'
+import { showGitUpdateOptionsDialog } from './gitUpdateOptionsHost.ts'
+import { readGitUpdateSettings, shouldShowUpdateOptions, writeGitUpdateSettings } from './gitUpdateSettings.ts'
 
 export interface VcsActionsDeps {
   notify: (message: string, error?: boolean) => void
@@ -90,6 +93,21 @@ const blamePath = ref('')
 /** 「追溯」开着没有 —— IDEA 的 `AnnotateToggleAction` 是一个 **Toggle**（`:18` 继承 `ToggleAction`）。 */
 const blameEnabled = ref(false)
 /**
+ * blame 原始行的**按 (路径, 修订, 行数) 缓存**（上游 `CacheableAnnotationProvider`/
+ * `AnnotationProviderEx`，见 `src/blameCache.ts` 头注）。第二次对同一个文件的同一修订打开「追溯」
+ * 不再往返 `git.blame`；文件在磁盘上被外部改过（行数变了）或换修订 ⇒ 不命中。
+ */
+const blameCache = new BlameCache<GitBlameLine>()
+// 外部改盘 ⇒ 那些文件的 blame 缓存作废（行号会漂）。上游对应 `AnnotationProviderEx.isAnnotationValid`
+// 那一档：文件在磁盘上变了，旧的 `FileAnnotation` 就不再有效。挂在 `fsChanges` 那条既有的
+// 宿主公告上（`src/bridge.ts:307-341`，`diskSync.ts` 也读同一个信号）。
+let lastBlameFsVersion = fsChanges.version
+watch(() => fsChanges.version, value => {
+  if (value === lastBlameFsVersion) return
+  lastBlameFsVersion = value
+  for (const path of fsChanges.paths) blameCache.invalidatePath(path)
+})
+/**
  * 「追溯」的注解文本。**IDEA 把注解画在编辑器装订线上**（`AnnotateToggleAction.java:139-153` 的
  * `doAnnotate(editor, …)` 拿到的是 `Editor`，注解由 `TextAnnotationGutterProvider` 提供），
  * 不是底部面板的一个 tab —— 本仓原先做成底部 tab 是错放，2026-09-27 改成编辑器 gutter。
@@ -111,9 +129,20 @@ async function showBlame() {
   if (blameEnabled.value && blamePath.value === path) { blameEnabled.value = false; return }
   blamePath.value = path
   blameEnabled.value = true
+  const tab = active.value
+  // 「修订」用当前标签的版本号（`DocumentData.version`），「行数」用缓冲区的行数 ——
+  // 两者合起来就是上游 `isAnnotationValid(path, revisionNumber)` 在本仓能做的那一半
+  // （本仓没有 PSI 的 revision 对象，用两个可观测量代替，见 `src/blameCache.ts` 的 `get`）。
+  const revision = tab?.version ?? ''
+  const lineCount = tab ? tab.content.split('\n').length : 0
   blameLines.value = []
-  try { blameLines.value = (await request<GitBlame>('git.blame', { path })).lines ?? [] }
-  catch (error) { notify(errorMessage(error), true) }
+  try {
+    // 缓存命中 ⇒ 不再往返 `git.blame`（上游 `getFromCache`）；未命中才拉一次并写回
+    // （`populateCache`）。行数变了/换修订都不命中，见 `src/blameCache.ts` 的 `get`。
+    const lines = await loadBlameLines(blameCache, path, revision, lineCount,
+      async () => (await request<GitBlame>('git.blame', { path })).lines ?? [])
+    blameLines.value = [...lines]
+  } catch (error) { notify(errorMessage(error), true) }
 }
 /**
  * 「比较对象…」（上游 `CompareFilesAction` 的单文件分支 → `getOtherFile`，`CompareFilesAction.java:152-171`）：
@@ -175,12 +204,31 @@ async function compareWithClipboard() {
 // Vcs.UpdateProject: refresh remotes first, then integrate (pull). Distinct from
 // Git.Pull, which just integrates.
 async function updateProject() {
-  if (!workspace.value || !isDesktop) return
+  const root = workspace.value?.root
+  if (!root || !isDesktop || !gitAvailable.value) return
+  let store: Storage | null = null
+  try { if (typeof localStorage !== 'undefined') store = localStorage } catch { store = null }
+  let settings = readGitUpdateSettings(store, root)
+  let method = settings.updateMethod
+  if (shouldShowUpdateOptions(settings)) {
+    const choice = await showGitUpdateOptionsDialog({ method, showDialog: settings.showUpdateOptions })
+    if (!choice || choice.kind === 'cancel' || workspace.value?.root !== root) return
+    method = choice.method
+    settings = { ...settings, updateMethod: method, showUpdateOptions: choice.showDialog }
+    writeGitUpdateSettings(store, root, settings)
+  }
+  if (method === 'RESET') return
   try {
-    await request('git.fetch')
-    await request('git.pull')
+    if (method === 'BRANCH_DEFAULT') await request('git.pull')
+    else {
+      await request('git.fetch')
+      if (workspace.value?.root !== root) return
+      if (method === 'REBASE') await request('git.rebase', { branch: '@{u}' })
+      else await request('git.merge', { branch: '@{u}' })
+    }
+    if (workspace.value?.root !== root) return
     noteVcsUpdate()
-    notify('已获取远端并合并到当前分支。')
+    if (method === 'MERGE') notify('已获取远端并合并到当前分支。')
     showView('git')
   } catch (error) { notify(errorMessage(error), true) }
 }
@@ -232,5 +280,9 @@ async function gitMenuAction(method: 'git.push' | 'git.pull' | 'git.fetch' | 'gi
     branchPopupOpen, openBranchPopup, onBranchAction, refreshTreeVersion, gitCompareWith, compareWithBranch,
     blameLines, blamePath, blameEnabled, blameOf, clipboardDiff, showBlame, compareWithClipboard, compareWithFile,
     updateProject, resetHeadDialog, pushWithConfirm, gitMenuAction,
+    // 缓存失效面（`AnnotationProviderEx.isAnnotationValid` 的等价物）：外部改盘与换工程两条。
+    invalidateBlame: (paths?: readonly string[]) => paths?.length
+      ? paths.reduce((count, path) => count + blameCache.invalidatePath(path), 0)
+      : blameCache.invalidateAll(),
   }
 }

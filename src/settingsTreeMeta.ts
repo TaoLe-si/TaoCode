@@ -7,7 +7,7 @@
 // 这样"这一页对应源码哪一条注册"在代码里就是答案；早期批次用过的键（appearance / editor.general /
 // structure / commit …）保持不变，以免打断跳转目标与测试。
 import {
-  AlignLeft, Braces, Bug, Cog, Eye, FileType, Filter, FoldVertical, GitBranch, GitCommitIcon, Hammer, History, Keyboard,
+  AlignLeft, Bot, Braces, Bug, CalendarClock, Cog, Eye, FileSearch, FileType, Filter, FoldVertical, GitBranch, GitCommitIcon, Hammer, History, Keyboard,
   Layers, ListChecks, Palette, Save, ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Type, Volume2,
 } from 'lucide-vue-next'
 
@@ -36,7 +36,7 @@ export const SETTINGS_GROUPS = [
 
 export type PageKey = 'preferences.lookFeel' | 'editor' | 'editor.preferences.appearance' | 'editor.preferences.tabs' | 'editor.preferences.smartKeys' | 'editor.preferences.gutterIcons' | 'editor.preferences.folding' | 'advanced'
   | 'preferences.sourceCode' | 'preferences.sourceCode.indents' | 'tools.actionsOnSave'
-  | 'preferences.general' | 'editing.templates' | 'commit' | 'project.scopes'
+  | 'preferences.general' | 'ide.date.format' | 'editing.templates' | 'commit' | 'project.scopes' | 'project.workspaceFileSearch'
   | 'reference.settings.ide.settings.file-colors'
   // `trusted.hosts` 注册在 groupId="appearance"（intellij.platform.ide.impl.xml:783-786，
   // instance TrustedHostsConfigurable，key configurable.trusted.hosts.display.name）。
@@ -45,6 +45,8 @@ export type PageKey = 'preferences.lookFeel' | 'editor' | 'editor.preferences.ap
   // `groupId="appearance" groupWeight="140" id="ide.audiocues"` —— 自己的页，不是 general 的子页。
   | 'ide.audiocues'
   | 'editor.breadcrumbs' | 'editor.stickyLines' | 'Console' | 'Errors'
+  // ColorAndFontOptions（`intellij.platform.ide.impl.xml:1749-1752`：`groupId="editor" groupWeight="180" dynamic="true"`）。
+  | 'reference.settingsdialog.IDE.editor.colors'
   // InlaySettingsConfigurable（intellij.platform.lang.impl.xml:935-941 `parentId="editor" id="inlay.hints"`）。
   | 'inlay.hints'
   // Code Vision 页（上游把这一组挂在 Inlay Hints 页里，本仓单列一页；键名是本仓的）。
@@ -59,6 +61,9 @@ export type PageKey = 'preferences.lookFeel' | 'editor' | 'editor.preferences.ap
   | 'reference.settingsdialog.project.gradle'
   // 「版本控制」是顶层页面节点，但本仓没有目录映射内容 → expandOnly，不列进 PAGE_KEYS。
   | 'project.propVCSSupport.Mappings'
+  // Agent 设置（本仓自己的页，上游 IDEA 没有对应物）：Agent 对话窗口的模型/权限/差异策略。
+  // 用户要求（2026-10-07）「Agent 设置单开一栏」—— 顶层页，不挂在任何组下。
+  | 'agent'
 
 /** `expandOnly` 对应 IDEA 树里"只有子项、自己不是设置页"的父节点（点它只展开，不打开空页面）。 */
 export interface SettingsNode { key: PageKey; label: string; icon: typeof Palette; parent: string | null; keywords: string; expandOnly?: boolean }
@@ -70,6 +75,8 @@ export interface SettingsNode { key: PageKey; label: string; icon: typeof Palett
 export const SETTINGS_NODES: SettingsNode[] = [
   { key: 'preferences.lookFeel', label: '外观', icon: Palette, parent: 'group:appearance', keywords: '主题 亮色 暗色 外观 缩放 theme scale' },
   { key: 'preferences.general', label: '系统设置', icon: Cog, parent: 'group:appearance', keywords: '系统设置 退出 删除 回收站 保存 自动 同步 安全写入 打开项目 新窗口 默认目录 System Settings reopen reopenLastProject deleteToBin confirm exit safe write autosave sync process close terminate disconnect ask' },
+  // DateTimeFormatConfigurable (PlatformExtensions.xml, parentId="preferences.general", id="ide.date.format").
+  { key: 'ide.date.format', label: '日期格式', icon: CalendarClock, parent: 'preferences.general', keywords: '日期 格式 日期时间 日期格式 覆盖系统格式 24 小时制 美化 pretty date time format pattern system 24 hour' },
   // trusted.hosts groupId="appearance"（intellij.platform.ide.impl.xml:783-786）：一张受信任位置清单
   // （TrustedHostsConfigurable），新增/删除后信任判定即时生效。
   { key: 'trusted.hosts', label: '受信任位置', icon: ShieldCheck, parent: 'group:appearance', keywords: '受信任 位置 信任 项目 安全模式 不受信任 清单 trusted locations trust safe mode' },
@@ -83,6 +90,7 @@ export const SETTINGS_NODES: SettingsNode[] = [
   { key: 'reference.settings.ide.settings.file-colors', label: '文件颜色', icon: Palette, parent: 'group:appearance', keywords: '文件颜色 作用域 标签页 File Colors Folder Colors Directory Colors scope tabs' },
   // 注册证据：intellij.platform.lang.impl.xml:1825 `groupId="appearance" groupWeight="111" id="project.scopes"`。
   { key: 'project.scopes', label: '作用域', icon: Filter, parent: 'group:appearance', keywords: '作用域 范围 scope scopes 文件模式 file: pattern 作用 in project 查找范围' },
+  { key: 'project.workspaceFileSearch', label: '工作区搜索范围', icon: FileSearch, parent: 'group:project', keywords: '工作区 搜索 范围 忽略规则 zcodeignore gitignore workspace search scope ignore files' },
   // 注册证据：`intellij.platform.lang.impl.xml:1341-1343`
 
   { key: 'editor', label: '常规', icon: SlidersHorizontal, parent: 'group:editor', keywords: '字体 大小 缩进 空格 制表符 行号 换行 空白 括号 标签 保存 自动 editor font indent' },
@@ -114,6 +122,9 @@ export const SETTINGS_NODES: SettingsNode[] = [
   { key: 'preferences.fileTypes', label: '文件类型', icon: FileType, parent: 'group:editor', keywords: '文件类型 扩展名 关联 file types extension association' },
   // parentId="preferences.editor"（:983）
   { key: 'Console', label: '控制台', icon: Terminal, parent: 'editor', keywords: '控制台 折叠 重复行 console fold lines' },
+  // 配色方案（`intellij.platform.ide.impl.xml:1749-1752`：**groupId**="editor" groupWeight="180" ——
+  // 分组直属（与「常规」/「检查」同层），不是 editor 页的子页；标题 `ApplicationBundle.properties:524`）。
+  { key: 'reference.settingsdialog.IDE.editor.colors', label: '配色方案', icon: Palette, parent: 'group:editor', keywords: '配色 方案 颜色 语法高亮 darcula light color scheme colors and fonts' },
   // parentId="preferences.editor"（intellij.platform.ide.impl.xml:1231）
   { key: 'editor.breadcrumbs', label: '面包屑', icon: AlignLeft, parent: 'editor', keywords: '面包屑 路径 导航 breadcrumbs placement language' },
   // parentId="preferences.editor"（intellij.platform.ide.impl.xml:1236）
@@ -140,6 +151,9 @@ export const SETTINGS_NODES: SettingsNode[] = [
   // 上一批只把入口放在帮助菜单（`src/menus/helpMenu.ts:52`），那是**本仓的落位决定**不是上游位置；
   // 这一页才是上游的真实入口，与对话框共用同一份 `keymapHost` 活状态。
   { key: 'preferences.keymap', label: '键盘映射', icon: Keyboard, parent: null, keywords: '键位 快捷键 改键 冲突 恢复默认 keymap shortcuts change conflicts' },
+  // Agent 设置（本仓自己的页，上游没有对应物）：模型/权限四档/上下文预算/差异接受策略。
+  // 规则、默认值与持久化都在 src/agentSettings.ts；页面是 src/components/AgentSettingsPage.vue。
+  { key: 'agent', label: 'Agent', icon: Bot, parent: null, keywords: 'Agent 对话 模型 权限 批准 上下文 差异 保留 撤回 agent model permission approval diff do undo' },
   { key: 'commit', label: '提交', icon: GitCommitIcon, parent: 'project.propVCSSupport.Mappings', keywords: '提交 信息 主题 正文 右边距 空行 换行 commit message margin' },
   { key: 'vcs.log', label: 'VCS 日志', icon: History, parent: 'project.propVCSSupport.Mappings', keywords: 'VCS 日志 标签名 仓库根名 vcs log tag root names' },
 
@@ -176,15 +190,16 @@ export const EXPANDED_DEFAULT: readonly string[] = [
 export const PROJECT_SCOPED_PAGES: ReadonlySet<string> = new Set<PageKey>([
   'editing.templates', 'preferences.toDoOptions', 'preferences.fileTypes', 'project.scopes', 'vcs.log',
   'reference.settings.ide.settings.file-colors',
-  'build.tools', 'reference.settingsdialog.project.gradle',
+  'build.tools', 'reference.settingsdialog.project.gradle', 'tools.actionsOnSave', 'project.workspaceFileSearch',
 ])
 
 /** 真正会渲染内容的叶子页（`initialSection` 的取值域与校验都靠它）。 */
 export const PAGE_KEYS: PageKey[] = ['preferences.lookFeel', 'editor', 'editor.preferences.appearance', 'editor.preferences.tabs', 'editor.preferences.smartKeys', 'editor.preferences.gutterIcons',
-  'preferences.sourceCode.indents', 'tools.actionsOnSave', 'editing.templates', 'commit', 'preferences.general', 'project.scopes',
+  'preferences.sourceCode.indents', 'tools.actionsOnSave', 'editing.templates', 'commit', 'preferences.general', 'ide.date.format', 'project.scopes', 'project.workspaceFileSearch',
   'reference.settings.ide.settings.file-colors',
   'trusted.hosts',
   'ide.audiocues', 'inlay.hints', 'code.vision',
+  'reference.settingsdialog.IDE.editor.colors',
   'editor.breadcrumbs', 'editor.stickyLines', 'Console', 'Errors', 'preferences.toDoOptions', 'preferences.fileTypes',
   'preferences.externalTools', 'diff.base', 'build.tools', 'vcs.log', 'reference.settingsdialog.project.gradle',
-  'preferences.keymap']
+  'preferences.keymap', 'agent']

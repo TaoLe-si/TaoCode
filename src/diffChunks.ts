@@ -98,6 +98,10 @@ export function optimizeSpans(spans: readonly MatchSpan[], totalA: number, total
       throw new RangeError('diff: optimized span outside input')
     }
   }
+  // 上游在这里的位置是 `ChunkOptimizer.build` 的 `return fair(createUnchanged(myRanges, …))`
+  // （`ChunkOptimizer.kt:25`），而 `fair()` 里挂的就是 `verifyFair`（`DiffIterableUtil.kt:113`）。
+  // 本仓同一个位置：开关没开时这是一次空操作。
+  verifyFairSpans(result, totalA, totalB, 'optimizeSpans')
   return result
 }
 
@@ -200,5 +204,95 @@ export function wordShift(tokens1: readonly ShiftToken[], tokens2: readonly Shif
     const right = edgeShift(text, tokens, touchStart - 1, equalBackward, false)
     if (right > 0) return -right
     return 0
+  }
+}
+
+// ── 公平迭代器的可校验契约（上游 `DiffIterableUtil` 的 Verification 那一段）─────────────────
+//
+// 上游每个从 LCS/优化器出来的迭代器都要过一遍 `fair()`，而 `fair()` 里就挂着 `verifyFair`
+// （`platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffIterableUtil.kt:110-114`），
+// 校验体在同文件 `:146-207`：`setVerifyEnabled`(`:148`) / `isVerifyEnabled`(`:152`) /
+// `verify(iterable)`(`:158`) / `verifyFair`(`:168`) / `verify(Iterable<Range>)`(`:178`) /
+// `verifyFullCover`(`:187`)。开关默认关（`SHOULD_VERIFY_ITERABLE`），只在测试里开 ——
+// 所以它**不改生产行为**，只是把"这个迭代器是合法的公平迭代器"变成可断言的东西。
+// `FairDiffIterable.kt:12` 的 `@see DiffIterableUtil.verifyFair` 说明这套校验就是那类对象的名片。
+//
+// 本仓的差异结果是 `{from,to}` 对 / `MatchSpan` 段表（`MatchSpan` 就是上游 `Range` 的两段形状），
+// 所以这里把四条 check 逐条搬过来，挂在 `optimizeSpans` 的出口 —— 上游也正是挂在
+// `ChunkOptimizer.build` 的返回值上（`ChunkOptimizer.kt:19-26`：`return fair(createUnchanged(myRanges, …))`）。
+
+/** 上游 `DiffIterableUtil.SHOULD_VERIFY_ITERABLE`（`@TestOnly setVerifyEnabled`，`iterables/DiffIterableUtil.kt:146-150`）。 */
+let shouldVerifyIterable = false
+
+/** 上游 `DiffIterableUtil.setVerifyEnabled`（`iterables/DiffIterableUtil.kt:148`）：只在测试/自检里开。 */
+export function setVerifyEnabled(value: boolean): void {
+  shouldVerifyIterable = value
+}
+
+/** 上游 `DiffIterableUtil.isVerifyEnabled`（`:152-154`，私有）。 */
+function isVerifyEnabled(): boolean {
+  return shouldVerifyIterable
+}
+
+/**
+ * 上游 `DiffIterableUtil.verify(Iterable<Range>)`（`:178-185`）的三条 check：
+ * `:181` `start1 <= end1`、`:182` `start2 <= end2`、`:183` 两侧不许同时为空（空段根本不该出现）。
+ */
+function verifyRanges(ranges: readonly MatchSpan[], where: string): void {
+  for (const { a, b } of ranges) {
+    if (a.start > a.end) throw new Error(`diff.verify: 一侧区间反向 ${where}：a ${a.start}..${a.end}`)
+    if (b.start > b.end) throw new Error(`diff.verify: 二侧区间反向 ${where}：b ${b.start}..${b.end}`)
+    if (a.start === a.end && b.start === b.end) throw new Error(`diff.verify: 空段不该进迭代器 ${where}`)
+  }
+}
+
+/**
+ * 上游 `DiffIterableUtil.verifyFullCover`（`:187-207`）：按 `iterateAll` 的顺序走一遍，
+ * `:196` 要求上一段的终点就是这一段的起点（**不许断裂、不许重叠、不许乱序**），
+ * `:198` 要求等/不等严格交替，`:205-206` 要求两侧都恰好铺满。
+ */
+function verifyFullCover(unchanged: readonly MatchSpan[], changes: readonly MatchSpan[], totalA: number, totalB: number, where: string): void {
+  let last1 = 0
+  let last2 = 0
+  let lastEquals: boolean | null = null
+  for (const { span, equal } of iterateAllSpans(unchanged, changes)) {
+    if (last1 !== span.a.start) throw new Error(`diff.verify: 一段的起点接不上前一段的终点 ${where}（a 侧 ${last1} vs ${span.a.start}）`)
+    if (last2 !== span.b.start) throw new Error(`diff.verify: 二段的起点接不上前一段的终点 ${where}（b 侧 ${last2} vs ${span.b.start}）`)
+    if (lastEquals === equal) throw new Error(`diff.verify: 等/不等没有交替 ${where}`)
+    last1 = span.a.end
+    last2 = span.b.end
+    lastEquals = equal
+  }
+  if (last1 !== totalA) throw new Error(`diff.verify: 一段没有铺满 ${where}（到 ${last1}，应到 ${totalA}）`)
+  if (last2 !== totalB) throw new Error(`diff.verify: 二段没有铺满 ${where}（到 ${last2}，应到 ${totalB}）`)
+}
+
+/** 上游 `DiffIterableUtil.iterateAll`（`:131-134`）+ `AllRangesIterator`（`:314-341`）：两侧段表按起点归并，空段跳过。 */
+function* iterateAllSpans(unchanged: readonly MatchSpan[], changes: readonly MatchSpan[]): Generator<{ span: MatchSpan; equal: boolean }> {
+  let i = 0
+  let j = 0
+  while (i < unchanged.length || j < changes.length) {
+    const equal = unchanged[i] !== undefined && (changes[j] === undefined || unchanged[i]!.a.start <= changes[j]!.a.start)
+    const span = equal ? unchanged[i++]! : changes[j++]!
+    if (span.a.end > span.a.start || span.b.end > span.b.start) yield { span, equal }
+  }
+}
+
+/**
+ * 上游 `DiffIterableUtil.verifyFair`（`:168-176`）：先 `verify`（`:171`），再逐段查 unchanged 的
+ * **两侧长度必须相等**（`:174` `check(range.end1 - range.start1 == range.end2 - range.start2)`) ——
+ * 这一条就是"公平（fair）"的定义：等行段是一一配对的，不是"一段对一段"。
+ * 开关没开时整个函数直接返回（`:169`），所以生产路径一字未变。
+ */
+export function verifyFairSpans(unchanged: readonly MatchSpan[], totalA: number, totalB: number, where = 'unchanged'): void {
+  if (!isVerifyEnabled()) return
+  const changes = changedSpans(unchanged, totalA, totalB)
+  verifyRanges(changes, `${where}/changes`)
+  verifyRanges(unchanged, `${where}/unchanged`)
+  verifyFullCover(unchanged, changes, totalA, totalB, where)
+  for (const { a, b } of unchanged) {
+    if (a.end - a.start !== b.end - b.start) {
+      throw new Error(`diff.verify: 等行段两侧不等长（fair 违约）${where}：a ${a.end - a.start} vs b ${b.end - b.start}`)
+    }
   }
 }

@@ -57,7 +57,12 @@ test('预览有上限：超过上限只计数并标 truncated', () => {
 
 test('消费链：问题面板行菜单用预览（服务端条目与抑制条目都带）', () => {
   const panel = read('src/components/ProblemsPanel.vue')
+  // 2026-10-06 接线：行菜单里那一段条目搬进 `IntentionListMenu.vue`（档位顺序/分隔线/不可选
+  // 三条规则在 src/intentionList.ts），预览的**计算**仍在面板，**渲染**在组件，所以两头各钉一半。
+  const menu = read('src/components/IntentionListMenu.vue')
   assert.match(panel, /previewOfEdits/)
-  assert.match(panel, /problems-menu-change/)
-  assert.match(panel, /entry\.preview/)
+  assert.match(panel, /<IntentionListMenu :fixes="menuFixes"/, '面板不再把带预览的条目递给行菜单')
+  assert.match(menu, /intention-menu-change/)
+  assert.match(menu, /row\.payload\.fix\.preview\.summary/)
+  assert.match(menu, /将插入 \$\{row\.payload\.option\.preview\}/)
 })

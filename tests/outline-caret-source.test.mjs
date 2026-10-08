@@ -78,7 +78,10 @@ test('面板换算的是入参行号，不是把编辑器行直接交给判定',
   const panel = read('../src/components/OutlinePanel.vue')
   assert.match(panel, /caretSymbolInTree\(tree\.value, props\.source\.line - 1/, '行号按 1 基 → 0 基换算')
   assert.match(panel, /caretCharacterInSymbolBasis\(props\.source\.character\)/, '列号走同一个换算口径')
-  assert.match(panel, /import \{ caretCharacterInSymbolBasis, shouldRevealInEditor \} from '\.\.\/structureFollow'/,
+  // 钉的是「这两个函数同源、不在面板里再抄一份」，不是那一行 import 的字面成员表
+  // （2026-10-06 pvtree4 往同一行里加了 `rememberCollapsed`/`restoredCollapsed`，
+  //  按字面比的那一版判据当场变红 —— 意图没变，形状多了两个名字）。
+  assert.match(panel, /import \{[^}]*\bcaretCharacterInSymbolBasis\b[^}]*\bshouldRevealInEditor\b[^}]*\} from '\.\.\/structureFollow'/,
     '换算函数与跟随判定同源，不在面板里再抄一份')
 })
 

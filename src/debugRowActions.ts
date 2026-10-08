@@ -20,8 +20,22 @@
 //     `node.valueContainer.canNavigateToTypeSource()`，跳转走
 //     `XDebuggerNavigationApi.navigateToXValueType`（`:11-12`）。DAP `variables` 不带
 //     值的源码位置 ⇒ 同样只能隐藏。真正要补得先有「类型名 → 源码位置」的查找通道。
+//
+// ── 调试器支持闸（2026-10-07 xdebugger EP lane）──────────────────────────────────────
+// 上游这一整组树动作都挂在 `XDebuggerActionBase` 下面，而它的可用性判定走
+// `getHandler(DebuggerSupport)` → `DebuggerActionHandler.isEnabled(project, event)`
+// （`platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/actions/XDebuggerActionBase.kt`：
+// `update` 在 `:20` 起，`:28` 是 `val enabled = isEnabled(event)`；`isEnabled(project, event)`
+// 在 `:57-59` 就是 `getHandler().isEnabled(project, event)`；`getHandler()` 在 `:53-55` 递归到
+// `getHandler(DebuggerSupport())`）。也就是说：**没有 `DebuggerSupport` 可解析时，
+// 这组动作全部不可用**。本仓把「有没有调试器支持」暴露成上游同名 EP
+// `com.intellij.xdebugger.debuggerSupport`（`src/xdebuggerExtensionPoints.ts` 的
+// `hasDebuggerSupport()`），这里就是那条判定的**真实消费点**：一个支持项都没登记时，
+// 下面整份清单一律置灰并把原因写进 `hint`。缺省现读注册表（`DebugPanel` 那条活链路
+// 不需要自己传），测试可显式注入。
 import type { DapVariable } from './bridge'
 import { canViewAsArray, type VarRow } from './debugDataView.ts'
+import { hasDebuggerSupport } from './xdebuggerExtensionPoints.ts'
 
 export type DebugRowActionMode =
   | 'copy-value' | 'copy-name' | 'watch' | 'console' | 'array-on' | 'array-off'
@@ -51,6 +65,19 @@ export interface DebugRowActionItem {
 }
 
 const NO_VALUE = '这一行没有值'
+/** 一个调试器支持都没登记时，全部条目的禁用原因（见文件头的「调试器支持闸」）。 */
+const NO_DEBUGGER_SUPPORT = '没有可用的调试器支持，调试动作全部停用'
+
+/**
+ * `debugRowActions` 的上下文。
+ * `debuggerSupported` 是上游 `XDebuggerActionBase.getHandler(DebuggerSupport)` 那条判定
+ * 在本仓的等价物：缺省现读 EP `com.intellij.xdebugger.debuggerSupport` 的注册表。
+ */
+export interface DebugRowActionContext {
+  paused: boolean
+  /** 显式覆盖「有调试器支持」；不传 = 现读 `hasDebuggerSupport()`（活链路走这条）。 */
+  debuggerSupported?: boolean
+}
 
 /**
  * 变量行 → 清单的入参。放在这里而不是 `DebugPanel.vue` 里：判据只依赖**行本身**
@@ -74,8 +101,18 @@ export function debugRowTarget(
 
 /** 该行现在处于「按数组显示」时，条目是「取消」；否则是「按数组显示」。 */
 export function debugRowActions(
-  target: DebugRowActionTarget, context: { paused: boolean },
+  target: DebugRowActionTarget, context: DebugRowActionContext,
 ): DebugRowActionItem[] {
+  const items = rowActionItems(target, context)
+  // 调试器支持闸（见文件头）：没有可解析的 DebuggerSupport ⇒ 整组不可用。
+  // 内建 dap 支持一直在 EP 里（`src/xdebuggerExtensionPoints.ts` 的 bundled 登记），
+  // 所以这条只在「一个支持都没有」时触发（第三方把后端整个换掉的极端情形）。
+  if (context.debuggerSupported ?? hasDebuggerSupport()) return items
+  return items.map(item => ({ ...item, disabled: true, hint: NO_DEBUGGER_SUPPORT }))
+}
+
+/** 逐条目的可用性判定（不含调试器支持闸）。 */
+function rowActionItems(target: DebugRowActionTarget, context: { paused: boolean }): DebugRowActionItem[] {
   const hasExpression = Boolean(target.expression)
   const hasValue = target.isValue && target.value.trim() !== ''
   return [

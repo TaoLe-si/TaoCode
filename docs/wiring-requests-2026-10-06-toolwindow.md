@@ -59,3 +59,15 @@
 
 - W-B11c-2（`src/components/ToolWindowView.vue` 的陈旧 `TestRunnerPanel` import）：**磁盘上已经不存在**（该文件里没有这条 import，`node .tools/find-orphan-modules.mjs --dead-imports` 也不报它）⇒ 桶 11c 那条请求可以关掉。
 - 桶 10b 那份「接线请求（给桶 8）」的 6 条：逐条核过目标文件 —— `src/App.vue:2648`（Run Anything 的 cwd）、`SettingsDialog.vue`/`settingsModel.ts`（终端字号两格、ANSI 逐色号）、`CodeEditor.vue`+`editorCommands.ts`（大文件动作替换）、`SearchPanel.vue`/`EditorFindBar.vue`（正则提示）、`bridge.ts`（`elevate?`）—— **全部不在本批可改面**（`App.vue`/`CodeEditor.vue`/`settingsModel.ts`/`bridge*`/`SearchPanel.vue` 都是保留或他人在途），本批一条都没动，请主代理按原派单归属另派。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-TW-1（把当前窗口 id 喂给齿轮闸）** —— 目标 `src/menuUi.ts`（非本 lane）+ `src/App.vue:2038/:2063`（本 lane）。复核 tw3 R-1 已走组件侧同一条判据（`ToolWindowGear :tool-window-id`），故本请求的组件侧已闭环；行表侧（`menuUi.ts`）需 owner 决定。
+- **W-TW-2（分步列表宿主）** —— `src/components/AnchoredMenu.vue` 等（本 lane 可改面），登记。
+
+结论：W-TW-1 已由 tw3 R-1 覆盖；W-TW-2 登记。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W-TW-1 已由 tw3 R-1 覆盖；W-TW-2 登记。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

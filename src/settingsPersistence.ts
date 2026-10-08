@@ -22,8 +22,10 @@ import { COMMIT_MESSAGE_INSPECTION_STORAGE_KEY, resolveInspectionSettings,
 // 设置对话框要跳到哪一节（IDEA 的 Settings 树按 section 定位）。值就是各叶子页的 id。
 // 构建工具那两页（`build.tools` / Gradle）也在这里 —— Gradle 工具窗口的齿轮按钮会跳到 Gradle 页。
 type SettingsSectionHint = 'preferences.lookFeel' | 'editor' | 'editor.preferences.appearance' | 'editor.preferences.tabs'
-  | 'preferences.sourceCode.indents' | 'tools.actionsOnSave' | 'editing.templates' | 'commit' | 'preferences.general'
-  | 'build.tools' | 'reference.settingsdialog.project.gradle' | null
+  | 'preferences.sourceCode.indents' | 'tools.actionsOnSave' | 'editing.templates' | 'commit' | 'preferences.general' | 'ide.date.format'
+  | 'build.tools' | 'reference.settingsdialog.project.gradle'
+  // Agent 设置（本仓自己的页，2026-10-07 单开一栏）。
+  | 'agent' | 'agent.modelProvider' | null
 
 import type { SettingsDraft } from './settingsDraft'
 export type { SettingsDraft } from './settingsDraft'
@@ -294,9 +296,10 @@ export function createSettingsPersistence(deps: SettingsPersistenceDeps) {
     settingsBusy.value = true
     settingsError.value = ''
     try {
-      if (draft.scopes || draft.localFileColors || draft.fileColors) {
+      if (draft.formatOnSave !== undefined || draft.scopes || draft.localFileColors || draft.fileColors) {
         if (!workspace.value) throw new Error('请先打开项目。')
         const result = await request<{ settings: ProjectSettings }>('project.settings.update', {
+          ...(draft.formatOnSave !== undefined ? { formatOnSave: draft.formatOnSave } : {}),
           ...(draft.scopes ? { scopes: draft.scopes } : {}),
           ...(draft.localFileColors ? { localFileColors: draft.localFileColors } : {}),
           ...(draft.fileColors ? { fileColors: draft.fileColors } : {}),
@@ -307,6 +310,7 @@ export function createSettingsPersistence(deps: SettingsPersistenceDeps) {
           scopes: result.settings.scopes,
           localFileColors: result.settings.localFileColors,
           fileColors: result.settings.fileColors,
+          ...(draft.formatOnSave !== undefined ? { formatOnSave: result.settings.formatOnSave ?? draft.formatOnSave } : {}),
         }
       }
       if (draft.editor) {

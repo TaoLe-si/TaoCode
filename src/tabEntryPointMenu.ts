@@ -19,6 +19,8 @@ export interface TabEntryPointContext {
   hasUnpinned: boolean
   /** 当前是不是分屏（`Unsplit` / `UnsplitAll` / `ChangeSplitOrientation` 的可用性）。 */
   split: boolean
+  /** 当前标签能不能摘成独立窗口（要有一个活动标签）。 */
+  canDetach: boolean
   reopenClosedTab: () => void
   closeAllTabs: () => void
   closeUnpinnedTabs: () => void
@@ -27,6 +29,12 @@ export interface TabEntryPointContext {
   changeSplitOrientation: () => void
   /** 「配置编辑器标签页…」：打开设置里那一页（上游 `ConfigureEditorTabs`）。 */
   openTabSettings: () => void
+  /**
+   * 「在独立窗口中打开」（上游 `EditSourceInNewWindow`，`PlatformActions.xml:919` 那一行紧跟在
+   * `PinActiveEditorTab`/`KeepTabOpen` 之后；默认键位 Shift+F4 = `$default.xml:729-731`）。
+   * 本仓的还原是浮层编辑器 + 浏览器档的真新窗口，规则在 `src/editorWindows.ts`。
+   */
+  openInNewWindow: () => void
 }
 
 /**
@@ -41,6 +49,10 @@ export function tabEntryPointItems(ctx: TabEntryPointContext): TabEntryPointItem
     { id: 'CloseAllEditors', label: '关闭所有标签页', enabled: ctx.tabCount > 0, run: ctx.closeAllTabs },
     { id: 'ReopenClosedTab', label: '重新打开已关闭的标签页', enabled: ctx.closedCount > 0, run: ctx.reopenClosedTab },
     { id: 'CloseUnpinnedTabs', label: '关闭所有未固定标签页', enabled: ctx.hasUnpinned, run: ctx.closeUnpinnedTabs },
+    // `EditSourceInNewWindow`（`PlatformActions.xml:919`，在 KeepTabOpen 之后）。`canDetach` 是
+    // 宿主能力探测的结果（浮层容器在 DOM 里或浏览器档可开）—— 能力不足时 `enabled=false`，
+    // 按 `ActionPanel` 的规矩整个不画，不摆一个点了没反应的假控件。
+    { id: 'EditSourceInNewWindow', label: '在独立窗口中打开', enabled: ctx.canDetach && ctx.tabCount > 0, run: ctx.openInNewWindow },
     { id: 'Unsplit', label: '取消拆分', enabled: ctx.split, run: ctx.unsplit },
     { id: 'UnsplitAll', label: '全部取消拆分', enabled: ctx.split, run: ctx.unsplitAll },
     { id: 'ChangeSplitOrientation', label: '切换拆分方向', enabled: ctx.split, run: ctx.changeSplitOrientation },
@@ -58,6 +70,7 @@ export function tabEntryPointContext(input: {
   tabCount: number
   hasUnpinned: boolean
   split: boolean
+  canDetach?: boolean
   reopenClosedTab: () => void
   closeAllTabs: () => void
   closeUnpinnedTabs: () => void
@@ -65,8 +78,9 @@ export function tabEntryPointContext(input: {
   unsplitAll: () => void
   changeSplitOrientation: () => void
   openTabSettings: () => void
+  openInNewWindow?: () => void
 }): TabEntryPointContext {
-  return input
+  return { canDetach: false, openInNewWindow: () => {}, ...input }
 }
 
 /**
@@ -84,14 +98,20 @@ export function createTabEntryPoint(deps: {
   unsplitAll: () => unknown
   changeSplitOrientation: () => unknown
   openSettings: (section?: string) => unknown
+  /** 「在独立窗口中打开」那一格的注入（缺省 = 这一档不画，见 `tabEntryPointItems`）。 */
+  canDetach?: () => boolean
+  detachActive?: (pane: number) => unknown
 }): (pane: number) => TabEntryPointItem[] {
   return pane => {
     const tabs = deps.groups[pane].tabs
+    const activePath: string = deps.groups[pane].activePath ?? ''
+    const canDetach = deps.canDetach?.() === true && Boolean(activePath)
     return tabEntryPointItems({
       closedCount: deps.closedTabsPerPane[pane].length,
       tabCount: tabs.length,
       hasUnpinned: tabs.some((tab: { pinned?: boolean }) => !tab.pinned),
       split: deps.split() !== 'none',
+      canDetach,
       reopenClosedTab: () => void deps.reopenClosedTab(),
       closeAllTabs: () => void deps.closeAllTabsIn(pane),
       closeUnpinnedTabs: () => void deps.closeUnpinnedTabsIn(pane),
@@ -99,6 +119,7 @@ export function createTabEntryPoint(deps: {
       unsplitAll: () => void deps.unsplitAll(),
       changeSplitOrientation: () => void deps.changeSplitOrientation(),
       openTabSettings: () => void deps.openSettings('editor.preferences.tabs'),
+      openInNewWindow: () => void deps.detachActive?.(pane),
     })
   }
 }

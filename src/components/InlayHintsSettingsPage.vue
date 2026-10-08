@@ -41,10 +41,6 @@ function toggle(key: InlayHintSettingKey, checked: boolean) {
 
 <template>
   <h3>编辑器 › 内联提示</h3>
-  <p class="section-description">
-    对应 IDEA Settings › Editor › Inlay Hints（注册证据 <code>intellij.platform.lang.impl.xml:935-941</code>，
-    <code>parentId="editor" id="inlay.hints" groupWeight="1"</code>）。
-  </p>
   <fieldset class="settings-fields" :disabled="busy">
     <label v-for="group in GROUPS" :key="group.id" class="checkbox-row">
       <input
@@ -53,13 +49,5 @@ function toggle(key: InlayHintSettingKey, checked: boolean) {
         @change="toggle(INLAY_HINT_SETTING_KEYS[group.id], ($event.target as HTMLInputElement).checked)"
       /><span>{{ group.label }}</span>
     </label>
-    <p class="field-hint">
-      上游这一页是**按 provider 的清单树**（<code>InlaySettingsPanel.kt</code> +
-      <code>InlayProviderSettingsModel.isEnabled</code>，<code>platform/lang-api/…/InlayProviderSettingsModel.kt:26</code>），
-      本仓只有一个 provider（LSP 的 <code>textDocument/inlayHint</code>），于是那棵树塌成上面三格
-      （<code>kind</code> 1 = Type、2 = Parameter，其余归第三档）。提示的来源与渲染见
-      <code>src/editorInlayHints.ts</code>；按语言分组的清单节点、逐条 case 明细与排除清单需要
-      「多个 provider / 文件类型」这一层，本仓没有，故不渲染。
-    </p>
   </fieldset>
 </template>

@@ -112,9 +112,12 @@ struct DocumentEdit {
 // WorkspaceEdit -> uri -> {TextEdit[], version}. Both wire forms are accepted:
 // `changes` (uri -> TextEdit[]) and `documentChanges` (TextDocumentEdit with
 // textDocument.uri/version + edits). Create/rename/delete file operations carry no
-// text edits and are skipped — the client only writes files it is given edits for.
-std::map<std::string, DocumentEdit> collect_document_edits(const Json& edit) {
+// text edits: they are counted into `skipped_operations` instead of being silently
+// dropped, because `workspace/applyEdit`'s answer must say what really happened
+// (see Client::answer_apply_edit).
+std::map<std::string, DocumentEdit> collect_document_edits(const Json& edit, std::size_t& skipped_operations) {
     std::map<std::string, DocumentEdit> documents;
+    skipped_operations = 0;
     if (!edit.is_object()) return documents;
     const auto push = [&documents](const std::string& uri, const Json& edits, int version) {
         if (uri.empty() || !edits.is_array()) return;
@@ -127,7 +130,14 @@ std::map<std::string, DocumentEdit> collect_document_edits(const Json& edit) {
         for (const auto& entry : edit.at("changes").items()) push(entry.key(), entry.value(), -1);
     if (edit.contains("documentChanges") && edit.at("documentChanges").is_array())
         for (const auto& change : edit.at("documentChanges")) {
-            if (!change.is_object() || !change.contains("edits")) continue;
+            if (!change.is_object()) { ++skipped_operations; continue; }
+            // 没有 `edits` 的那一支就是 create/rename/delete（`CreateFile`/`RenameFile`/`DeleteFile`
+            // 三个 ResourceOperation，形状是 `{kind, uri[, newUri]}` / `{kind, edits?}` 里没有 edits）。
+            // 本客户端只会往已经在的文件里落 TextEdit，不做文件的增/改名/删 —— 这一条必须**计数**，
+            // 不能一句 continue 混过去：客户端能力表里写着 `resourceOperations: [create, rename, delete]`
+            // （`native/lsp_host_bootstrap.cpp` 的 workspaceEdit 段），回给服务器的 `applied`
+            // 却把没做过的事算成做过 = 比回一个 -32601 更难查的错。
+            if (!change.contains("edits")) { ++skipped_operations; continue; }
             const auto& identifier = change.contains("textDocument") && change.at("textDocument").is_object()
                                          ? change.at("textDocument") : Json::object();
             const auto uri = identifier.contains("uri") && identifier.at("uri").is_string()
@@ -157,9 +167,17 @@ std::map<std::string, DocumentEdit> collect_document_edits(const Json& edit) {
 //     通知带按钮，返回值是用户点的那一项（没点就 null）。
 //   · `:341-368` 五条 `workspace/…/refresh` —— 每条都 `completedFuture(null)`（协议的返回类型是 void），
 //     并让对应的缓存作废/重取（`LspClientImpl.kt:223-265`、`LspHighlightingCacheRegistry.kt:46-56`）。
-//     `refreshInlineValues`（`:368`）在上游就是**什么也不做**只答 null，这里一并列进来。
+//     `refreshInlineValues`（`:360`）在上游就是**什么也不做**只答 null，这里一并列进来。
+//   · 服务器**主动发起**的另外几条请求（不是通知，客户端必须回包）也在本文件里答：
+//     `client/registerCapability`/`client/unregisterCapability`（上游 `:119-123`/`:125-128`，
+//     两条都 `completedFuture(null)`，上游还把它们记进 `LspDynamicCapabilities`（`:117`））、
+//     `window/workDoneProgress/create`（上游 `:255` 一行 `completedFuture(null)`）、
+//     `workspace/configuration`（上游 `:249-253`，按 items 逐条回值）、
+//     `workspace/applyEdit`（上游 `:84-117`，回的是**真实**的 applied）、
+//     `workspace/workspaceFolders`（上游 `:241-247`，回每个根一份 `WorkspaceFolder(uri, name)`）。
+//     这六条在客户端能力表里都声明了支持（`native/lsp_host_bootstrap.cpp:272-280`）⇒ 一条都不许不回。
 //   · `workspace/documentContent/refresh` 不在这张表里：那是动态文档内容
-//     （`:369-375` 的 `dynamicFiles.refreshContent`），本仓没有那一层 ⇒ 照旧答 MethodNotFound，
+//     （`:369-374` 的 `dynamicFiles.refreshContent`），本仓没有那一层 ⇒ 照旧答 MethodNotFound，
 //     与「声明与实发一致」那条纪律同口径（不为做不到的事回一个"支持"）。
 bool is_refresh_request(const std::string& method) {
     static constexpr std::string_view names[] = {
@@ -178,6 +196,45 @@ Json tag_server_message(Json params, std::string_view method) {
     if (!params.is_object()) params = Json::object();
     params["method"] = std::string(method);
     return params;
+}
+
+// `client/registerCapability` 的 `RegistrationParams.registrations` 与
+// `client/unregisterCapability` 的 `UnregistrationParams.unregisterations`：
+// 两条的形状只差一个键名，条目形状同为 LSP 的 `{id: string, method: string, registerOptions?: any}`
+// （3.17 协议里前两个都是必填）。
+//
+// 为什么整包一起拒（而不是"能认几条认几条"）：`id` 是这一批登记的**撤销把手**，
+// 半包登记会让服务器下一条 `client/unregisterCapability` 撤不掉它当初注册的那一条，
+// 于是客户端留着一份服务器已经认为不存在的能力 —— 比直接回一个 InvalidParams 更难查。
+// `failure` 只在返回 false 时有值，写的是**这一条为什么不算合法**（回包带的就是这个）。
+bool collect_registrations(const Json& params, const char* key,
+                           std::vector<std::pair<std::string, std::string>>& out, std::string& failure) {
+    if (!params.is_object()) {
+        failure = std::string(key) + ": parameters must be an object";
+        return false;
+    }
+    if (!params.contains(key)) return true;  // 键整个缺省 = 一批都没有，合法的空批（回 null，不记任何东西）
+    const auto& list = params.at(key);
+    if (!list.is_array()) {
+        failure = std::string("client/…capability: ") + key + " must be an array";
+        return false;
+    }
+    for (const auto& entry : list) {
+        if (!entry.is_object()) {
+            failure = std::string(key) + ": each entry needs an id and a method";
+            return false;
+        }
+        if (!entry.contains("id") || !entry.at("id").is_string()) {
+            failure = std::string(key) + ": registration id must be a string (it is the handle unregisterCapability uses)";
+            return false;
+        }
+        if (!entry.contains("method") || !entry.at("method").is_string()) {
+            failure = std::string(key) + ": registration method must be a string";
+            return false;
+        }
+        out.emplace_back(entry.at("id").get<std::string>(), entry.at("method").get<std::string>());
+    }
+    return true;
 }
 
 }  // namespace
@@ -386,10 +443,34 @@ void Client::fail_pending(const std::string& code) {
 // fix, organize imports, a rename the server computed). The edits are grouped per
 // document, sorted back-to-front and handed to the installed editor, which owns
 // the file writes; the reply carries the real outcome.
+//
+// 「真实结果」是这一支的全部要点（上游同一形状：`LspServerNotificationsHandlerImpl.kt:94-117`
+// —— applier 建不出来 / 写失败时那个 `finally` 支补的就是 `ApplyWorkspaceEditResponse(false)`）：
+//   · 一份编辑里有任何一条 create/rename/delete ⇒ **一条都不写**，直接 `applied:false` + 理由。
+//     先写完文本编辑再回 false 会留下「一半落盘、一半没落」的状态，服务器按 `applied:false`
+//     以为整份没做，界面里却已经改过了；拒在写之前是唯一可解释的形状。
+//     （声明侧那三样 `resourceOperations` 怎么补真，写在 docs/wiring-requests-2026-10-06-lspmsg.md 的 R10。）
+//   · 一份完全不含任何动作的编辑（`{}` / `changes:{}`）按定义就是已应用：没有东西要写，也没有失败。
 void Client::answer_apply_edit(const Json& id, const Json& params) {
     const auto edit = params.is_object() && params.contains("edit") ? params.at("edit") : Json(nullptr);
     if (!edit.is_object()) {
         respond(id, Json(nullptr), Json{{"code", -32602}, {"message", "workspace/applyEdit needs an edit object"}});
+        return;
+    }
+    std::size_t skipped = 0;
+    const auto documents = collect_document_edits(edit, skipped);
+    if (skipped > 0) {
+        respond(id, Json{{"applied", false},
+                         {"failureReason", "this client applies TextEdit only: " + std::to_string(skipped) +
+                                           " create/rename/delete resource operation(s) were not applied, so nothing was written"},
+                         {"error", {{"code", "APPLY_EDIT_FAILED"},
+                                    {"message", "resource operations are not supported by this client"}}}},
+                Json(nullptr));
+        return;
+    }
+    if (documents.empty()) {
+        // An edit with no operation at all is applied by definition: there is nothing to write.
+        respond(id, Json{{"applied", true}}, Json(nullptr));
         return;
     }
     if (!editor_) {
@@ -397,13 +478,6 @@ void Client::answer_apply_edit(const Json& id, const Json& params) {
                          {"failureReason", "no workspace editor is attached to this language server"},
                          {"error", {{"code", "APPLY_EDIT_FAILED"}, {"message", "no workspace editor is attached"}}}},
                 Json(nullptr));
-        return;
-    }
-    const auto documents = collect_document_edits(edit);
-    if (documents.empty()) {
-        // An edit with no TextEdit at all (a pure create/rename/delete) is applied
-        // by definition: there is nothing to splice into an existing document.
-        respond(id, Json{{"applied", true}}, Json(nullptr));
         return;
     }
     for (const auto& [uri, document] : documents) {
@@ -419,9 +493,99 @@ void Client::answer_apply_edit(const Json& id, const Json& params) {
     respond(id, Json{{"applied", true}}, Json(nullptr));
 }
 
+// `workspace/workspaceFolders`：能力在 initialize 里已经声明了（宿主那份客户端能力表的
+// `workspace.workspaceFolders: true`，见 `lsp_host_bootstrap.cpp`），于是服务器**有权**来问这一份表。
+// 上游同一条：`platform/lsp/src/api/Lsp4jClient.kt:71-72` 转给处置器，
+// `platform/lsp-impl/src/impl/LspServerNotificationsHandlerImpl.kt:241-247` 把项目的每个根映射成
+// `WorkspaceFolder(uri, name)`，项目没了回 emptyList。协议的返回类型是 `WorkspaceFolder[] | null`，
+// `null` 那一支留给"客户端没有文件夹"这一种（我们没在 initialize 里发过那份表时就是它）。
+//
+// 这一支是本轮补的**真缺陷**：以前分派表里没有它 ⇒ 落到 :592 的兜底回 -32601
+// —— 声明了能力却不认得这条请求，服务器问到的是"不认得"，只能按"客户端不支持"继续，
+// 于是它给多根工作区算的那些结果（源根、依赖范围）会静默按单根走。
+void Client::answer_workspace_folders(const Json& id) {
+    Json folders = nullptr;
+    {
+        std::lock_guard lock(mutex_);
+        folders = workspace_folders_;
+    }
+    respond(id, std::move(folders), Json(nullptr));
+}
+
+// `client/registerCapability`：协议返回 void ⇒ 客户端唯一"合法"的答复是回 null（收下）。
+// 上游做得更多一点：`LspServerNotificationsHandlerImpl.kt:119-123` 把每条 registration 存进
+// `LspDynamicCapabilities`（`:117` 的 `capabilityToInfo.putValue(registration.method, …)`），
+// 再 `restartHighlightingIfNeeded(...)`（`:130-182`）让受影响的那几族结果重取。
+// 本仓这一层：形状校验 + 原样转给界面（记账与作废缓存都在 `src/lspServerMessages.ts`，
+// 那里才是"谁看得见这件事"的那一头）+ 回包。
+//
+// 次序是**先答再转**：转出走的是宿主那条事件回调，它万一抛（前端没装出口 / JSON 形状意外），
+// 也不能把这条回包一起带走 —— 服务器那条 future 等不到答复就会把它后面所有的请求排在同一条
+// 等待上，界面看到的"语言服务卡住"就是这么来的。
+void Client::answer_register_capability(const Json& id, const Json& params) {
+    std::vector<std::pair<std::string, std::string>> registrations;
+    std::string failure;
+    if (!collect_registrations(params, "registrations", registrations, failure)) {
+        respond(id, Json(nullptr), Json{{"code", -32602}, {"message", failure}});
+        return;
+    }
+    respond(id, Json(nullptr), Json(nullptr));
+    forward_server_request(params, "client/registerCapability");
+}
+
+// `client/unregisterCapability`：同一形状，键名是 `unregisterations`（上游 `:125-128`，
+// 它按 `unregistration.method` 找到那一族再把那个 id 摘掉）。撤一个本端没登记过的 id 不算错
+// —— 服务器可以在自己那侧已经忘掉它之后又撤一次，所以这里**照旧回 null**，
+// 由界面那一头的日志如实写"其中 N 项本端没有登记过"。
+void Client::answer_unregister_capability(const Json& id, const Json& params) {
+    std::vector<std::pair<std::string, std::string>> unregistrations;
+    std::string failure;
+    if (!collect_registrations(params, "unregisterations", unregistrations, failure)) {
+        respond(id, Json(nullptr), Json{{"code", -32602}, {"message", failure}});
+        return;
+    }
+    respond(id, Json(nullptr), Json(nullptr));
+    forward_server_request(params, "client/unregisterCapability");
+}
+
+// `window/workDoneProgress/create`：协议返回 void，上游就是一行
+// `override fun createProgress(params: WorkDoneProgressCreateParams) = completedFuture(null)`
+// （`LspServerNotificationsHandlerImpl.kt:255`）—— 同意，不做别的事，真正的行是之后那条
+// `$/progress` 的 begin 才建的（`:266-314`）。
+// 但 `token` 是这条参数的**必填**字段（`WorkDoneProgressCreateParams { token: ProgressToken }`，
+// ProgressToken = integer | string）：没有 token 的"申请"服务器自己 later 也发不出对应的 `$/progress`，
+// 所以缺字段就当 InvalidParams 明着拒（回包照样给出去，不留挂着的那条），并把原样参数转出去留一行。
+void Client::answer_create_progress(const Json& id, const Json& params) {
+    const bool has_token = params.is_object() && params.contains("token") &&
+                           (params.at("token").is_string() || params.at("token").is_number_integer());
+    respond(id, Json(nullptr), has_token ? Json(nullptr)
+                                         : Json{{"code", -32602},
+                                                {"message", "window/workDoneProgress/create needs a string or integer token"}});
+    forward_server_request(params, "window/workDoneProgress/create");
+}
+
+// 服务器请求的原样参数（补 `method`）交给界面那一条出口。没装出口（离线自测 / 服务器停了之后）
+// 就什么都不做 —— 回包已经在调用它的那一行先给出去了，协议这一头不受影响。
+void Client::forward_server_request(const Json& params, std::string_view method) {
+    Notify sink;
+    {
+        std::lock_guard lock(mutex_);
+        sink = server_message_;
+    }
+    if (!sink) return;
+    sink(tag_server_message(params, method));
+}
+
 void Client::start(Json initialize_params, Handler on_result) {
     if (state_ != State::fresh) protocol_error("start called on a non-fresh client");
     state_ = State::initializing;
+    // 记住我们**告诉过**服务器的工作区文件夹，之后它用 `workspace/workspaceFolders` 来问时回同一份。
+    // 在 `state_ = initializing` 之后、发请求之前就取：initialize 的回包一到，服务器随时可以问。
+    {
+        std::lock_guard lock(mutex_);
+        workspace_folders_ = initialize_params.is_object() && initialize_params.contains("workspaceFolders")
+                                 ? initialize_params.at("workspaceFolders") : Json(nullptr);
+    }
     send_request("initialize", std::move(initialize_params), [this, handler = std::move(on_result)](Json result, Json error) {
         if (!error.is_null()) {
             state_ = State::failed;
@@ -538,9 +702,16 @@ void Client::receive(const Json& message) {
         if ((!message.at("id").is_number_integer() && !message.at("id").is_string()) || !message.at("method").is_string()) return;
         const auto& id = message.at("id");
         const auto method = message.at("method").get<std::string>();
-        if (method == "window/workDoneProgress/create" || method == "client/registerCapability" ||
-            method == "client/unregisterCapability")
-            respond(id, Json(nullptr), Json(nullptr));
+        // 服务器**主动发起**的那六条请求，逐条都有回包（本轮之前少了 workspace/workspaceFolders 那一支，
+        // 它掉进下面的 -32601 兜底 —— 而这份客户端能力表里 `workspace.workspaceFolders` 是 true）。
+        if (method == "window/workDoneProgress/create")
+            answer_create_progress(id, message.value("params", Json(nullptr)));
+        else if (method == "client/registerCapability")
+            answer_register_capability(id, message.value("params", Json(nullptr)));
+        else if (method == "client/unregisterCapability")
+            answer_unregister_capability(id, message.value("params", Json(nullptr)));
+        else if (method == "workspace/workspaceFolders")
+            answer_workspace_folders(id);
         else if (method == "workspace/configuration") {
             const auto params = message.value("params", Json::object());
             if (!params.is_object() || !params.contains("items") || !params.at("items").is_array()) {
@@ -574,20 +745,16 @@ void Client::receive(const Json& message) {
         // 上游逐条：`LspServerNotificationsHandlerImpl.kt:341-368`（refresh 一族全部
         // `completedFuture(null)`，并让对应缓存作废重取：`LspClientImpl.kt:223-265`）、
         // `:377-383`（showMessageRequest 先把消息与 `actions` 的标题写进日志，再弹带按钮的通知）。
-        // 本仓同样先交给同一条 `server_message_` 出口（带 `method`，前端的处置见
-        // `src/lspProgress.ts`：refresh ⇒ 清掉前端那一族缓存，下一次读自然重取），再按协议答回包：
+        // 本仓按同一顺序做两件事，但**回包在前**（与上面那三条一样的理由：转出那头的回调万一抛，
+        // 不能把回包一起带走，服务器会一直等）：先答回包，再交给同一条 `server_message_` 出口（带 `method`，
+        // 前端的处置见 `src/lspServerMessages.ts`：refresh ⇒ 清掉前端那一族缓存，下一次读自然重取）：
         //   · refresh 答 null = 收到了；
         //   · showMessageRequest 答 null = 用户没有点任何一项（协议允许 `MessageActionItem | null`，
         //     上游把气球关掉也是这个值）。通知面现在只显示消息本身、还没有那一排按钮，
         //     按钮那半写在 docs/wiring-requests-2026-10-06-lsp.md 里要接线。
         else if (method == "window/showMessageRequest" || is_refresh_request(method)) {
-            Notify sink;
-            {
-                std::lock_guard lock(mutex_);
-                sink = server_message_;
-            }
-            if (sink) sink(tag_server_message(message.value("params", Json(nullptr)), method));
             respond(id, Json(nullptr), Json(nullptr));
+            forward_server_request(message.value("params", Json(nullptr)), method);
         }
         else
             respond(id, Json(nullptr), Json{{"code", -32601}, {"message", "Method not found"}});

@@ -80,7 +80,9 @@ test('引用 chip 的菜单：标签给「删除」（GitDeleteRefAction），�
 
 test('接线：chip 上挂右键、日志视图两套菜单共用一份渲染', () => {
   const table = read('src/components/VcsLogTable.vue')
-  assert.match(table, /@contextmenu\.prevent\.stop="emit\('refMenu'/, '引用 chip 上挂右键')
+  assert.match(table, /@contextmenu\.prevent\.stop="emitRefMenu\(chip, \$event\)"/, '引用 chip 上挂右键（组头那条引用）')
+  assert.match(table, /emit\('refMenu', \{ name: chip\.head\.name, type: chip\.head\.type/,
+    '菜单契约没改：交出去的还是那一条引用（chip 显示的是组名，可能不是组头之外的某一条）')
   const view = read('src/components/VcsLog.vue')
   assert.match(view, /@ref-menu="openRefMenu"/)
   assert.match(view, /logRefMenu\(\{ name: payload\.name, type: payload\.type \}/, '引用菜单由模型给出（空行就不开菜单）')

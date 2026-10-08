@@ -30,6 +30,7 @@ import { applyViewMode, shouldHideOnFocusLoss, viewModeOf, type ViewMode, type W
 import { attachStripeButton, detachStripeButton } from './toolWindowPaneState.ts'
 import { STRIPE_NAMES_DEFAULT_WIDTH, clampStripeWidth, stripeWidthsAfterShowNames, type StripeSide } from './stripeResize.ts'
 import { sortedByMnemonicThenId } from './toolWindows.ts'
+import { dispatchToolWindowStateChange, layoutSnapshotOf, type ToolWindowLayoutSnapshot } from './toolWindowManagerListener.ts'
 import type { Workspace } from './bridge'
 
 /** IDEA 的 `ToolWindowAnchor`（TaoCode 只用 left/right/bottom）。 */
@@ -67,6 +68,15 @@ export interface ToolWindowStripesDeps {
    * `WindowInfo.isVisible` 把它**写回**去（打开项目时恢复上次开着的那一个），所以是可写的。
    */
   activeView: { value: ToolWindowId }
+  /**
+   * 把一个窗口「带到前面」地显示在**它新锚点所在的那条 dock**（左右各自独立后，
+   * `setToolAnchor` 搬运可见性不能再一律写左栏 —— 上游 `hideIfNeededAndShowAfterTask`
+   * 搬完在**新位置**重新显示）。宿主传 `routeToDock`；缺省回落到旧的「写左栏」行为
+   * （单测夹具与只有左栏的旧世界一致）。
+   */
+  showAtAnchor?: (id: ToolWindowId, anchor: Anchor) => void
+  /** 右 dock 装哪个窗口 / 是否可见（宿主的 rightView / rightVisible）——「现在哪些窗口开着」的账要算上右栏。 */
+  rightView?: { value: ToolWindowId }; rightVisible?: { value: boolean }
   /**
    * 底部 dock 是否展开（宿主的 `bottom`）—— 它承担底部那几个内容的 `isVisible`。
    * 可选：不传就当作"底部一直没开"（单测夹具大多不关心这一侧）。
@@ -252,6 +262,7 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
       bottomRef.value = true
       return
     }
+    if (deps.showAtAnchor) { deps.showAtAnchor(id as ToolWindowId, anchor); return } // 按锚点路由到它那一侧（右锚亮右栏）
     deps.activeView.value = id as ToolWindowId
     deps.explorer.value = true
   }
@@ -384,6 +395,9 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     if (resolved.persist) saveLayout()
     if (resolved.migrated) markLayoutMigrated()
     if (resolved.writeAppliedVersion !== null) markAppliedLayoutVersion(DEFAULT_PROJECT_FRAME_PROFILE.id, resolved.writeAppliedVersion)
+    // 整套布局替换 = 上游 `ToolWindowManagerImpl.setLayout`，之后广播一次状态变化
+    //（注册/注销/锚点/顺序都在这一份里，见 `toolWindowManagerEvents`）。
+    publishLayoutChange()
   }
 
   /**
@@ -393,10 +407,12 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
    */
   function restoreVisibility(layout: StoredProjectLayout) {
     const visible = visibleWindowIds(layout)
-    const side = visible.find(id => Object.hasOwn(toolAnchors, id) && toolAnchors[id as ToolWindowId] !== 'bottom')
-    if (side) {
-      deps.activeView.value = side as ToolWindowId
-      deps.explorer.value = true
+    // 侧栏那一侧：可见的可能不止一个（左右两条 dock 各一个），且**各自回各自那一侧**
+    // （上游恢复的是每个 WindowInfo.isVisible；旧写法一律塞左栏，右锚窗口启动后跑到左栏去了）。
+    const sides = visible.filter(id => Object.hasOwn(toolAnchors, id) && toolAnchors[id as ToolWindowId] !== 'bottom')
+    if (sides.length) {
+      if (deps.showAtAnchor) for (const id of sides) deps.showAtAnchor(id as ToolWindowId, toolAnchors[id as ToolWindowId])
+      else { deps.activeView.value = sides[0] as ToolWindowId; deps.explorer.value = true } // 宿主没给路由时的旧行为（单测夹具）
     } else {
       deps.explorer.value = false
     }
@@ -417,6 +433,7 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   function currentVisibleIds(): string[] {
     const ids: string[] = []
     if (deps.explorer.value) ids.push(String(deps.activeView.value))
+    if (deps.rightVisible?.value && deps.rightView?.value) ids.push(String(deps.rightView.value))
     if (bottomRef.value && bottomTabRef.value) ids.push(String(bottomTabRef.value))
     return ids
   }
@@ -424,6 +441,33 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     if (!layoutRoot.value) return
     visibleIds.value = currentVisibleIds()
     saveLayout()
+    publishLayoutChange()
+  }
+
+  // ---- 工具窗口事件面（上游 `ToolWindowManagerListener` 那条 MessageBus Topic）----
+  // 上游在注册/注销/状态变化/显隐时逐次 `syncPublisher(TOPIC).…`；本仓由**布局前后两份快照**
+  // 算出四类事件再投给订阅者（`src/toolWindowManagerListener.ts` 的 `dispatchToolWindowStateChange`）。
+  // 发布点是这里两处：`saveVisibility`（可见性/切换的写入点）与 `applyProjectLayout`（整套布局替换）。
+  // 没有任何订阅者时这一步是恒等变换（判据 `tests/tool-window-manager-listener.test.mjs`）。
+  let lastLayoutSnapshot: ToolWindowLayoutSnapshot | null = null
+  function currentLayoutSnapshot(): ToolWindowLayoutSnapshot {
+    const registered = [...new Set<string>([...Object.keys(toolAnchors), ...extraContentIds])]
+    return layoutSnapshotOf({
+      registered,
+      visible: currentVisibleIds(),
+      anchorOf: id => anchorOf(id as ToolWindowId),
+      orderOf: id => {
+        const side = anchorOf(id as ToolWindowId)
+        const rank = toolOrder.value[side].indexOf(id as ToolWindowId)
+        return String(rank)
+      },
+    })
+  }
+  function publishLayoutChange() {
+    if (!layoutRoot.value) return
+    const next = currentLayoutSnapshot()
+    if (lastLayoutSnapshot) dispatchToolWindowStateChange(lastLayoutSnapshot, next)
+    lastLayoutSnapshot = next
   }
 
   /**
@@ -504,8 +548,10 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
       bottomRef.value = true
       bottomTabRef.value = id
     } else if (wasVisible) {
-      deps.explorer.value = true
-      deps.activeView.value = id
+      // 上游：搬完在**新位置**重新显示（`ToolWindowManagerImpl.kt:1714-1719`）——
+      // 左右分栏后「新位置」可能是右栏，由 `showAtAnchor` 按锚点路由；没传才写左栏。
+      if (deps.showAtAnchor) deps.showAtAnchor(id, anchor)
+      else { deps.explorer.value = true; deps.activeView.value = id }
     }
     saveToolAnchors()
     saveToolOrder()
@@ -532,11 +578,28 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   // 隐藏集与锚点/顺序同属项目的布局（`isShowStripeButton` 就存在 WindowInfo 里），所以一起落盘。
   const hiddenStripeButtons = reactive(new Set<ToolWindowId>())
   function saveHiddenStripeButtons() { saveLayout() }
-  /** `RemoveStripeButtonAction.actionPerformed`（`:923-925`）。 */
+  /**
+   * 「从侧栏移除」的**两半**（上游是同一次调用：`ToolWindowImpl.kt:924` 的
+   * `hideToolWindow(id, removeFromStripe = true, …)` → `ToolWindowManagerImpl.kt:833-868`）：
+   *   ① `setHiddenState`（`:712-719`，`info.isVisible = false` 在 `:716`）—— **面板收起**；
+   *   ② `mutation`（`:849-853`）把 `info.isShowStripeButton = false` + `entry.removeStripeButton()`
+   *      —— 按钮摘掉。
+   * 顺序也照上游（先收面板、再摘按钮）。本仓原来只做了 ②，于是留下一条真缺陷：
+   * 按钮没了、面板还开着，那一格变成"看得见却没有入口"的孤儿态（上游
+   * `:1626-1627` 那句 "if the tool window is visible, we ignore isShowStripeButton" 防的就是它），
+   * 而且用户再也无法从侧栏把它切走。
+   * **只收它自己那一格**：`deps.activeView`/`bottomTab` 是"这一格现在显示谁"，别的窗口不该被带下去。
+   */
   function removeStripeButton(id: ToolWindowId) {
     // 挂/摘**严格配对**（上游 `ToolWindowEntry.stripeButton` 的 setter 断言，`ToolWindowEntry.kt:38-45`）：
     // 重复移除同一个按钮不写盘也不重复通知 —— 契约在 `detachStripeButton` 里，可单测。
     if (!detachStripeButton(hiddenStripeButtons.has(id) ? null : id).ok) return
+    // ① 上游 setHiddenState：这一格此刻显示的就是它 ⇒ 收掉（收完立刻落一次可见性，
+    //    这样第 ② 半写的那条记录里 `visible` 与 `showStripeButton` 是同一时刻的真状态）。
+    if (deps.explorer.value && deps.activeView.value === id) deps.explorer.value = false
+    else if (bottomRef.value && bottomTabRef.value === id) bottomRef.value = false
+    saveVisibility()
+    // ② 上游 mutation：按钮摘掉并持久化。
     hiddenStripeButtons.add(id)
     saveHiddenStripeButtons()
   }

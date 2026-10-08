@@ -102,3 +102,15 @@ const graph = computed(() => folded.value.graph)
 | §G `:1398`、`:1401`、`:1426`、`:1475`、`:1476`、`:1479`、`:1685` | `EdgePrintElement`/`NodePrintElement`/`PrintElementGenerator`/`PrintElementGeneratorImpl`/`EdgePrintElementImpl`/`TerminalEdgePrintElement`/`SimpleGraphCellPainter` | `[-]` | `[~]` | 族理由是"Swing 自绘/平台抽象"，但这几条的**用户可见部分**（每行的列、竖线 vs 弯线、终端箭头、HEAD 空心圈、虚线折叠边）已在本仓模块等价实现：`src/vcsLogGraph.ts:42-78`、`:170-228`、`:314-319`；判据 `tests/vcs-log-graph-cells.test.mjs:94-138`。Swing 画师本体仍 `[-]`，只升"数据形状"这一半 |
 | `:79`、`:80`、`:83`、`:85`、`:86`、`:87`、`:89`、`:93` | `AlignLabelsAction`/`ChangeDiffPreviewLocationActions`/`CompactReferencesViewAction`/`ShowChangesFromParentsAction`/`ShowCommitInLogAction`/`ShowCommitTooltipAction`/`TwoStepCompletionProvider`/`VcsLogSpeedSearch` | `[ ]` | `[x]`（除前四条由别的批次落，本批逐条开文件核过消费链） | 落点分别在 `src/vcsLogPresentation.ts:34-45,130-157,195-199,206-212,214-225` + `src/components/VcsLog.vue:114,122,145,183-187,244` + `src/components/VcsLogChanges.vue:10` + `src/components/VcsLogTable.vue:36-39,140-153` + `src/vcsLogGoToRef.ts:105-130`；判据 `tests/vcs-log-presentation.test.mjs` 与 `tests/vcs-log-go-to-ref.test.mjs`（45 条全绿） |
 | `:90`、`:91`、`:92`、`:77`、`:78` | `FileHistoryOneCommitAction`/`ShowAllAffectedFromHistoryAction`/`MultipleCommitInfoDialog`/`UpdateOptionsDialog`/`UpdateOrStatusOptionsDialog` | `[ ]` | 维持 `[ ]` | 本批**没做**，落点在组件/native（不属本代理文件面），一句话理由照 §C 原表即可 |
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **请求 1 / 2** —— 目标 `src/components/VcsLogTable.vue`（本 lane 可改面，属 VCS 半区），登记为待办。
+- **请求 3** —— 无需改。**请求 4** —— 判词，非本 lane。
+
+结论：零接线（请求 1/2 登记）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（请求 1/2 登记）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

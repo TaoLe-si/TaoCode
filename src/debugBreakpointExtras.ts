@@ -199,7 +199,7 @@ export function setBreakpointProperties(
  * （`XLightBreakpointPropertiesPanel.java:559-565` —— 启用位关掉时表达式不再作用于会话，
  * 但文本仍是断点的属性，本仓留着它，重新勾选就恢复）。
  */
-export function sendableBreakpoints<T extends DapBreakpoint & { logMessage?: string }>(
+export function sendableBreakpoints<T extends DapBreakpoint>(
   path: string, points: readonly T[], table: Record<string, BreakpointPropertiesState>,
 ): T[] {
   return points.map(point => {
@@ -208,9 +208,7 @@ export function sendableBreakpoints<T extends DapBreakpoint & { logMessage?: str
     const next: T = { ...point }
     if (!next.condition && props.condition) next.condition = props.condition
     if (!next.hitCondition && props.hitCondition) next.hitCondition = props.hitCondition
-    if (!(next as { logMessage?: string }).logMessage && props.logMessage) {
-      (next as { logMessage?: string }).logMessage = props.logMessage
-    }
+    if (!next.logMessage && props.logMessage) next.logMessage = props.logMessage
     if (props.conditionEnabled === false) delete next.condition
     return next
   })
@@ -230,6 +228,6 @@ export function breakpointMarkersOf(point: DapBreakpoint, table?: Record<string,
   return {
     condition: Boolean(conditionText) && props?.conditionEnabled !== false,
     hit: Boolean(props?.hitCondition ?? point.hitCondition),
-    log: Boolean(props?.logMessage ?? (point as { logMessage?: string }).logMessage),
+    log: Boolean(props?.logMessage ?? point.logMessage),
   }
 }

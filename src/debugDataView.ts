@@ -11,6 +11,11 @@
 // 排序」可单测，也让面板只剩模板与 DAP 调用。`tests/debug-frame-context.test.mjs` 会用真实模块
 // 驱动面板的 `varRows`。
 import type { DapScope, DapVariable } from './bridge'
+import { evaluateResultReference } from './debugPaging.ts'
+// 「按类型分组」的派生规则搬进 src/debugFrameTree.ts（上游 `XValueGroup`/`XValueGroupNodeImpl`）：
+// 组怎么造、组键怎么拼、展开态怎么跨会话存都在那边。这里只调它，不再自己写一份 ——
+// 变量树与求值结果树共用同一份实现，两处才不会对同一个 type 一处成组、一处不成组。
+import { groupChildrenByType, typeGroupKey } from './debugFrameTree.ts'
 
 export interface DebugDataViewOptions {
   hideNullValues: boolean
@@ -67,6 +72,14 @@ export interface VarRow {
   evaluateName?: string
   /** true = 「按类型分组」合成出来的组行（不是变量，不可改值/复制值）。 */
   group?: boolean
+  /**
+   * 适配器为**这个变量自己的容器**声明的子项规模（`namedVariables`/`indexedVariables`，
+   * 规范可选）。分页的下一半（`src/debugVariablePaging.ts`）靠它算"还有多少"——
+   * 桥接的 `DapVariable` 接口没有这两个字段（bridge 冻结），但 native 整形一直发
+   * （`native/dap_shaping.cpp:230-236`），所以这里按运行时形状可选读出。
+   */
+  namedVariables?: number
+  indexedVariables?: number
 }
 
 /** 「按数组显示」的判定：孩子全是索引名（`named === false` 或名字是十进制整数）。 */
@@ -110,10 +123,12 @@ function pushChildRow(
   const key = `${prefix}${index}`
   const expanded = expandable && open[key] === true
   const indexical = forceIndex || child.named === false
+  const size = child as DapVariable & { namedVariables?: number; indexedVariables?: number }
   rows.push({
     key, name: indexical ? `[${index}]` : child.name, value: child.value, type: child.type ?? '',
     depth, expandable, expanded, reference: child.reference, state: 'value',
     container, apiName: child.name, evaluateName: child.evaluateName,
+    namedVariables: size.namedVariables, indexedVariables: size.indexedVariables,
   })
   return { child, key, expanded }
 }
@@ -140,25 +155,17 @@ function walk(
   const visible = visibleChildren(children, options)
   if (options.groupByType && !arrayMode) {
     // 同一层里 type 非空的兄弟聚成组（组内保持原顺序）；没报类型的留在组外。
-    const groups: Array<{ type: string; entries: VisibleChild[] }> = []
-    const indexOf = new Map<string, number>()
-    const ungrouped: VisibleChild[] = []
-    for (const entry of visible) {
-      const type = (entry.variable.type ?? '').trim()
-      if (!type) { ungrouped.push(entry); continue }
-      let at = indexOf.get(type)
-      if (at === undefined) { at = groups.length; indexOf.set(type, at); groups.push({ type, entries: [] }) }
-      groups[at]!.entries.push(entry)
-    }
+    // 派生规则在 `src/debugFrameTree.ts` 的 `groupChildrenByType`（上游 `XValueGroup`）。
+    const { groups, ungrouped } = groupChildrenByType(visible)
     for (const group of groups) {
-      const key = `${prefix}g|${group.type}`
+      const key = typeGroupKey(prefix, group.type)
       const expanded = open[key] === true
       rows.push({
-        key, name: group.type, value: `${group.entries.length} 项`, type: '', depth, expandable: true,
+        key, name: group.type, value: group.comment, type: '', depth, expandable: true,
         expanded, reference: 0, state: 'value', container: reference, apiName: '', group: true,
       })
       if (!expanded) continue
-      for (const entry of group.entries) {
+      for (const entry of group.members) {
         const row = pushChildRow(entry.variable, entry.index, depth + 1, `${key}-`, rows, reference, open, false)
         if (row.expanded) walk(row.child.reference, depth + 2, `${row.key}-`, rows, [...seen, reference], values, open, options)
       }
@@ -186,13 +193,15 @@ export function collectVarRows(
   scopes.forEach((scope, index) => {
     const key = `s${index}`
     const expanded = open[key] === true
-    rows.push({ key, name: scope.name, value: '', type: scope.expensive ? '按需' : '', depth: 0, expandable: true, expanded, reference: scope.reference, state: 'value', container: scope.reference, apiName: scope.name })
+    const size = scope as DapScope & { namedVariables?: number; indexedVariables?: number }
+    rows.push({ key, name: scope.name, value: '', type: scope.expensive ? '按需' : '', depth: 0, expandable: true, expanded, reference: scope.reference, state: 'value', container: scope.reference, apiName: scope.name, namedVariables: size.namedVariables, indexedVariables: size.indexedVariables })
     if (expanded) walk(scope.reference, 1, `${key}-`, rows, [], values, open, options)
   })
   return rows
 }
 
-/** 单个 reference 的子树（求值结果浏览器用；与作用域共用同一套展开/选项规则）。 */
+/**
+ * 单个 reference 的子树（求值结果浏览器用；与作用域共用同一套展开/选项规则）。 */
 export function collectReferenceRows(
   reference: number,
   values: Record<number, DapVariable[]>,
@@ -202,6 +211,30 @@ export function collectReferenceRows(
   const rows: VarRow[] = []
   walk(reference, 1, 'eval-', rows, [], values, open, options)
   return rows
+}
+
+/**
+ * **求值结果**的子树（IDEA 的 Evaluate 结果浏览器 / ShowAsObject 那一格）。
+ *
+ * 与 `collectReferenceRows` 的差别只有「根 reference 从哪来」：这里接的是 `dap.evaluate`
+ * 的整条回参，句柄按 `reference` 优先、退回 `variablesReference`（原生两个键都发，
+ * 见 `native/dap_values.cpp` 的 `shape_evaluate`；规则在 `src/debugPaging.ts`）。
+ * 结果不可展开（标量）时返回空表 —— 调用方据此不画展开箭头，而不是拿一个 0 去 `walk`
+ * 出一行"读取中…"的假节点。
+ *
+ * 这是 `DebugPanel.vue` 里那段
+ * `exprReference.value = result.variablesReference ?? 0` + `collectReferenceRows(exprReference.value, …)`
+ * 的等价物，收成一处：面板只需把两行换成 `collectEvaluateRows(result, values, open, dataView)`。
+ */
+export function collectEvaluateRows(
+  result: { reference?: number; variablesReference?: number } | null | undefined,
+  values: Record<number, DapVariable[]>,
+  open: Record<string, boolean>,
+  options: DebugDataViewOptions = DEFAULT_DEBUG_DATA_VIEW,
+): VarRow[] {
+  const reference = evaluateResultReference(result)
+  if (reference <= 0) return []
+  return collectReferenceRows(reference, values, open, options)
 }
 
 /**

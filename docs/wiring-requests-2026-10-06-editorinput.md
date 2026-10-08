@@ -247,3 +247,16 @@ watch(() => props.content, value => { if (!replacing && view && view.state.doc.t
 `api`（那块 `createEditorHostApi`/同名对象）声明之后，否则 setup 期求值源就 TDZ；
 ③判据要配一条「两栏同一文件、外部改 content 后第二栏文档跟着变」的 SSR/纯逻辑判据 ——
 本批没做这条，因为落点在保留面上，模块侧无可拆的东西。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1 已闭环**（`src/components/CodeEditor.vue` 已灌三格设置 + 语言 id）。
+- **W-2（`caret.perLine` 键位注册）未落** —— 目标 `src/keymapBindings.ts`（保留文件）+ `CodeEditor.vue`（禁改）。需 keymap/CodeEditor owner（与 caretops R3 同一条）。
+- **W-3 已闭环**（`:480`）。**W-4 / W-5** —— 登记项（保留文件 `keymapBindings.ts`）。
+
+结论：W-1/W-3 已闭环；W-2 转 owner。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W-1/W-3 已闭环；W-2 转 owner。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

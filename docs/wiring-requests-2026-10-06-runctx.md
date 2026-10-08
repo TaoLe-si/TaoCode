@@ -110,3 +110,16 @@ new：
 上游依据：`RunAnythingChooseContextAction.kt:76`（"工作目录"这件事由**输入行右侧那一格**自己显示，行文案里不重复目录），
 以及 `RunAnythingPopupUI.java:509-516`（执行时才把上下文放进 DataContext）。
 ⇒ 严格说本仓这一格已经承担了上游的同一职责，**行内 detail 保持原样**是可以辩护的做法；列在这里只是请主代理知情拍板。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **请求 1（`:module-roots`）已接线**：`src/App.vue:2658` 的 `<RunAnythingDialog :module-roots="runAnythingModuleRoots" …>`，`runAnythingModuleRoots` 在 `:1926`。
+- **请求 2（`payload.cwd`）已接线**：同行已透传 `payload.cwd`。
+- **请求 3（可选 detail 文案）** —— 目标 `src/runAnything.ts`（本 lane 可改面），登记。
+
+结论：请求 1/2 已接线；请求 3 登记。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「请求 1/2 已接线；请求 3 登记。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

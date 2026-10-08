@@ -11,6 +11,8 @@ import { clearLspDiagnostics, lspDiagnostics, request, setLspDiagnostics, type D
 import type { Tab } from './editorTab'
 import { BreakpointLocationCache } from './breakpointLocations.ts'
 import { errorMessage } from './errors.ts'
+// 每次文档变更给那一篇换一个新号（上游 Document.getModificationStamp() 的本仓账本）。
+import { bumpDocumentRevision } from './documentRevisions.ts'
 // 最近位置的两档（导航档 / 更改档）与它们的上限、合并规则都在 src/appPlacesRing.ts；
 // 这里只把弹层要看的那一条列表按上游 `createPlaceLinePairs` 的口径取出来。
 import { recentPlacesList } from './appPlacesRing.ts'
@@ -18,6 +20,10 @@ import { recentPlacesList } from './appPlacesRing.ts'
 import { jumpTargetPane, type PaneGroup } from './editorGroups.ts'
 import { describeNavigationBoundary, navigateFrom, navigationPoints } from './navigateInFile.ts'
 import { locationSnippet, previousChangePlace } from './recentLocations.ts'
+// 结构视图的弹层档位（Ctrl+F12 那棵树出厂的排序器；依据逐条写在 `src/outlineView.ts` 的
+// `orderFileStructurePopup` 上面：`FileStructurePopup.java:750`/`:938-942` +
+// `JavaFileTreeModel.java:68` + `KindSorter.java:38`）。
+import { orderFileStructurePopup } from './outlineView.ts'
 // LSP 符号导航包装层（workspaceSymbol/documentSymbol 一族，见该模块头）：
 // 文件内/工作区符号的过滤（含 SpeedSearch 匹配器）、去重、排序与导航目标都走同一份规则。
 import { CLASS_LIKE_SYMBOL_KINDS, documentSymbolEntries, mergeWorkspaceSymbols, symbolNavigationTarget } from './lspSymbolBridge.ts'
@@ -32,6 +38,11 @@ import { CLASS_LIKE_SYMBOL_KINDS, documentSymbolEntries, mergeWorkspaceSymbols, 
 //     开关 UI 在 `src/menus/navigateMenu.ts` 的「按类型过滤」子菜单，排除态由那份模块持久化。
 import { NavWorkspaceSymbolCache } from './navWorkspaceSymbolCache.ts'
 import { filterSymbols, hiddenSymbolGroups } from './navChooseByNameFilter.ts'
+// 「转到 类/符号/文件」的三个 EP（上游 `ChooseByNameContributor` 一族，EP id 与
+// `LspGoToSymbolContributor`/`LspGoToClassContributor` 的挂法见 `src/gotoByNameContributors.ts`）。
+// 本模块把 LSP 的 workspace-symbol 通道作为 bundled 贡献挂进去，并在合并处取全部贡献 ——
+// 于是第三方按 id 挂的符号贡献者能被「转到符号/类」看见（不再是私有表）。
+import { gotoByNameContributions, registerLspGotoContributors } from './gotoByNameContributors.ts'
 // Ctrl+U（`GotoSuperAction`）与 Ctrl+Shift+T（`GotoTestOrCodeAction`）的规则层，
 // 宿主装配就住在下面 `gotoSuper` / `gotoTest` 两处（本模块已经握着它们要的 request/outline/reveal）。
 import { runGotoSuper } from './navGotoSuper.ts'
@@ -145,6 +156,10 @@ export function createLspNavigation(deps: LspNavigationDeps) {
   // 变了就必然不命中）。语言服务重启与换工程走 `clearCache()`（`LspSingleSlotCache.kt:48-52` 三格全清）。
   let symbolRevision = 0
   const workspaceSymbolsCache = new NavWorkspaceSymbolCache<SymbolEntry[]>(() => symbolRevision)
+  // LSP 的 workspace-symbol 通道**作为两条 bundled 贡献**挂进 `gotoSymbolContributor`/
+  // `gotoClassContributor`（上游 `intellij.platform.lsp.impl.xml:112-113` 的同一挂法，见
+  // `src/gotoByNameContributors.ts`）。数据源就是上面这份单槽缓存的快照。
+  registerLspGotoContributors({ snapshot: () => workspaceSymbolsCache.snapshot() })
   const starts = new Map<string, symbol>()
   async function startLsp(tab: Tab) {
     // **必须往响应式代理上写**：`startCompletionSession` 会设置 `lspRunning`/`lspConfigured`，
@@ -244,6 +259,9 @@ export function createLspNavigation(deps: LspNavigationDeps) {
   function onEditorChange(tab: Tab) {
     tab.dirty = true
     tab.preview = false
+    // 每篇文档每改一次换一个号（上游 `Document.getModificationStamp()`，`DocumentImpl.java:171`）。
+    // 提交检查的"这份结果还作数吗"就钉在这一个号上（`src/documentRevisions.ts` / `src/commitChecksResult.ts`）。
+    bumpDocumentRevision(tab.path)
     // 书签按"同一行号 + 同一行原文"对账（上游 BookmarkManager.documentChanged；丢/放回都在那一步）。
     notifyEditorContentChanged(tab.path, editorFor(tab.path)?.text() ?? tab.content)
     // 本地检查（JUnit 规则）随编辑实时重算：问题面板与 LSP 诊断读同一张汇总表。
@@ -420,16 +438,29 @@ export function createLspNavigation(deps: LspNavigationDeps) {
     const path = activePath.value
     if (!path) return []
     // 过滤用结构弹层的 SpeedSearch 档（驼峰缩写/子序列，见 src/symbolSearch.ts），
-    // 但**不重排**：上游 SpeedSearch 只在树里过滤，行序仍是结构视图顺序。
+    // 过滤本身**不重排**：上游 SpeedSearch 只在树里过滤，行序仍是结构视图顺序。
+    // 「结构视图顺序」在弹层那一侧不是文档序 —— 弹层出厂开着名称档与**弹层那一份**种类档
+    // （`FileStructurePopup.java:750` 给每个 tree action 上 `getDefaultValue`，`:938-942` 判
+    // ALPHA 恒真、`KindSorter.java:71-74` 判 KIND 为 true；`JavaFileTreeModel.java:68` 选的
+    // 是 `POPUP_INSTANCE` ⇒ 类型落 53 分、在成员下面）。逐条依据与重排实现都在
+    // `src/outlineView.ts` 的 `orderFileStructurePopup`。
     // 转换与跳转位置取法在 src/lspSymbolBridge.ts 的 documentSymbolEntries（selectionRange 优先）。
-    return filterSymbols(documentSymbolEntries(outline.value as NavigationDocumentSymbol[], path, query), hiddenSymbolGroups.value)
+    return orderFileStructurePopup(
+      outline.value as NavigationDocumentSymbol[],
+      filterSymbols(documentSymbolEntries(outline.value as NavigationDocumentSymbol[], path, query), hiddenSymbolGroups.value))
   }
   // 缓存里存的是**服务器原始应答**，合并/去重/排序与类别过滤都在缓存之后 ——
   // 上游 `LspWorkspaceSymbolContributor.kt:69` 也正是先 `getWorkspaceSymbolsCaching(query)`
   // 再逐条 `shouldAcceptSymbolKind(symbolKind)`。
   function visibleSymbols(symbols: readonly SymbolEntry[], query: string): SymbolEntry[] {
-    return mergeWorkspaceSymbols([filterSymbols(symbols, hiddenSymbolGroups.value)], {
-      query, mode: symbolPrompt.value?.mode === 'class' ? 'class' : 'symbol',
+    const mode = symbolPrompt.value?.mode === 'class' ? 'class' : 'symbol'
+    // 本仓的「转到符号/类」= 全部 EP 贡献（LSP 那条是 bundled 贡献，读同一份缓存的快照）+
+    // 语言服务直接交回的这一份。两处同源（`registerLspGotoContributors` 的数据源就是本缓存），
+    // `mergeWorkspaceSymbols` 末尾的 `dedupeSymbols` 会把重复的合成一条，结果与只并 LSP 那一份
+    // 逐条相同 —— 但第三方按 EP id 挂的贡献者在这一步被收进列表（不再是私有表）。
+    const contributed = filterSymbols(gotoByNameContributions(mode, query.trim(), query.trim()), hiddenSymbolGroups.value)
+    return mergeWorkspaceSymbols([filterSymbols(symbols, hiddenSymbolGroups.value), contributed], {
+      query, mode,
     })
   }
   async function globalSymbolEntries(query: string) {
@@ -496,6 +527,9 @@ export function createLspNavigation(deps: LspNavigationDeps) {
         tab.readOnly = doc.readOnly
         // The editor holds its own buffer, so the new text has to be pushed into it.
         editorFor(path)?.setDraft(doc.content)
+        // 批量替换改的是**正文** ⇒ 这一篇换号（上游 documentChanged，`DocumentImpl.java:171`）；
+        // 不换的话提交检查的指纹看不见这次改写，上一轮的结果会被当成还作数。
+        bumpDocumentRevision(path)
       } catch { /* the file may have been moved mid-replace */ }
     }
     // 替换改写的是磁盘：符号索引里的行号全可能漂了（上游 PSI 计数在这一刻变），槽作废。

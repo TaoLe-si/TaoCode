@@ -159,7 +159,8 @@ test('接线：清单挂在通知工具窗口，移除按钮是真动作', () =>
   assert.match(panel, /doNotAskInfos\(props\.root\)/, '清单没读那张分层表')
   assert.match(panel, /clearDoNotAskInfo\(info, props\.root\)/, '移除按钮没接解除抑制')
   assert.match(panel, /:aria-label="`\$\{DO_NOT_ASK_LIST_ACCESSIBLE_NAME\}（\$\{suppressed\.length\}）`"/, '开关缺可及名')
-  assert.match(panel, /<BellOff :size="iconSize\.menu" \/>/, '图标走 lucide + iconSize 阶梯')
+  // 装饰性图标（外层按钮已有 aria-label）走 lucide + iconSize 阶梯，并由可及性 lane 统一加 aria-hidden。
+  assert.match(panel, /<BellOff aria-hidden="true" :size="iconSize\.menu" \/>/, '图标走 lucide + iconSize 阶梯')
 })
 
 test('接线：通知宿主把项目根喂进抑制判定（不然「不再为此项目显示」点了没用）', () => {

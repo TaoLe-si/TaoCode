@@ -18,9 +18,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
 
 const ctx = (over = {}) => ({
-  closedCount: 0, tabCount: 0, hasUnpinned: false, split: false,
+  closedCount: 0, tabCount: 0, hasUnpinned: false, split: false, canDetach: false,
   reopenClosedTab: () => {}, closeAllTabs: () => {}, closeUnpinnedTabs: () => {},
   unsplit: () => {}, unsplitAll: () => {}, changeSplitOrientation: () => {}, openTabSettings: () => {},
+  openInNewWindow: () => {},
   ...over,
 })
 
@@ -39,9 +40,9 @@ test('一条可见动作都没有时连按钮都不该画（getPreferredSize 返
 })
 
 test('成员表照上游顺序，且只列本仓真接得住的那几条', () => {
-  const items = tabEntryPointItems(ctx({ closedCount: 2, tabCount: 3, hasUnpinned: true, split: true }))
+  const items = tabEntryPointItems(ctx({ closedCount: 2, tabCount: 3, hasUnpinned: true, split: true, canDetach: true }))
   assert.deepEqual(items.map(item => item.id), [
-    'CloseAllEditors', 'ReopenClosedTab', 'CloseUnpinnedTabs', 'Unsplit', 'UnsplitAll',
+    'CloseAllEditors', 'ReopenClosedTab', 'CloseUnpinnedTabs', 'EditSourceInNewWindow', 'Unsplit', 'UnsplitAll',
     'ChangeSplitOrientation', 'ConfigureEditorTabs',
   ])
   // 上游那组里 RecentFilesFallback / RecentLocations / GotoFile 是**全局找回**，不属于"标签这一格"，
@@ -49,6 +50,19 @@ test('成员表照上游顺序，且只列本仓真接得住的那几条', () =>
   for (const id of ['RecentFilesFallback', 'RecentLocations', 'GotoFile']) {
     assert.equal(items.some(item => item.id === id), false, `${id} 不该出现在标签下拉里`)
   }
+  // `EditSourceInNewWindow`（PlatformActions.xml:919）排在 KeepTabOpen 之后、Unsplit 之前。
+  const ids = items.map(item => item.id)
+  assert.ok(ids.indexOf('EditSourceInNewWindow') > ids.indexOf('CloseUnpinnedTabs'), '排在关闭组之后')
+  assert.ok(ids.indexOf('EditSourceInNewWindow') < ids.indexOf('Unsplit'), '排在拆分组之前')
+})
+
+test('「在独立窗口中打开」：宿主能力不足时整行不画（不放假控件）', () => {
+  const noCapability = tabEntryPointItems(ctx({ tabCount: 2, canDetach: false }))
+  assert.equal(noCapability.find(item => item.id === 'EditSourceInNewWindow').enabled, false, '能力不足 ⇒ 不可用 ⇒ 不出现')
+  const noTab = tabEntryPointItems(ctx({ tabCount: 0, canDetach: true }))
+  assert.equal(noTab.find(item => item.id === 'EditSourceInNewWindow').enabled, false, '没有标签时也不可用')
+  const ok = tabEntryPointItems(ctx({ tabCount: 1, canDetach: true }))
+  assert.equal(ok.find(item => item.id === 'EditSourceInNewWindow').enabled, true)
 })
 
 test('每一条的可用性跟着真实状态走', () => {
@@ -60,22 +74,22 @@ test('每一条的可用性跟着真实状态走', () => {
   assert.equal(byId.Unsplit, false, '没分屏时不能取消拆分')
   assert.equal(byId.ChangeSplitOrientation, false)
   assert.equal(byId.ConfigureEditorTabs, true, '配置页永远可用')
-  const some = tabEntryPointItems(ctx({ closedCount: 1, tabCount: 2, hasUnpinned: true, split: true }))
+  const some = tabEntryPointItems(ctx({ closedCount: 1, tabCount: 2, hasUnpinned: true, split: true, canDetach: true }))
   assert.deepEqual(some.filter(item => item.enabled).map(item => item.id),
-    ['CloseAllEditors', 'ReopenClosedTab', 'CloseUnpinnedTabs', 'Unsplit', 'UnsplitAll', 'ChangeSplitOrientation', 'ConfigureEditorTabs'])
+    ['CloseAllEditors', 'ReopenClosedTab', 'CloseUnpinnedTabs', 'EditSourceInNewWindow', 'Unsplit', 'UnsplitAll', 'ChangeSplitOrientation', 'ConfigureEditorTabs'])
 })
 
 test('点每一行都真的干活（行在却不干活 = 假控件）', () => {
   const ran = []
   const items = tabEntryPointItems(ctx({
-    closedCount: 1, tabCount: 1, hasUnpinned: true, split: true,
+    closedCount: 1, tabCount: 1, hasUnpinned: true, split: true, canDetach: true,
     reopenClosedTab: () => ran.push('reopen'), closeAllTabs: () => ran.push('closeAll'),
     closeUnpinnedTabs: () => ran.push('closeUnpinned'), unsplit: () => ran.push('unsplit'),
     unsplitAll: () => ran.push('unsplitAll'), changeSplitOrientation: () => ran.push('orient'),
-    openTabSettings: () => ran.push('settings'),
+    openTabSettings: () => ran.push('settings'), openInNewWindow: () => ran.push('detach'),
   }))
   for (const item of items) item.run()
-  assert.deepEqual(ran, ['closeAll', 'reopen', 'closeUnpinned', 'unsplit', 'unsplitAll', 'orient', 'settings'])
+  assert.deepEqual(ran, ['closeAll', 'reopen', 'closeUnpinned', 'detach', 'unsplit', 'unsplitAll', 'orient', 'settings'])
 })
 
 test('接线：组件读的是过滤后的行、按钮按"有没有可见动作"出现', () => {

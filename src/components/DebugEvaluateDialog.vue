@@ -103,7 +103,7 @@ function pick(expression: string) { text.value = expression; notice.value = '' }
 .debug-evaluate-result.error { color: var(--error); }
 .debug-evaluate-history { display: flex; flex-direction: column; min-width: 0; border-left: 1px solid var(--line); padding-left: var(--space-2); }
 .debug-evaluate-history-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); color: var(--muted); font-size: 11px; }
-.debug-evaluate-history-head > span { display: inline-flex; align-items: center; gap: 4px; }
+.debug-evaluate-history-head > span { display: inline-flex; align-items: center; gap: var(--space-1); }
 .debug-evaluate-history-row { display: flex; align-items: center; gap: 2px; }
 .debug-evaluate-history-text { flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; color: var(--text); font: 11px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .debug-evaluate-history-text:hover { color: var(--bright); background: var(--hover); }

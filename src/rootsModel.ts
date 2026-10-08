@@ -30,9 +30,11 @@
 //      `OrderEntriesBridge.kt:363`）与模块数量无关、每个模块都有一条 —— roots3 已按上游补上
 //      （`buildOrderEntries` 的 `moduleSource` 条目；上游那条恒在，本仓在它不贡献任何根时不出行，
 //      理由与「空组不出」同口径，见该函数注释）。
-//   2. 内容根数量：`JavaProjectSettings`（`src/settingsModel.ts:66`）只有 `sourcePaths` 一张扁平表，
-//      没有内容根字段。所以 `contentRootUrls` 恒为 `['']`（工作区根），但对象图按**复数**建
-//      （`RootContentEntry[]`），将来加字段就有多根的落点，不用改这一层。
+//   2. 内容根数量：`JavaProjectSettings`（`src/settingsModel.ts:108`）只有 `sourcePaths` 一张扁平表，
+//      没有**用户显式配的**内容根字段 ⇒ 工作区根那条地板恒在（`buildRootModel` 里的 `''` 不可被顶掉）。
+//      **链接进来的构建工程目录**（Gradle `linkedProjects` + Maven pom）由 `src/buildContentRoots.ts`
+//      求出后经 `RootModelInput.buildProjectDirs` 递进来当**派生内容根**（roots4 补的，
+//      与这里原本写的「将来加字段就有多根的落点，不用改这一层」一致——落点已经到位）。
 //   3. 排除根形态：上游按**路径**记（`ContentEntry.addExcludeFolder`，`ContentEntry.java:282-291`），
 //      本仓 `ProjectSettings.excludedDirs` 是**目录名表**（命中规则见 `src/projectRoots.ts:66-70`）。
 //      这里按名字在磁盘清单上求出**实际命中的那些目录**，所以 `RootExcludeFolder.path` 是求出来的、
@@ -42,6 +44,9 @@
 //      **不猜** `out/test/<模块>`（那条默认布局在本地上游树里取不到出处，按取证口径记「无法核实」）。
 
 import { classifySourceRoot, excludedByNames, normalizeRootPath, SOURCE_ROOT_LABELS, validateSourceRoots, type SourceRootKind } from './projectRoots.ts'
+// 链接进来的构建工程（Gradle 链接表 / Maven 的 pom 目录）→ 内容根与排除根的合并、去重、排除优先。
+// 坐标与两条不等价都在 `src/buildContentRoots.ts` 的文件头。
+import { excludedBy, isAncestorPath, mergeContentRoots, outputExcludeRoots } from './buildContentRoots.ts'
 import { libraryPresentableName, libraryUrlsByType, type Library } from './libraryModel.ts'
 import { sdkPresentableName, sdkRootsOf, type Sdk } from './rootsSdkTable.ts'
 import type { OrderRootType } from './orderRoots.ts'
@@ -64,9 +69,16 @@ export interface RootSourceFolder {
 /** 一个排除根（`ContentEntry.getExcludeFolders()`，`ContentEntry.java:92`）。 */
 export interface RootExcludeFolder {
   readonly path: string
-  /** 命中它的那个目录名（本仓按名字排除，见文件头第 3 条不等价）。 */
+  /** 命中它的那个目录名（本仓按名字排除，见文件头第 3 条不等价）；输出目录那条是它自己的末段。 */
   readonly name: string
   readonly fileCount: number
+  /**
+   * 这条排除根的来源：`name` = `ProjectSettings.excludedDirs` 的目录名表（缺省，文件头第 3 条）；
+   * `output` = 配置的**编译输出目录**（上游把 build 目录 `storePath(EXCLUDED, …)`：
+   * `CommonGradleProjectResolverExtension.java:407-408`；Maven 侧 `MavenRootModelAdapterLegacyImpl.java:96`
+   * 的 `setExcludeOutput(true)`，且上游默认就是 true —— `JpsJavaModuleExtensionBridge.kt:43`）。
+   */
+  readonly rule: 'name' | 'output'
 }
 
 /** 一个内容根（`ContentEntry`，`ContentEntry.java:56-105`）。 */
@@ -115,6 +127,14 @@ export interface RootModelInput {
   moduleName: string
   /** 内容根（工作区相对路径）。本仓的存储只支撑工作区根一个，缺省即空串。 */
   contentRoots?: readonly string[]
+  /**
+   * **链接进来的构建工程目录**（Gradle 的 `linkedProjects` + Maven 的 pom 目录），由
+   * `src/buildContentRoots.ts` 的 `buildContentRoots()` 求出后递进来。它们与 `contentRoots` 同批参与
+   * 合并与祖先去重，但**不会**顶掉「工作区根」那条地板（文件头第 2 条不等价）。
+   */
+  buildProjectDirs?: readonly string[]
+  /** 编译输出目录当排除根（上游 `excludeOutput` 默认 true，`JpsJavaModuleExtensionBridge.kt:43`）；传 false 关掉。 */
+  excludeOutput?: boolean
   /** `JavaProjectSettings.sourcePaths`。 */
   sourcePaths?: readonly string[]
   /** `ProjectSettings.excludedDirs`（目录名表）。 */
@@ -171,19 +191,52 @@ export function excludeFoldersFromFiles(files: readonly string[], excludedDirs: 
     const prefix = `${path}/`
     let fileCount = 0
     for (const file of files) if (normalizeRootPath(file).startsWith(prefix)) fileCount += 1
-    out.push({ path, name, fileCount })
+    out.push({ path, name, fileCount, rule: 'name' as const })
   }
   return out.sort((left, right) => left.path.localeCompare(right.path))
 }
 
+/** 一条路径之下的清单条目数（不含它自己）—— 排除根行的计数口径。 */
+function countUnder(files: readonly string[], path: string): number {
+  const prefix = `${path}/`
+  let count = 0
+  for (const file of files) if (normalizeRootPath(file).startsWith(prefix)) count += 1
+  return count
+}
+
+/**
+ * 一条内容根上的排除根：目录名表求出的那些 + **配置的编译输出目录**那一条。
+ * 两条各自的出处见 `RootExcludeFolder.rule` 的注释；输出目录不在本条根之下时不出（谈不上从这条根里挖）。
+ *
+ * `ownerUrls`（同批内容根全体）用来做**最长匹配归属**：输出目录只挂在盖住它的那条**最深**内容根上，
+ * 邻居根不重复列同一条排除根（与源根那条 `ownerOf` 规则同一条口径）。
+ */
+function excludeRootsForEntry(
+  input: RootModelInput, url: string, files: readonly string[], ownerUrls: readonly string[] = [],
+): RootExcludeFolder[] {
+  const byName = excludeFoldersFromFiles(files, input.excludedDirs ?? [])
+  const outputs: RootExcludeFolder[] = outputExcludeRoots({
+    outputPath: input.outputPath,
+    testOutput: input.compilerTestOutput ?? '',
+    contentRoots: [url],
+    excludeOutput: input.excludeOutput,
+  })
+    .filter(entry => !ownerUrls.length || longestOwnerUrl(entry.path, ownerUrls) === url)
+    .map(entry => ({ path: entry.path, name: entry.name, fileCount: countUnder(files, entry.path), rule: 'output' as const }))
+  // 同一条路径只留一条（名字表先命中就归名字表，输出那条不重复挂）。
+  const seen = new Set(byName.map(folder => folder.path))
+  return [...byName, ...outputs.filter(folder => !seen.has(folder.path))]
+}
+
 /** 一个内容根（`ContentEntry`）：源根来自配置的 `sourcePaths`，排除根按名字表在清单上求出。 */
-export function buildContentEntry(input: RootModelInput, url: string): RootContentEntry {
+export function buildContentEntry(input: RootModelInput, url: string, ownerUrls: readonly string[] = []): RootContentEntry {
   const configured = (input.sourcePaths ?? []).map(normalizeRootPath).filter(Boolean)
   const prefix = url ? `${url}/` : ''
   // 只算落在这条内容根里的文件（`ContentEntry` 的源根/排除根都是**这条根下面**的东西，`:63`/`:92`）。
   const underUrl = (path: string) => !prefix || path === url || path.startsWith(prefix)
   const files = (input.files ?? []).map(normalizeRootPath).filter(underUrl)
   const states = validateSourceRoots(configured.filter(underUrl), files, input.excludedDirs ?? [])
+  const excludes = excludeRootsForEntry(input, url, files, ownerUrls)
   const sources: RootSourceFolder[] = states.map(state => ({
     path: state.path,
     kind: input.kindOverrides?.[state.path] ?? state.kind,
@@ -191,9 +244,22 @@ export function buildContentEntry(input: RootModelInput, url: string): RootConte
     packagePrefix: '',
     fileCount: state.fileCount,
     missing: state.missing,
-    excludedBy: state.excludedBy,
+    // 排除优先：名字表已经命中的照旧（`validateSourceRoots` 给的），否则看它是不是躺在输出排除根里
+    // —— 上游那条语义是「排除」= 内容根里被挖掉的子树（见 `src/buildContentRoots.ts` 文件头）。
+    excludedBy: state.excludedBy ?? outputExcludedName(state.path, excludes),
   }))
-  return { url, sources, excludes: excludeFoldersFromFiles(files, input.excludedDirs ?? []) }
+  return { url, sources, excludes }
+}
+
+/** 盖住这条路径的**最深**内容根（与 `buildRootModel` 里源根那条 `ownerOf` 同一个规则）。 */
+function longestOwnerUrl(path: string, urls: readonly string[]): string {
+  return urls.reduce((best, url) => (isAncestorPath(url, path) && url.length > best.length ? url : best), '')
+}
+
+/** 源根踩在输出排除根里时说得出的那个目录名（名字表那条由 `validateSourceRoots` 已经给过）。 */
+function outputExcludedName(path: string, excludes: readonly RootExcludeFolder[]): string | null {
+  const hit = excludedBy(path, excludes)
+  return hit ? hit.name : null
 }
 
 /**
@@ -269,7 +335,13 @@ export function buildOrderEntries(input: RootModelInput): RootOrderEntry[] {
 
 /** 整张根模型（`ModuleRootModel` 的等价物）。 */
 export function buildRootModel(input: RootModelInput): ModuleRootModel {
-  const urls = ['', ...(input.contentRoots ?? []).map(normalizeRootPath).filter(Boolean)]
+  // 内容根：工作区根那条地板（文件头第 2 条不等价）+ 链接进来的构建工程目录 / 调用方显式给的 `contentRoots`。
+  // 后者之间先过 `mergeContentRoots` 的祖先规则（外层盖住内层时不再挂内层那条，
+  // `MavenRootModelAdapterLegacyImpl.java:102`＋`:108` 的 `isEqualOrAncestor`），所以
+  // 「同时链接了 `Build` 与 `Build/sub`」只出一条 `Build`。
+  const extra = mergeContentRoots([...(input.contentRoots ?? []), ...(input.buildProjectDirs ?? [])])
+    .filter(url => url !== '')
+  const urls = ['', ...extra]
   const configured = [...new Set((input.sourcePaths ?? []).map(normalizeRootPath).filter(Boolean))]
   // 一条源根只归**最长匹配**的那条内容根（上游 `ContentEntry` 各管自己根下的文件夹，
   // `ContentEntry.java:63` 的 getSourceFolders 不会把邻居根下的东西算进来）。
@@ -277,7 +349,8 @@ export function buildRootModel(input: RootModelInput): ModuleRootModel {
     const under = !url || path === url || path.startsWith(`${url}/`)
     return under && url.length > best.length ? url : best
   }, '')
-  const contentEntries = urls.map(url => buildContentEntry({ ...input, sourcePaths: configured.filter(path => ownerOf(path) === url) }, url))
+  const contentEntries = urls.map(url => buildContentEntry(
+    { ...input, sourcePaths: configured.filter(path => ownerOf(path) === url) }, url, urls))
   return { moduleName: input.moduleName, contentEntries, orderEntries: buildOrderEntries(input) }
 }
 
@@ -368,7 +441,13 @@ export function rootModelRows(model: ModuleRootModel, known: boolean): RootModel
     if (entry.excludes.length) {
       rows.push({ key: `exgroup:${entry.url}`, depth: 1, text: `排除根（${entry.excludes.length}）`, count: null })
       for (const folder of entry.excludes) {
-        rows.push({ key: `exclude:${folder.path}`, depth: 2, text: folder.path, count: known ? folder.fileCount : null, comment: `按目录名「${folder.name}」排除` })
+        // 两条来源说得清：目录名表那条说名字，编译输出那条说「输出」（出处见 RootExcludeFolder.rule）。
+        // key 带内容根：同一个目录可以在两条内容根下各被排除一次，不带根就会撞出重复的 v-for key
+        // （本仓真机踩过「多根 ⇒ key 重复 ⇒ 渲染静默失效」那一类，见 `exclude:` 行的 key 形状判据）。
+        rows.push({
+          key: `exclude:${entry.url}:${folder.path}`, depth: 2, text: folder.path, count: known ? folder.fileCount : null,
+          comment: folder.rule === 'output' ? '编译输出目录（不参与内容）' : `按目录名「${folder.name}」排除`,
+        })
       }
     }
   }

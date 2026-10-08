@@ -251,7 +251,10 @@ test('编辑嵌套规则真的落回模型：设置页 → 宿主 → FileTree �
   assert.match(tree, /compactDirs: \(\) => sharedSortSettings\.value\.compactDirectories \?\? false/)
   assert.match(tree, /treeHost\.value\.nesting\.rules\],\s*\n?\s*\(\) => \{ void model\.refresh\(\) \}/, '改设置要整树重建（ConfigureFilesNestingAction.kt:58）')
   const model = read('../src/projectTreeModel.ts')
-  assert.match(model, /nestSiblings\(entries, nestingRules\(\)\)/)
+  // 2026-10-07 epclose2：折叠前先过 `com.intellij.treeStructureProvider` EP（无 provider 时恒等），
+  // 内建 `nestSiblings` 仍是那一步折叠本体。
+  assert.match(model, /const providers = modifyProjectTreeChildren\(null, entries\.map\(toProviderNode\), \{/)
+  assert.match(model, /return nestSiblings\(providers\.map\(fromProviderNode\), nestingRules\(\)\)/)
   assert.match(model, /const compactOf = \(entry: Entry\): Entry =>/)
 })
 
@@ -349,4 +352,53 @@ test('递归展开与全部展开也开「文件嵌套」的父行（不是只�
   const source = read('../src/projectTreeModel.ts')
   assert.match(source, /if \(entry\.kind !== 'directory'\) \{[\s\S]*?hasNested\(entry\.path\)/,
     '批量展开的目录判据必须在文件行这一支也让位给「有嵌套子行」')
+})
+
+// 「全部折叠」的保留层（`ptree3` 桶 §8.4 登记过这条缺陷、没跑改动）：上游那一格留开不是
+// `DefaultTreeExpander` 定的，而是项目视图自己覆写的 —— pvtree5 复开过的坐标：
+// `platform/lang-impl/src/com/intellij/ide/projectView/impl/AbstractProjectViewPane.java:803-806`
+// （`super.collapseAll(tree, false, keepSelectionLevel)`，泛用那份 `DefaultTreeExpander.kt:53-55` 给的是
+// strict=**true**）→ `platform/platform-api/src/com/intellij/util/ui/tree/TreeUtil.java:892-925`
+// 的 `:911` `if (!strict && row == 0) break` ⇒ 只有**第 0 行**豁免折叠。
+// 生产里第 0 行就是项目根（`src/App.vue:2101` 与 `src/components/ToolWindowView.vue:260` 都传
+// `:project-name` ⇒ 恒有那一个合成根），所以「留住项目根那一格」= 留住第 0 行。
+test('全部折叠留住顶层那一排，不是把项目根也一起收掉', async () => {
+  const { model, errors } = mountedModel()
+  await model.expandAll()
+  assert.deepEqual(model.rows.value.map(row => row.entry.name),
+    ['demo', 'docs', 'readme.md', 'src', 'components', 'ui', 'a.ts', 'b.ts', 'README.md'])
+  model.select('src/components/ui/a.ts')
+  model.collapseAll()
+  assert.deepEqual(model.rows.value.map(row => row.entry.name), ['demo', 'docs', 'src', 'README.md'],
+    '项目根这一格保持展开（它是 prohibited），底下的顶层行各占一行、都是收着的')
+  assert.equal(model.selected.value, '', '选中退回那一格（上游 collapseAll 之后 internalSelect）')
+  assert.deepEqual(errors, [], '全程不该去桥那边取新的目录')
+  // 收起的那些深行里不能再有 a.ts 的祖先被留着
+  assert.equal(model.rows.value.some(row => row.entry.name === 'components'), false)
+})
+
+// 没有项目根行的那一支（嵌入树）：`TreeUtil.java:899-900` 的 `if (!tree.isRootVisible()) minCount++`
+// 只把「允许折叠的最小路径长度」往下挪一格，**留开的那一行仍然是第 0 行**（`:911` 的 break 按行号算）
+// ⇒ 本仓这一支留住的是选中行所属的第一行（这里就是 `src`）。
+// 已知分歧（登记在 `docs/wiring-requests-2026-10-06-pvtree5.md` R-3，本批不擅自改行为）：上游
+// `:916` 的 `if (pathCount == minCount && row > 0) strict = true` 在**有多个顶层行**时（这里 `main.ts`
+// 也是顶层行）会把 strict 翻成 true ⇒ 第 0 行也一起折掉；本仓 `collapseAll()` 留的是「选中行的
+// 顶层祖先」。两者只在单项目根（= 生产形状）下等价。
+test('嵌入树（没有项目根行）折叠时留住选中行所属的那一格', async () => {
+  const entries = [directory('src'), file('main.ts')]
+  const settings = { sortKey: 'BY_NAME', foldersAlwaysOnTop: true, autoscrollToSource: false,
+    autoscrollFromSource: false, openInPreviewTab: false }
+  const model = createProjectTreeModel({
+    entries: () => entries, synthetic: () => [], depth: () => 0, projectName: () => undefined,
+    sortSettings: () => settings, nestingRules: () => [], error: message => { throw new Error(message) },
+  })
+  model.children.set('src', [file('src/app.ts'), file('src/index.ts')])
+  await model.expandAll()
+  assert.deepEqual(model.rows.value.map(row => row.entry.name), ['src', 'app.ts', 'index.ts', 'main.ts'])
+  model.select('src/app.ts')
+  model.collapseAll()
+  assert.deepEqual(model.rows.value.map(row => row.entry.name), ['src', 'app.ts', 'index.ts', 'main.ts'],
+    'src 是第 0 行（上游 `TreeUtil.java:911` 那一支豁免）⇒ 它不进折叠表，名下那两行叶子照常看得见；main.ts 收成关')
+  assert.equal(model.expanded.has('src'), true)
+  assert.equal(model.expanded.has('main.ts'), false, '没被留住的那一格才是真的收起了')
 })

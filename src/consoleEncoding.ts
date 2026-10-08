@@ -1,10 +1,22 @@
-// 控制台输出编码（上游 `ConsoleEncodingComboBox`，
-// `platform/lang-impl/src/com/intellij/execution/console/ConsoleEncodingComboBox.kt`）。
+// 控制台输出编码（上游 `ConsoleEncodingComboBox`）。
 //
-// 上游的组合框给控制台选字符集（默认「系统编码」+ 收藏 + 全部可用字符集），选完由
-// `ConsoleViewImpl.setEncoding` 重新解码/显示。本仓的输出是**原始字节**（宿主 base64 回传，
-// 子进程按自己的代码页打印），所以这里的编码选择直接决定 `src/runInstances.ts` 里
-// `TextDecoder` 用哪套字符集解码 —— 选 GBK 才能正确显示 Windows 中文控制台程序的输出。
+// 上游的组合框本体 `platform/lang-impl/src/com/intellij/execution/console/ConsoleEncodingComboBox.kt:20`
+// （列表三档就是它 `:51-52` 那两条分隔线：默认「系统编码」（`:30` 的 `encoding.name.system.default`
+// + `CharsetToolkit.getDefaultSystemCharset()`）、收藏 `firstFavorite`、其余全部 `firstMore`）。
+//
+// **订正（2026-10-06 execui2）**：这里原先写「选完由 `ConsoleViewImpl.setEncoding` 重新解码/显示」——
+// 那份树里**没有这个方法**：`platform/lang-impl/src/com/intellij/execution/impl/ConsoleViewImpl.kt` 与
+// 接口 `platform/execution/src/com/intellij/execution/ui/ConsoleView.java` 都 grep 不到 `setEncoding`，
+// 把 `platform/lang-impl/src/com/intellij/execution/`、`platform/execution/src/com/intellij/execution/`、
+// `platform/execution-impl/src/com/intellij/execution/` 三棵目录一起 grep 也是零命中。
+// 上游那个选择的真身是**应用级默认**，落在编码管理器上，不在每个控制台身上：
+// 取值 `platform/lang-impl/src/com/intellij/execution/console/ConsoleConfigurable.java:116-125`
+// （`getDefaultConsoleEncodingReference()`，真身 `platform/platform-impl/src/com/intellij/openapi/vfs/encoding/EncodingManagerImpl.java:360`）、
+// 应用同文件 `:157-160`（`setDefaultConsoleEncodingReference`）、回填 UI 同文件 `:183-190`。
+// 与 `src/runInstances.ts` 文件头那段（同一个坐标，上一批已按上游改过）现在口径一致。
+//
+// 本仓的输出是**原始字节**（宿主 base64 回传，子进程按自己的代码页打印），所以这里的编码选择直接决定
+// `src/runInstances.ts` 里 `TextDecoder` 用哪套字符集解码 —— 选 GBK 才能正确显示 Windows 中文控制台程序的输出。
 //
 // 与上游的两点差异（如实记录，不假装一致）：
 //   · 列表是固定的一组常用字符集（浏览器 TextDecoder 支持的那批），不是「全部可用字符集 + 收藏」；

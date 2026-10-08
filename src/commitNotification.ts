@@ -60,10 +60,9 @@ export function commitNotificationRows(commitMessage: string, feedback: readonly
   return rows
 }
 
-/**
- * `CountChangesIgnoringChangeLists` (`:128`) is `HashSet(changes).size` — two change lists that
- * contain the same path must not be counted twice.
- */
-export function countCommittedPaths(paths: readonly string[]): number {
-  return new Set(paths).size
-}
+// 2026-10-06 partialcommit 收尾删掉这里的 `countCommittedPaths()`：它数的是"**路径**去重后有几条"，
+// 而上游 `ShowNotificationCommitResultHandler.kt:42-43` + `:128` 数的是 `HashSet(changes).size` =
+// **这次包含的变更**条数。一次重命名交出去是两朵 pathspec、一条变更 ⇒ 按路径数会把它报成"2 个文件已提交"。
+// 面板唯一的调用点（`SourceControl.vue` 的 `reportCommitResult`）已改走 `src/commitScope.ts` 的
+// `committedChangeCount`（同一份 `HashSet` 口径，判据在 `tests/commit-scope.test.mjs`），
+// 这里留着它就是一个没有生产消费方的第二把尺子。

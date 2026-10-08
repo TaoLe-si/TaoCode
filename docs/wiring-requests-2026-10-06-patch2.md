@@ -147,3 +147,14 @@ apply 的撤销对话框（`UndoApplyPatchDialog`）。
 
 - `docs/inventory/verdict-vcs.md:163` 说的 `native/history_diff.cpp:42` 的 `build_script`：本批只核到同文件 `:95` 的 `render_hunks`，没有逐行确认 `:42` 是不是那个函数（写「请按现状再核」而不是断言它错）。
 - 上游 `MergeThreesideViewer.model.hasNonConflictedChanges(side)` 的逐侧语义，本仓没有三份内容的实时模型（输入是文件里的冲突标记），无法逐侧复刻；只做了整文件一档。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- 请求 A–E —— 判词与锚点订正（`scripts/verdict_table.py` / `docs/inventory/*`），非本 lane。说明 F —— 保持现状。
+
+结论：零接线。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

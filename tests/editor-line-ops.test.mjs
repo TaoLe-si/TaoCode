@@ -1,13 +1,16 @@
-// 行操作一族（排序行 / 删除重复行 / 反串行）的判据。
+// 行操作一族（排序行 / 删除重复行 / 反串行 / 饥饿退格）的判据。
 // 上游：`AbstractPermuteLinesHandler.java:18-101` + 三个 `permute` 实现，
-// 动作注册 `intellij.platform.ide.impl.actions.xml:262-264`，菜单次序 `PlatformActions.xml:495-496`。
+// 动作注册 `intellij.platform.ide.impl.actions.xml:262-264`，菜单次序 `PlatformActions.xml:495-496`；
+// 饥饿退格 `HungryBackspaceAction.java:29-50` + `CharArrayUtil.java:136-151`（`intellij.platform.ide.impl.actions.xml:177`）。
+// C-6 同族的「光标处的词」三条不在本模块（已在 `src/selectWordAtCaret.ts`，判据 `select-word-at-caret.test.mjs`）：
+// 这里只断言模块头把它指向那一份，防止再写第二份。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { EditorState } from '@codemirror/state'
 import {
-  compareLinesNatural, lineIndexOf, permuteTargetRange, placePermutation,
-  reversePermutation, sortPermutation, uniquePermutation,
+  compareLinesNatural, hungryBackspace, isHungryWhitespace, lineIndexOf, permuteTargetRange,
+  placePermutation, reversePermutation, shiftBackward, sortPermutation, uniquePermutation,
 } from '../src/editorLineOps.ts'
 import { editingCommands } from '../src/editorCommands.ts'
 
@@ -178,4 +181,77 @@ test('落点留痕：模块头引了三个动作与 AbstractPermuteLinesHandler�
   assert.match(src, /ReverseLinesAction\.java:11-19/)
   assert.match(src, /intellij\.platform\.ide\.impl\.actions\.xml:262-264/)
   assert.match(src, /ActionsBundle\.properties:173-175/)
+})
+
+// ── 饥饿退格（`HungryBackspaceAction.java:29-50`）─────────────────────────────────────
+// 上游判据只有两条：`!hasSelection && StringUtil.isWhiteSpace(text.charAt(caretOffset - 1))`
+// （`:41`，空白口径 = `Strings.java:729-731` 的 `\n`/`\t`/` ` 三个字符），命中才做 `:42-43` 的扫+删。
+
+test('空白口径就是三个字符：\\r 与 NBSP 都不算（Strings.java:729-731，不是 Character.isWhitespace）', () => {
+  for (const ch of [' ', '\t', '\n']) assert.equal(isHungryWhitespace(ch), true, JSON.stringify(ch))
+  for (const ch of ['\r', '\u00A0', '\v', '\f', 'x']) {
+    assert.equal(isHungryWhitespace(ch), false, JSON.stringify(ch))
+  }
+})
+
+test('shiftBackward：往回跳到第一个不在集合里的下标；扫到头返回 -1；上界越界原样返回（:137）', () => {
+  assert.equal(shiftBackward('a  b', 2, '\t \n'), 0, '两格空白都跳过，停在 a 上')
+  assert.equal(shiftBackward('   ', 2, '\t \n'), -1, '全是空白 ⇒ 一路到 -1')
+  assert.equal(shiftBackward('ab', 1, ' '), 1, '第一个字符就不在集合里 ⇒ 原地')
+  assert.equal(shiftBackward('ab', 5, ' '), 5, ':137 maxOffset >= length 原样返回')
+})
+
+test('饥饿退格：光标前是一段空白 ⇒ 连制表符与换行一起，一次删到第一个非空白（:42-43）', () => {
+  assert.deepEqual(hungryBackspace('ab\n   ', 6), { kind: 'delete', from: 2, to: 6 })
+  assert.deepEqual(hungryBackspace('x\t  ', 4), { kind: 'delete', from: 1, to: 4 })
+  assert.deepEqual(hungryBackspace('a\n', 2), { kind: 'delete', from: 1, to: 2 }, '只有换行本身')
+})
+
+test('饥饿退格：整篇都是空白 ⇒ 从 0 删到光标（shiftBackward 的 -1 再 +1）', () => {
+  assert.deepEqual(hungryBackspace('   ', 3), { kind: 'delete', from: 0, to: 3 })
+  assert.deepEqual(hungryBackspace('\t\n ', 3), { kind: 'delete', from: 0, to: 3 })
+})
+
+test('饥饿退格：末行没有换行符 / 单行文档也照吃（删的是行尾那一小段，不是整行）', () => {
+  assert.deepEqual(hungryBackspace('value = 1 ', 10), { kind: 'delete', from: 9, to: 10 })
+  assert.deepEqual(hungryBackspace('let x = 1;\n    ', 15), { kind: 'delete', from: 10, to: 15 },
+    '末行只有空白 ⇒ 连上一行那个换行一起删掉')
+})
+
+test('饥饿退格：前一个字符不是那三个空白 ⇒ 交给普通退格（:41 的第二个条件）', () => {
+  assert.deepEqual(hungryBackspace('abc', 3), { kind: 'plain' })
+  assert.deepEqual(hungryBackspace('a\nb', 3), { kind: 'plain' })
+})
+
+test('饥饿退格：有选区时也是普通退格 —— 饥饿档只认无选区（:41 的 !hasSelection）', () => {
+  assert.deepEqual(hungryBackspace('ab   ', 5, { from: 0, to: 3 }), { kind: 'plain' })
+  assert.deepEqual(hungryBackspace('   ', 3, { from: 1, to: 2 }), { kind: 'plain' })
+})
+
+test('饥饿退格：光标在文档开头什么都不做（:34-36）；空文档与越界同理（越界是本仓护栏）', () => {
+  assert.equal(hungryBackspace('', 0), null)
+  assert.equal(hungryBackspace('   ', 0), null, '光标在 0 —— 前面没有东西可删')
+  assert.equal(hungryBackspace('abc', -1), null)
+  assert.equal(hungryBackspace('abc', 4), null, '上游没有这个状态，本仓按不动作处理')
+})
+
+test('饥饿退格的删除范围应用到文档就是新文档（宿主接线用同一段；plain 档文档不动）', () => {
+  const apply = (text, caret, selection) => {
+    const plan = hungryBackspace(text, caret, selection)
+    return plan?.kind === 'delete' ? text.slice(0, plan.from) + text.slice(plan.to) : text
+  }
+  assert.equal(apply('let x = 1;\n    ', 15), 'let x = 1;')
+  assert.equal(apply('ab\n   ', 6), 'ab')
+  assert.equal(apply('keep  me', 8), 'keep  me', 'plain = 这一条不吞键，交给普通退格')
+})
+
+test('落点留痕：模块头记了饥饿退格的每条依据，并把「光标处的词」指向既有模块（不复写第二份）', () => {
+  const src = readFileSync('src/editorLineOps.ts', 'utf8')
+  assert.match(src, /HungryBackspaceAction\.java:29-50/)
+  assert.match(src, /StringUtil\.java:1250-1252/)
+  assert.match(src, /Strings\.java:729-731/)
+  assert.match(src, /CharArrayUtil\.java:136-151/)
+  assert.match(src, /intellij\.platform\.ide\.impl\.actions\.xml:177/)
+  assert.match(src, /selectWordAtCaret\.ts/, 'C-6 的「光标处的词」三条已在那一份，这里只留指针')
+  assert.doesNotMatch(src, /export function selectWordAtCaret/, '不许出现第二份实现')
 })

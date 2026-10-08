@@ -1,13 +1,26 @@
-// 抑制动作（上游 `platform/lang-impl/src/com/intellij/codeInsight/intention/` 里 `SuppressIntentionAction`
-// 那一族：Java 的 `@SuppressWarnings`、`//noinspection` 注释，以及各语言的等价抑制形式）。
+// 抑制动作（上游 `platform/analysis-api/src/com/intellij/codeInspection/SuppressIntentionAction.java:19-98`
+// 抽象类：`:19` 声明 + `Iconable, IntentionAction`；`:38-40` `startInWriteAction() = true`（写命令里落编辑，
+// 由 daemon 在写完之后再跑一遍）；`:48-53` 的 `invoke` 拿 caret 位置解析 element 后 delegate 给抽象重载；
+// `:66-70` 的 `isAvailable` 决定灯泡亮不亮；`:83-85` `isSuppressAll()` 与 `:87-91` `getElement`（走 caret，不是诊断行）。
+// 注释式抑制的**基础设施**在同一包的另一枚文件里：`platform/analysis-impl/src/com/intellij/codeInspection/SuppressionUtil.java:31-38`
+// 定 `//noinspection <id>[, <id>]*` 与 `//file:noinspection …` 两条正则，`:14` 的 `SUPPRESS_INSPECTIONS_TAG_NAME`
+// 由 `platform/core-impl/src/com/intellij/codeInspection/SuppressionUtilCore.java:9` 给出，字面串就是 `noinspection`。
+// 注解式那一支本仓只做降级：上游的 `@SuppressWarnings("…")` 由 `platform/analysis-impl/…/SuppressIntentionActionFromFix.java`
+// 与 Java 侧的 `SuppressionFixUtil` 走 PSI 找到** enclosing declaration** 再插注解，本仓没有 PSI ⇒ 只把它插到问题行的**上一行**（等价于「声明行紧邻其上」的常见形状），
+// 不假称自己找到了声明。
+//
+// 派单原话里的 `codeInsight/SuppressIntentionAction` 是**假坐标**（2026-10-06 复算：
+// `find . -name "SuppressIntentionAction*"` 在参考树只命中 `codeInspection/`，`codeInsight/intention/` 里
+// 只有 `QuickFixFactory.java`/`AddAnnotationFix.java` 那一族）；本仓头注释**以前**也写的这条假路径，已订正。
 //
 // 本仓现状：Alt+Enter 只列语言服务给的 `textDocument/codeAction`，本地检查（如 `src/junitInspections.ts`
 // 的 JUnit 规则）报出来的条目**没有抑制入口** —— 用户只能关掉整条规则。这个模块把「按语言/来源
 // 生成抑制文本」落成纯规则：给出 `insertText` 与插入位置，编辑器侧只做一次文本插入。
 //
-// 覆盖的形态（上游对应类）：
-//   · Java  `//noinspection <Id>`（`SuppressIntentionAction` 的注释式）与注解式 `@SuppressWarnings("…")`；
-//   · JS/TS `// eslint-disable-next-line <rule>`（ESLint 抑制）与 `// @ts-ignore`；
+// 覆盖的形态（对应上游/生态里真实存在的抑制语法）：
+//   · Java  `//noinspection <Id>`（`SuppressionUtil.java:31-33` 的 `SUPPRESS_IN_LINE_COMMENT_PATTERN`）
+//     与注解式 `@SuppressWarnings("…")`（本仓降级为上一行，见上一段）；
+//   · JS/TS `// eslint-disable-next-line <rule>`（ESLint 官方抑制）与 `// @ts-ignore`（TypeScript 官方抑制）；
 //   · Python `# noqa: <code>`（flake8）与 `# type: ignore`（mypy）；
 //   · C/C++ `// NOLINT(<check>)`（clang-tidy）与 `#pragma clang diagnostic ignored`；
 //   · Go    `//nolint:<linter>`。
@@ -66,9 +79,26 @@ export function suppressOptionsFor(problem: SuppressibleProblem, language: strin
     case 'typescript':
     case 'javascript': {
       const options: SuppressOption[] = []
-      if (tool === 'eslint' && ruleSuffix) options.push({ id: 'eslint-disable-next-line', title: `抑制本条（// eslint-disable-next-line ${ruleSuffix}）`, insertText: `// eslint-disable-next-line ${ruleSuffix}`, placement: 'line-above' })
-      else options.push({ id: 'eslint-disable-next-line', title: '抑制下一行（// eslint-disable-next-line）', insertText: '// eslint-disable-next-line', placement: 'line-above' })
-      options.push({ id: 'ts-ignore', title: '抑制类型错误（// @ts-ignore）', insertText: '// @ts-ignore', placement: 'line-above' })
+      // 2026-10-06 本轮订正（batch-inspections2 A3）：旧版无论 `tool` 是不是 eslint，都**先**摆
+      // `// eslint-disable-next-line`。tsserver 报的诊断（`source: 'ts'` / `'typescript'`）**不认**这一条 ⇒
+      // 用户按 Alt+Enter 挑了第一条、插完仍报同一个错，是**假控件**。
+      // 现在按 `tool` 分派：eslint 来源 → eslint-disable 优先 + ts-ignore 备档；
+      // tsserver/未识别来源 → 只出真的那一支（`@ts-ignore`），eslint 那条仅在带规则名时**降为备档**
+      // （真实工作区里 tsserver 与 eslint 常并跑，允许一键切到 eslint 抑制；但不再把它摆第一条冒充主项）。
+      if (tool === 'eslint') {
+        options.push({
+          id: 'eslint-disable-next-line',
+          title: ruleSuffix ? `抑制本条（// eslint-disable-next-line ${ruleSuffix}）` : '抑制下一行（// eslint-disable-next-line）',
+          insertText: ruleSuffix ? `// eslint-disable-next-line ${ruleSuffix}` : '// eslint-disable-next-line',
+          placement: 'line-above',
+        })
+        options.push({ id: 'ts-ignore', title: '抑制类型错误（// @ts-ignore）', insertText: '// @ts-ignore', placement: 'line-above' })
+      } else {
+        // `@ts-ignore` 不带规则名（它抑制这一行**所有**类型错，上游 TypeScript 手册的语义），标题里塞 code 会误导；
+        // eslint 那条仍带规则名，因为 eslint-disable 就是要按规则停。
+        options.push({ id: 'ts-ignore', title: '抑制类型错误（// @ts-ignore）', insertText: '// @ts-ignore', placement: 'line-above' })
+        if (ruleSuffix) options.push({ id: 'eslint-disable-next-line', title: `抑制本条（// eslint-disable-next-line ${ruleSuffix}）`, insertText: `// eslint-disable-next-line ${ruleSuffix}`, placement: 'line-above' })
+      }
       return options
     }
     case 'python': {

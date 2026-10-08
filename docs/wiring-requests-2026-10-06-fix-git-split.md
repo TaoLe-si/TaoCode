@@ -92,3 +92,14 @@
 我已把它订正并在注释里留痕（`src/vcsLogGraph.ts:93`）。
 如果你希望这类"裸文件名:行号"也被拦，需要动的是 `tests/source-citation-anchors.test.mjs` 的收集器
 （独占文件，我没动）：可以让它对**同段里已给出完整目录**的裸文件名做一次目录继承后核界。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- 全部目标为 `tests/module-size.test.mjs` / `CMakeLists.txt` / `native/git*` / `.tools/*` —— 均非本 lane 可改面。跳过给 native owner。
+
+结论：零接线，未改任何文件。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线，未改任何文件。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

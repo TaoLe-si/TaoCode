@@ -70,7 +70,12 @@ test('消费链：semanticActions 的 openCodeActions 把本地条目与 LSP 条
   const source = readFileSync(new URL('src/semanticActions.ts', root), 'utf8')
   assert.match(source, /from '\.\/localIntentions(?:\.ts)?'/)
   assert.match(source, /suppressionActionsFor\(/)
-  assert.match(source, /\.\.\.localActions/)
+  // 2026-10-06 接线后合流不再按「哪段代码先写」排，改按上游档位排（CachedIntentions.java:354-360 先修复后意图），
+  // 所以这里钉的是「两半都进了同一张表、并由规则判档」，不再钉旧的 `...localActions` 拼接形状。
+  assert.match(source, /\{ group: 'fix', rows: \[[\s\S]*?\.\.\.localFixes\] \}/, 'LSP 条目与 JUnit 修复没并进 fix 档')
+  assert.match(source, /\{ group: 'intention', rows: \[\.\.\.contributed, \.\.\.suppressions\] \}/,
+    '抑制条目没并进 intention 档')
+  assert.match(source, /orderIntentionSections<LspCodeAction>\(\[[\s\S]*?\]\)\.flatMap/, '档位顺序没交给 src/intentionList.ts')
 })
 
 test('消费链：本地条目这一层同时喂 LSP 诊断与本地检查诊断（JUnit 修复才到得了 Alt+Enter）', () => {

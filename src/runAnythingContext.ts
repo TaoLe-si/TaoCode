@@ -19,11 +19,10 @@
 // 文案：中文是本仓口径；英文原文与 bundle key 记在常量注释里，全部出自
 // `platform/platform-api/resources/messages/IdeBundle.properties:1183-1189`。
 //
-// **没有宿主（具体卡点）**：`run.start` 本身吃 `cwd`（`src/runActions.ts:417` 就传了
-// `cwd: workspace.value.root`），但那条函数把 cwd **写死成工作区根**、签名里没有 cwd 形参
-// （`src/runActions.ts:396`），改它要动执行域的 `src/runActions.ts`（本 lane 未获授权）。
-// 对话框的 emit 也只透传 command（`src/components/RunAnythingDialog.vue:43`）。
-// ⇒ 这里只落规则与表，**上下文选择器不渲染**（playbook §3：没有消费链路就不画控件）。
+// **宿主链路（已接）**：`src/runActions.ts:491` 的 `runExternalTool(command, name, cwd?)` 现在收
+// 调用方给的目录，`:515` 落 `cwd: cwd?.trim() || workspace.value.root` —— 没给才退回工作区根。
+// 对话框那一头在 `src/components/RunAnythingDialog.vue:153-154`：没选过上下文就**不带 cwd 键**发出。
+// 上游对应：`RunAnythingContextUtils.kt:14-21` 的 `getPath()` 交给执行侧当 working directory。
 
 /** `IdeBundle` L1184 `run.anything.context.project` = `Project`。 */
 export const CONTEXT_LABEL_PROJECT = '项目'
@@ -87,14 +86,21 @@ export function contextPath(context: RunAnythingContext, moduleRoots: Readonly<R
 /**
  * `ModuleContext` 的描述（`RunAnythingExecutingContext.kt:21-26`）：
  * 模块内容根**相对项目根**的路径（`FileUtil.getRelativePath(..., '/')`，`:23-24`）：
- * `contentRoots` 恰好一个时用那一个，否则退回 `getModuleDirPath`。
- * 只有**项目根拿不到**（上游 `guessProjectDir()` 为 null，`:22`）才落到
- * `run.anything.context.project.undefined`；相对路径为空串就是空串（内容根 == 项目根），
- * 那是合法结果，不是「未定义」。
+ * `contentRoots` 恰好一个时用那一个，否则退回 `getModuleDirPath`
+ * （`platform/projectModel-api/src/com/intellij/openapi/module/ModuleUtilCore.java:287-289` = `.iml` 的父目录）。
+ * 上游那一串只有一个 `?:`（`:22` 与 `:25`），它兜住的是**两种**拿不到：
+ *   · 项目根本身为 null（`guessProjectDir()` 为空，`:22`）；
+ *   · 相对路径算不出来 —— `FileUtil.getRelativePath` 转 `FileUtilRt.getRelativePath`
+ *     （`platform/util/src/com/intellij/openapi/util/io/FileUtil.java:105-106`），那一条对
+ *     「与项目根没有公共前缀」返回 null（`platform/util-rt/src/com/intellij/openapi/util/io/FileUtilRt.java:418`）。
+ * 两种都落到 `run.anything.context.project.undefined`。**算得出的相对路径一律照原样显示**：
+ * 内容根 == 项目根时上游给的是 `.`（同文件 `:404-405`），本仓同一情况按「工作区相对路径」口径给空串
+ * （`contextPath` 的项目档也是空串，见 `:80` 那段）—— 两者都是**合法结果**，不是「未定义」；
+ * 只有 `null` 才是。判据 `moduleDescription(true, '')` 钉的就是后半句。
  */
 export function moduleDescription(projectRootKnown: boolean, relativeRoot: string | null): string {
-  if (!projectRootKnown) return CONTEXT_DESCRIPTION_UNDEFINED
-  return relativeRoot ?? ''
+  if (!projectRootKnown || relativeRoot === null) return CONTEXT_DESCRIPTION_UNDEFINED
+  return relativeRoot
 }
 
 export interface AllContextsInput {
@@ -141,12 +147,20 @@ export function allRunAnythingContexts(input: AllContextsInput): RunAnythingCont
  * 那个方法（`platform/util/src/com/intellij/openapi/util/io/FileUtil.java:1265-1282`）在
  * **非 Unix 上原样返回**（`:1273` 的 `isUnix || !unixOnly`，单参版传 `unixOnly = true`），
  * Windows 宿主上永远拿不到 `~` 缩写 —— 这里照抄这个平台差异，不在 Windows 上造 `~`。
+ * 留痕（2026-10-06 本批核对）：原写「家目录本身也折成 `~`」、实际**不会** —— 那一族的祖先判定用的是
+ * `isAncestor(userHomeDir, projectDir, strict)` 且 `strict` 传的是 `true`（`:1276`），而 strict 档在
+ * **两段长度相等时返回 `ThreeState.NO`**（`:180-182`，注释 `:130`「if {@code false} then this method returns
+ * true if ancestor equals to file」反过来说明 strict=true 不含相等）⇒ 路径 == 家目录时整条折叠不成立、
+ * 原样返回。只有**家目录以下的后代**才折成 `~/子路径`（`:1277`，`File.separator` 在 Unix 上就是 `/`）。
+ * 派单提到的 `UserHomeDirectoryUtil` 在参考树里**不存在**（`find . -name "UserHomeDirectoryUtil*"` 0 命中，
+ * 全树 grep 只命中 `python/installer/.../CondaInstallManager.kt` 里的安装参数字面量 `CurrentUserHomeDirectory`）
+ * ⇒ 无法核实，按上面那一条真族实现。
  */
 export function recentDirectoryLabel(path: string, isUnix = false, userHome?: string): string {
   if (!isUnix || !userHome) return path
   const normalized = path.replace(/\\/g, '/')
   const home = userHome.replace(/\\/g, '/').replace(/\/$/, '')
-  if (normalized === home) return '~'
+  // 相等那一档**不折**（strict 祖先判定，见上面 `:1276` 与 `:180-182`），所以下面只认「家目录 + 分隔符」开头的。
   return normalized.startsWith(`${home}/`) ? `~/${normalized.slice(home.length + 1)}` : path
 }
 
@@ -202,4 +216,38 @@ export function pushRecentDirectory(
   if (next.length >= limit) next.splice(0, next.length - limit + 1)
   next.push(path)
   return next
+}
+
+/**
+ * 宿主那半的数据折算：一个 Gradle 子项目 = 一个模块根。本仓没有 `ModuleManager` / `.iml` 模型
+ * （上面 `:50-51` 那条已写明），而 IDEA 导入 Gradle 时就是一个子项目一个模块，所以候选来源与上游
+ * `RunAnythingChooseContextAction.kt:242-249` 同档（`ModuleManager.getInstance(project).modules`），
+ * 目录取上游 `ModuleContext.getPath() = module.guessModuleDir()?.path`
+ * （`RunAnythingContextUtils.kt:18`）在本仓的等价物：**相对工作区根**的路径。
+ *
+ * `node.path === ':'` 是 Gradle 的根项目 = 工作区根本身 = 上游表里的第一档 `ProjectContext`
+ * （`RunAnythingProvider.java:154-163` 注释 `:160` "The first context will be chosen as default context."），
+ * 不重复列一档。链接的项目可能落在工作区子目录里 ⇒ 那一层前缀要补上。
+ */
+export function gradleSubprojectRoots(
+  linked: readonly { directory: string; result: { projects: readonly { path: string; name: string }[] } }[],
+  root: string,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const project of linked) {
+    // 链接的 Gradle 项目可能落在工作区的子目录里，那一层前缀要带上，模块根才是「相对工作区根」的。
+    // 目录先归一到正斜杠：`workspace.root` 是正斜杠形态（`src/gradleHost.ts:175` 就是按 `directory + '/' + path`
+    // 拼的），而链接对话框给的是原生反斜杠路径 ⇒ 不归一就永远 `startsWith` 不上、前缀静默丢掉（= 跑错目录）。
+    const directory = project.directory.replace(/\\/g, '/')
+    let prefix = ''
+    if (root && directory.startsWith(root)) {
+      prefix = directory.slice(root.length).replace(/^\/+/, '')
+    }
+    for (const node of project.result.projects) {
+      if (node.path === ':') continue
+      const rel = [prefix, ...node.path.replace(/^:/, '').split(':').filter(Boolean)].filter(Boolean).join('/')
+      if (rel) out[node.name] = rel
+    }
+  }
+  return out
 }

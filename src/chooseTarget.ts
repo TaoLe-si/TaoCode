@@ -31,6 +31,7 @@
 import { wordAt } from './editorText.ts'
 import { baseName } from './filenameWidget.ts'
 import { speedSearchMatches } from './speedSearch.ts'
+import { allTargetNamesEqual, applyTargetPresentation } from './gotoDeclarationExtensionPoints.ts'
 
 /** LSP `Location` 在本仓的形状（`src/bridge.ts` 的 `LspLocation`）。 */
 export interface TargetLocation { path: string; line: number; character: number }
@@ -70,17 +71,22 @@ export function targetRow(target: TargetLocation, content: string | null): Choos
 /**
  * 目标表 → 行表。**同一个位置只留一条**：上游的 targets 是元素的集合、天然不重复，
  * 而 LSP 的 `Location[]` 允许同一个位置出现两次（服务器可以这么回）。
+ *
+ * 折完行模型后按 `com.intellij.gotoTargetPresentationProvider` 的贡献覆盖三段
+ * （`src/gotoDeclarationExtensionPoints.ts` 的 `applyTargetPresentation`；`differentNames`
+ * = 全表同名，照 `GotoTargetPresentationProvider.java:21-24` 的语义）；没有贡献时逐行原样返回。
  */
 export function chooseTargetRows(targets: readonly TargetLocation[], contents: ReadonlyMap<string, string | null>): ChooseTargetRow[] {
-  const rows: ChooseTargetRow[] = []
+  const pairs: { row: ChooseTargetRow; target: TargetLocation }[] = []
   const seen = new Set<string>()
   for (const target of targets) {
     const row = targetRow(target, contents.get(target.path) ?? null)
     if (seen.has(row.id)) continue
     seen.add(row.id)
-    rows.push(row)
+    pairs.push({ row, target })
   }
-  return rows
+  const differentNames = !allTargetNamesEqual(pairs.map(pair => pair.row))
+  return pairs.map(pair => applyTargetPresentation(pair.row, pair.target, differentNames))
 }
 
 /** 过滤用的名字（上游 `speedSearchText` = presentableText + " " + containerText）。 */

@@ -124,3 +124,16 @@ export function loadSetup(file, props = {}) {
 }
 
 export { placeholder }
+
+/**
+ * 用**与组件同一份**模块缓存求值一个相对仓库根的 .ts（判据与组件必须看到同一个模块级状态）。
+ *
+ * 为什么需要：`await import('../src/foo.ts')` 走的是 Node 的 ESM 装载器，夹具这边是
+ * `ts.transpileModule` + CommonJS，两边各一份实例 —— 组件读的模块级 ref 与测试灌进去的
+ * 那份不是同一个对象（`runAnythingRecentDirectories` 那一份缓存就是这么被喂的）。
+ */
+export function loadModule(file) {
+  const target = resolve(root, file)
+  if (!modules.has(target)) modules.set(target, evaluate(readFileSync(target, 'utf8'), target, loader(target)))
+  return modules.get(target)
+}

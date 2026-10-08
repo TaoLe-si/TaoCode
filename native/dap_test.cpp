@@ -299,6 +299,14 @@ void scenario_full_session() {
     check(number_at(variables[0], "reference") == 0, "a scalar has no child reference");
     check(flag_at(variables[1], "named") && number_at(variables[1], "reference") == 4000,
           "an expandable variable reports its child reference");
+    // 「按类型分组」与分页两个前端消费点读的就是这三个字段：`type` 非空才成组，
+    // `namedVariables`/`indexedVariables` 决定要不要发 `variables{start,count}` 取下一页。
+    // 整形必须把它们原样透出（缺字段不造键；`scopes` 那两个同名字段由 dap_values_test 钉）。
+    check(string_at(variables[1], "type") == "const char *", "the group-by-type key (type) survives on a variable");
+    check(number_at(variables[1], "namedVariables") == 1 && number_at(variables[1], "indexedVariables") == 5,
+          "namedVariables/indexedVariables survive on a variable");
+    check(!variables[0].contains("namedVariables") && !variables[0].contains("indexedVariables"),
+          "absent child counts must not be invented on a variable");
 
     // DAP `setVariable`（IDEA 的 XValue.setValue）：容器 reference、变量名、新值三者都要原样到达，
     // 响应只有一条变量（规范里没有 variables 数组），字段与 `variables` 的一条一致。
@@ -572,7 +580,8 @@ void scenario_conditional_breakpoints() {
 
     Waiter installed;
     client.set_breakpoints("dap/cond.cpp",
-                           Json::array({Json{{"line", 3}, {"condition", "i == 2"}},
+                           Json::array({Json{{"line", 3}, {"condition", "i == 2"}, {"hitCondition", "3"},
+                                             {"logMessage", "i={i}"}},
                                         Json{{"line", 4}, {"condition", ""}},
                                         Json{{"line", 0}, {"condition", "never"}},
                                         Json{{"condition", "no line"}}}),
@@ -583,12 +592,13 @@ void scenario_conditional_breakpoints() {
           "only the two valid lines are sent: " + installed.result.dump());
     const auto& notes = installed.result.at("messages");
     check(notes.is_array() && notes.size() == 1 && notes[0].at("line").get<int>() == 3 &&
-              string_at(notes[0], "message") == "cond:i == 2",
-          "the condition reached the adapter, got: " + notes.dump());
+              string_at(notes[0], "message") == "condition=i == 2,hitCondition=3,logMessage=i={i}",
+          "condition, hitCondition and logMessage all reached the adapter, got: " + notes.dump());
     const auto remembered = client.breakpoint_map();
     const auto& stored = remembered.at("dap/cond.cpp");
-    check(stored.size() == 2 && string_at(stored[0], "condition") == "i == 2",
-          "conditions are remembered for a restart: " + stored.dump());
+    check(stored.size() == 2 && string_at(stored[0], "condition") == "i == 2" &&
+              string_at(stored[0], "hitCondition") == "3" && string_at(stored[0], "logMessage") == "i={i}",
+          "all three attributes are remembered for a restart: " + stored.dump());
     check(!stored[1].contains("condition"), "an empty condition is dropped, not sent as \"\"");
     client.shutdown();
 }
@@ -831,6 +841,34 @@ void scenario_event_shaping() {
                  },
                  "the progress end", &end);
     check(string_at(end, "progressId") == "load", "progress end still names the same id");
+
+    // 线程清单变化：`thread` 的 reason/threadId 要抬到顶层（前端 `applyDapThread` 直读顶层）。
+    Json thread;
+    expect_event(recorder, [](const Json& event) { return is_event(event, "thread"); }, "the thread event", &thread);
+    check(string_at(thread, "reason") == "started", "thread carries its reason");
+    check(number_at(thread, "threadId") == 2, "thread carries its threadId at the top level");
+
+    // 带位置的控制台输出：`source.path` 映射成工作区相对路径，line/column 保留。
+    Json located;
+    expect_event(recorder,
+                 [](const Json& event) {
+                     return is_event(event, "output") && event.contains("line");
+                 },
+                 "the located output event", &located);
+    check(string_at(located, "category") == "stderr", "the located output keeps its category");
+    check(string_at(located, "path") == "fake.cpp",
+          "the output source path maps to a workspace-relative path, got: " + string_at(located, "path"));
+    check(number_at(located, "line") == 12 && number_at(located, "column") == 3, "line/column survive");
+
+    // `stopped` 的可选字段（preserveFocusHint / hitBreakpointIds）也要透出。
+    Json rich;
+    expect_event(recorder,
+                 [](const Json& event) { return is_event(event, "stopped") && event.contains("hitBreakpointIds"); },
+                 "the rich stopped event", &rich);
+    check(flag_at(rich, "allThreadsStopped") == true, "allThreadsStopped survives");
+    check(flag_at(rich, "preserveFocusHint") == true, "preserveFocusHint survives");
+    check(rich.at("hitBreakpointIds").is_array() && rich.at("hitBreakpointIds")[0] == 51,
+          "hitBreakpointIds survive");
 
     client.shutdown();
 }

@@ -28,7 +28,7 @@ import { iconSize } from '../uiIcons'
 // 按 tab 与"用过哪些搜索选项"给不同提示，规则全在 src/searchEverywhereEmpty.ts（纯函数）。
 import { searchEverywhereEmptyText } from '../searchEverywhereEmpty'
 // 作用域选择（上游 `ScopeChooserAction`）：候选、过滤、以及"能不能在项目/所有位置间切换"的判据。
-import { PROJECT_SCOPE_NAME, canToggleEverywhere, filterByScope, scopeChoices } from '../searchEverywhereScope'
+import { PROJECT_SCOPE_NAME, filterByScope, scopeChoices } from '../searchEverywhereScope'
 // **tab 表定制**（上游 `SeTabsCustomizer`）：本仓没有插件实现它，但有一个真实的定制需求 ——
 // 宿主没给 Text 档通道时那一档整档摘掉（上游 `SeTextTab.kt:37-39` 没有 project 时
 // `getTextSearchOptions()` 返回 null，那一档就没有筛选器可编辑）。
@@ -87,6 +87,16 @@ const props = defineProps<{
   onTextOption?: (key: keyof TextSearchOptions, value: boolean) => void
   /** 切档 → 宿主决定要不要发整工作区扫描（只有 All / Text 两档会发）。 */
   onTab?: (tab: SearchEverywhereTab) => void
+  /**
+   * 会话历史（上游 `SearchEverywhereManagerImpl.java:423-427` 把 `showHistoryItem(true/false)` 注册成
+   * `SearchTextField.SHOW_HISTORY_SHORTCUT`（Alt+Down）/ `ALT_SHOW_HISTORY_SHORTCUT`（Alt+Up））。
+   * 规则与存档在 `src/searchEverywhereHistory.ts`，宿主出口 `src/searchEverywhereHost.ts:274/:282`：
+   *   · `historyStep(next)` —— Alt+Down/Up 要填进输入框的那个词（`next=true` = 更新的一条）；
+   *   · `historyText()` —— 打开弹层时预填最近一条（`:128` 的 `myHistoryIterator.prev()`）。
+   * 未接时（undefined）两条键不生效，行为与今天一致。
+   */
+  historyStep?: (next: boolean) => string
+  historyText?: () => string
 }>()
 const emit = defineEmits<{ close: []; /** 空态里"在文件中查找"的落点（宿主打开工程内搜索）。 */ findInFiles: [] }>()
 
@@ -140,10 +150,6 @@ const scopeName = computed({
   },
 })
 const activeScope = computed(() => scopeOptions.value.find(choice => choice.name === scopeName.value) ?? scopeOptions.value[0]!)
-// 自动切换档（上游 `AutoToggleAction`）：本仓「项目」与「所有位置」是同一个集合，恒不可切换
-// （判据在 `src/searchEverywhereScope.ts`），所以这里只把它写进提示，不画那格按钮。
-const autoToggleNote = computed(() => (filter.value.autoToggleEnabled && !canToggleEverywhere()
-  ? '；本仓「项目」与「所有位置」是同一集合，不提供自动切换' : ''))
 // `filterByScope`：表达式为 null（项目档）时原样放行；坏表达式也放行（列表来自设置页的校验）。
 const scopePredicate = computed(() => {
   const expression = activeScope.value?.expression ?? null
@@ -310,7 +316,9 @@ watch(tab, value => { funnelOpen.value = false; props.onTab?.(value) })
 watch(query, value => props.onQuery?.(value))
 watch(() => props.open, async open => {
   if (!open) { props.onQuery?.(''); return }
-  query.value = ''
+  // 打开时预填最近一条历史（`SearchEverywhereManagerImpl.java:128` 的 `myHistoryIterator.prev()`，
+  // 出口 `src/searchEverywhereHost.ts:282`）。没历史时给空串 ⇒ 输入框仍是空的。
+  query.value = props.historyText?.() ?? ''
   tab.value = 'all'
   index.value = 0
   // 每次打开重读"点得最多"表（上一次会话里记的用量要在这一次生效）。
@@ -324,6 +332,18 @@ watch(() => props.open, async open => {
 })
 
 function move(delta: number) { index.value = moveSearchEverywhereIndex(index.value, results.value.length, delta) }
+/**
+ * `Alt+Down` / `Alt+Up`（上游 `SearchTextField.SHOW_HISTORY_SHORTCUT` / `ALT_SHOW_HISTORY_SHORTCUT`，
+ * `SearchEverywhereManagerImpl.java:423-427` 的 `showHistoryItem(true/false)` → `:465-472` 把取到的词
+ * `setText` 进搜索框并 `selectAll`）：把宿主的 `searchHistoryStep(next)` 结果写回输入框并全选。
+ * 未接宿主（`historyStep` 未给）时整条不动。
+ */
+function applyHistoryStep(next: boolean) {
+  const text = props.historyStep?.(next)
+  if (text === undefined) return
+  query.value = text
+  void nextTick(() => input.value?.select())
+}
 /**
  * 能切过去的档 = **在 tab 表里**（过了 `SeTabsCustomizer`）且**有结果**的那几档。
  * 只看结果不看定制表会把用户送进一个 tab 行上根本不存在的一档；
@@ -360,8 +380,10 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
           @keydown.up.prevent="move(-1)"
           @keydown.tab.prevent="cycle($event.shiftKey ? -1 : 1)"
           @keydown.enter.prevent="chooseSelected()"
+          @keydown.alt.down.prevent="applyHistoryStep(true)"
+          @keydown.alt.up.prevent="applyHistoryStep(false)"
         />
-        <button class="icon-button" title="关闭随处搜索" aria-label="关闭随处搜索" @click="emit('close')"><X :size="iconSize.action" /></button>
+        <button class="icon-button" aria-label="关闭随处搜索" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="se-tabs" role="tablist">
         <button
@@ -382,7 +404,6 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
             v-model="scopeName"
             class="se-scope"
             aria-label="作用域"
-            :title="`作用域：${scopeName}（只作用于文件与符号两类结果）${autoToggleNote}`"
           >
             <option v-for="choice in scopeOptions" :key="choice.name" :value="choice.name">{{ choice.name }}</option>
           </select>
@@ -390,7 +411,6 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
             v-else-if="action === 'preview'"
             class="se-tab se-tab-icon"
             :aria-pressed="showPreview"
-            :title="showPreview ? '关闭预览' : '打开预览'"
             :aria-label="showPreview ? '关闭预览' : '打开预览'"
             @click="showPreview = !showPreview"
           ><Eye v-if="showPreview" :size="iconSize.control" /><EyeOff v-else :size="iconSize.control" /></button>
@@ -398,7 +418,6 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
             <button
               class="se-tab se-tab-icon"
               :aria-expanded="funnelOpen"
-              title="按类型筛选结果"
               aria-label="按类型筛选结果"
               @click="funnelOpen = !funnelOpen"
             ><Filter :size="iconSize.control" /></button>
@@ -420,13 +439,11 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
             :key="key"
             class="se-text-toggle"
             :class="{ on: props.textOptions[key] }"
-            :title="label"
             :aria-label="label"
             :aria-pressed="props.textOptions[key]"
             @click="props.onTextOption?.(key as keyof TextSearchOptions, !props.textOptions[key])"
           >{{ OPTION_GLYPHS[key] }}</button>
         </span>
-        <span class="se-hint">Tab 切换 · ↑↓ 选择 · 回车打开</span>
       </div>
       <div ref="splitContainer" class="se-content" :style="{ '--se-ratio': `${splitRatio * 100}%` }">
       <div ref="resultList" class="palette-results" role="listbox" :aria-label="`${results.length} 条结果`">
@@ -445,7 +462,7 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
           <!-- 被 Top Hit 钉住的行显示组名「点击最多」（上游 `TopHitSEContributor.getGroupName()`，
                中文包 `IdeBundle.properties:2313`），其余显示供给者名。 -->
           <span class="action-group">{{ topIds.has(entry.id) ? TOP_HIT_GROUP_NAME : searchEverywhereSourceLabel(entry.source) }}</span>
-          <ArrowRight :size="iconSize.control" />
+          <ArrowRight aria-hidden="true" :size="iconSize.control" />
         </button>
         <!-- 空态：上游按 tab 与用过的选项给不同文案（`SearchEverywhereUI.java:1926-2011`），
              并给一条去工程内查找的出路。 -->
@@ -479,23 +496,23 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
 .se-content { display: grid; min-height: 0; max-height: min(60vh, 600px); overflow: hidden; }
 .with-preview .se-content { grid-template-rows: minmax(0, var(--se-ratio)) 5px minmax(0, 1fr); height: min(60vh, 600px); }
 .se-splitter { background: var(--line, rgba(127,127,127,.25)); cursor: row-resize; touch-action: none; }
-.se-splitter:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.se-splitter:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .palette-results { min-width: 0; overflow: auto; }
 @media (max-width: 700px) { .se-hint { display: none; } .se-tabs { flex-wrap: wrap; } }
 /* `--tc-border` / `--tc-hover` 不是 tokens.css 里的名字：这两个弹层一直退化成中性灰 rgba，
    深色主题下 hover 几乎看不见。改回真令牌 --line / --hover。 */
-.se-tabs { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); position: relative; }
+.se-tabs { display: flex; align-items: center; gap: var(--space-1); padding: 6px 10px; border-bottom: 1px solid var(--line); position: relative; }
 .se-tab-icon { display: inline-flex; align-items: center; justify-content: center; padding: 0; width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); }
 .se-tab-icon svg { flex-shrink: 0; }
 /* 类型漏斗（上游 `getFilterTypesAction` 那格）：面板贴着那一格往下长，不占列表高度。 */
 .se-funnel { position: relative; display: inline-flex; }
-.se-funnel-panel { position: absolute; top: 100%; right: 0; z-index: 1; display: flex; flex-direction: column; gap: var(--space-1); min-width: 120px; padding: var(--space-1) var(--space-2); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); box-shadow: var(--shadow-2); }
+.se-funnel-panel { position: absolute; top: 100%; right: 0; z-index: 1; display: flex; flex-direction: column; gap: var(--space-1); min-width: 120px; padding: var(--space-1) var(--space-2); background: var(--popup-background); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
 .se-funnel-row { display: flex; align-items: center; gap: var(--space-1); font-size: 11px; }
 .se-text-options { display: inline-flex; align-items: center; gap: 2px; margin-left: var(--space-1); }
 .se-text-toggle { padding: 0 var(--space-1); height: var(--ctrl-height-sm); color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: var(--radius-xs); font: 11px var(--font-mono); cursor: pointer; }
 .se-text-toggle.on { color: var(--text); border-color: var(--accent); background: var(--hover); }
 .se-scope { height: var(--ctrl-height-sm); padding: 0 var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-ui); }
-.se-tab { background: none; border: 0; border-radius: 4px; padding: 3px 10px; font: inherit; color: inherit; cursor: pointer; opacity: .7; transition: opacity var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
+.se-tab { background: none; border: 0; border-radius: var(--radius-sm); padding: 3px 10px; font: inherit; color: inherit; cursor: pointer; opacity: .7; transition: opacity var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
 .se-tab:hover { opacity: 1; background: var(--hover); }
 .se-tab.active { opacity: 1; font-weight: 600; box-shadow: inset 0 -2px 0 currentColor; }
 .se-hint { margin-left: auto; font-size: 11px; opacity: .55; }

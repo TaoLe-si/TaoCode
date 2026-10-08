@@ -1,0 +1,10 @@
+// TaoCode 可执行文件的图标资源。
+//
+// 为什么用 .rc 而不是在 main.cpp 里 LoadIconW：窗口类只认 `IDI_APPLICATION` 那个系统默认图标，
+// 而「exe 在资源管理器里长什么样」由**嵌进 PE 的图标组资源**决定 —— 那是链接期的事，跟窗口类无关。
+// 所以图标走资源脚本：`native/app-icon.ico` 由 `scripts/gen-app-icon.mjs` 从
+// `src/assets/app-icon.svg` 的同一组几何数字栅格化，多档尺寸（16/24/32/48/64/128/256）都在里面。
+//
+// `IDI_TAOCODE` = 1 是这一个资源自己的编号（与窗口类无关，也不占用系统 IDI_* 的号段）。
+#define IDI_TAOCODE 1
+IDI_TAOCODE ICON "app-icon.ico"

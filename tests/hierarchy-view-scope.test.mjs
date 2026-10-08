@@ -59,6 +59,30 @@ test('接线：两个新出口都在 createHierarchyView 的返回值里，类�
   assert.equal(typeof view.pickHierarchyScope, 'function', '菜单/命令那一路仍按类型化入口调用')
   assert.ok('hierScopeOptions' in view && 'hierScopeNotice' in view && 'hierScope' in view)
   const source = readFileSync('src/hierarchyView.ts', 'utf8')
-  assert.ok(source.includes('const hierScopeOptions = computed(() => HIERARCHY_SCOPES)'),
-    '选项表必须是同一份 HIERARCHY_SCOPES，不是在视图里再写一遍')
+  // 留痕（原钉 X、实际 Y）：这一条原来钉的是字面量 `const hierScopeOptions = computed(() => HIERARCHY_SCOPES)`，
+  // 它的**意思**是"表只有一份、视图不许自己再列一遍"（就是那条 message）。本批把选项表改成**按视图/方向给**
+  // （上游的范围动作本来就是一只一只视图注册的，见 `src/hierarchyScopes.ts` 文件头那段），
+  // 字面量随之变了；这里不放松，改成**更强**的两条：
+  //   · 表必须仍然**是那一份数组本身**（引用相等，不是 deepEqual 的形状相等）；
+  //   · 取表这一步必须走 `hierarchyScopeSupport`（= 判定在模块里，不在视图里另列）。
+  assert.equal(view.hierScopeOptions.value, HIERARCHY_SCOPES, '选项表还是那份 HIERARCHY_SCOPES（引用相等）')
+  assert.ok(source.includes('const hierScopeOptions = computed(() => hierScopeSupport.value.tiers)'),
+    '选项表没有走 hierarchyScopeSupport（在自己列档 = 漂的第二份表）')
+  assert.ok(source.includes('const hierScopeSupported = computed(() => hierScopeSupport.value.supported)'),
+    '宿主读不到"这一向到底该不该有这只下拉"')
+})
+
+test('接线：宿主把那一档控件摆进层级工具条（模块侧能用不等于界面上有）', () => {
+  const app = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
+  assert.match(app, /hierScope, hierScopeOptions, hierScopeNotice, hierScopeSupported, setHierarchyScope,/,
+    '解构里必须带上那四个名字（`hierScopeSupported` 见 hierlevel H-1），否则模板拿不到')
+  assert.match(app, /const pickHierScope = \(event: Event\) => setHierarchyScope\(\(event\.target as HTMLSelectElement\)\.value\)/,
+    '窄化放在脚本里（模板里的 $event.target 是 EventTarget | null，vue-tsc 过不去）')
+  assert.match(app, /<select :value="hierScope" @change="pickHierScope">/, '下拉绑当前档，不是写死第一档')
+  assert.match(app, /<option v-for="entry in hierScopeOptions" :key="entry\.id" :value="entry\.id">\{\{ entry\.label \}\}<\/option>/,
+    '选项来自 hierScopeOptions（= HIERARCHY_SCOPES 那一份），模板里没有另抄五档')
+  assert.match(app, /:title="hierScopeNotice">范围/, '计数提示走模块那份 scopeNotice，不在模板里再算一遍')
+  // hierlevel H-1：父类型向（上游 `isEnabled()` = false）整只下拉不渲染 —— 不放假控件。
+  assert.match(app, /<label v-if="hierScopeSupported" class="call-direction" :title="hierScopeNotice">范围/,
+    '不支持的档位整段不渲染（`hierarchyScopeSupport.supported` 的宿主落点）')
 })

@@ -51,16 +51,23 @@ test('扫描件是 350 类，且 §G 逐条覆盖（名字与路径都对得上�
 
 // 计数随批次变化（2026-10-04 本轮：`StatusBarEditorBasedWidgetFactory` / `WidgetRegistry` 两条
 // 复核后改判 `[x]` —— 缺的是形态差异不是行为，判据 `tests/status-widgets-registry.test.mjs`；
-// 此前为 17 + 99 + 0 + 234 = 350）。
+// 此前为 17 + 99 + 0 + 234 = 350。2026-10-06 EP 轮：`FilenameToolbarWidgetAction` 与
+// `ProjectWidgetActionsFilter` 两条升 `[x]`，20/96 → 21/95。2026-10-08 lane vc-nav 对账：
+// `ToggleReadOnlyAttributePanel` 升 `[x]`（App.vue 状态栏双态徽标 + `toggleReadOnlyFromStatusBar`
+// → `src/treeActions.ts:68` → 宿主 `native/file_queries.cpp:198` 的 `file.readOnly`），21/95 → 22/94；
+// §G 逐条表是唯一真值来源，§A/§B 小节计数与表头必须向它对齐）。
 // 这里盯的是**自洽**：每档数字与总数对得上，且判决表自己写的和数一致。
-test('四档计数自己加得起来（19 + 97 + 0 + 234 = 350）', () => {
+test('四档计数自己加得起来（22 + 94 + 0 + 234 = 350）', () => {
   const count = letter => rows.filter(row => row.verdict === letter).length
-  assert.equal(count('[x]'), 19)
-  assert.equal(count('[~]'), 97)
+  assert.equal(count('[x]'), 22)
+  assert.equal(count('[~]'), 94)
   assert.equal(count('[ ]'), 0)
   assert.equal(count('[-]'), 234)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 350)
-  assert.match(verdict, /四档合计 \*\*19 \+ 97 \+ 0 \+ 234 = 350\*\*/, '文档头部的和数也要跟着改')
+  assert.match(verdict, /四档合计 \*\*22 \+ 94 \+ 0 \+ 234 = 350\*\*/, '文档头部的和数也要跟着改')
+  // §A/§B 的小节计数是同一事实的第二个出口，不许各写一份漂掉的数字。
+  assert.match(verdict, /## A\. 已移植（`\[x\]`，全表 22 类）/, '§A 的小节计数要等于 [x] 档')
+  assert.match(verdict, /## B\. 部分移植（`\[~\]`，全表 94 类）/, '§B 的小节计数要等于 [~] 档')
 })
 
 test('每个 [x]/[~] 行的依据必须指到真实存在的 src/ 或 native/ 文件（防"注释里提过就算移植"）', () => {

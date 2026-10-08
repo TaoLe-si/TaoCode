@@ -331,3 +331,50 @@ new（同样紧跟 3a 那一行之后）：
    `:395` 的组名**无法核实**（没打开确认，引用时请去掉行号）。
 4. 同文档 `:270` 写 `TerminalPanel.vue:294` 是 palette 调用点、`:274` 写 `RunConsole.vue:145` ⇒ 本轮改前实测
    分别是 `:295` 与 `:146`（差一行，文档给的行号是改前另一版本）；改后是 `:322` 与 `:151/:153`。
+
+---
+
+## R-6）（2026-10-06 termset 第 2 切片新增）选中即复制 / 中键粘贴两把终端设置键：六处成对 + 设置页两格
+
+消费侧**本切片已落**（`src/terminalClipboard.ts` 的两个纯函数改成读旋钮值、`src/components/TerminalPanel.vue:571/:415`
+已 `props.settings?.copyOnSelection ?? false` / `?? true`）⇒ **宿主不传时行为与改造前逐字相同**（缺省 false / true = 上游同档）。
+要让它真正可切换，主代理需补齐下面六处 + 两格（照本文件 R-1 的成对口径；少一处会整次 `settings.update` 被拒或存不下）。
+
+上游依据（本切片逐条 `sed -n` 开过）：
+- 缺省档 `plugins/terminal/src/org/jetbrains/plugins/terminal/TerminalOptionsProvider.kt:77`（`myCopyOnSelection = false`）、`:78`（`myPasteOnMiddleMouseButton = true`）。
+- 真身消费 `plugins/terminal/src/org/jetbrains/plugins/terminal/JBTerminalSystemSettingsProvider.java:74-81`（`copyOnSelect()` = `(isSystemSelectionSupported() || getCopyOnSelection()) && Registry.is("editor.caret.update.primary.selection")`）、`:84-86`（`pasteOnMiddleMouseClick()` = `getPasteOnMiddleMouseButton()`）。
+- Linux 判定来源 `platform/editor-ui-api/src/com/intellij/openapi/ide/CopyPasteManager.java:83`（基类 `return false`，Linux 覆写 true）。
+
+要动的保留文件（本路无写句柄）：
+1. `src/settingsModel.ts` 的 `TerminalSettings` 接口尾部加两把布尔；`defaultTerminalSettings` 补 `copyOnSelection: false, pasteOnMiddleMouseClick: true`。
+2. `native/settings_schema.hpp` 的 `TERMINAL_SETTING_KEYS[]` 白名单加这两把；`native/settings_schema.cpp` 的默认值表补 `{"copyOnSelection", false}, {"pasteOnMiddleMouseClick", true}`（缺键补默认，别按字段数判损坏）。
+3. `src/previewSettings.ts` 键表认这两把布尔（走布尔兜底即可，不加分支）。
+4. `src/App.vue`：把这两把透传进 `<TerminalPanel :settings="…">`（目标出口 = 面板 `:75` 的 `settings` prop，字段名 `copyOnSelection` / `pasteOnMiddleMouseClick`，本切片已在面板读它们）。⚠ `bridge.ts` 贴顶净增 0，本请求**不往 bridge 加字段**，走 `App.vue` 已有的 `:settings` 对象。
+5. `src/components/SettingsDialog.vue`：终端设置组加两行勾选，绑这两把真键名。文案无 zh 包 ⇒ 用英文原句直译并注释（措辞「无法核实」见交付报告 §E）。
+
+判据：`tests/terminal-hyperlinks.test.mjs` 的「中键与选中即复制的门（子类真身）」那条钉死 `terminalCopyOnSelect(false, true)===true`、
+`terminalPasteOnMiddleClick(false)===false` 与两缺省档；R-6 落完后「上游默认档」应从「钉面板 `?? false` 兜底」升级成「钉 `defaultTerminalSettings`」硬钉。
+
+## R-7）（下一批，不阻塞）audible bell 发声通道
+
+上游缺省 **on**（`TerminalOptionsProvider.kt:76` `mySoundBell = true`；消费门 `.../frontend/view/impl/TerminalSessionController.kt:111-113`
+`is TerminalBeepEvent -> if (settings.audibleBell()) Toolkit.beep()`；BEL 源 `.../frontend/session/ghostty/GhosttyTerminalSession.kt:276-278`）。
+本仓 xterm 忽略 BEL ⇒ 这条**用户可见行为缺失**。本切片**未落假订阅**（`TerminalPanel.vue` 的 `defineEmits` 只有 `focusTerminal`、净余量 13 行，
+加 onBell 既逼近面板上限又会造出「调了但没人发声」的死效果 ⇒ 违反不放假控件）。要落需三件成组：
+①宿主/原生一条发声出口（native 或复用状态栏/通知）；②面板 `instance.onBell(() => terminalBellShouldSound(audibleBell) && 触发出口)`；
+③`terminalAudibleBell` 缺省 true 的键（同样六处）。块视图那条 `commandIsRunning &&`（`.../block/output/TerminalAlarmManager.kt:12-14`）
+本仓裸 ConPTY 无 OSC 133 判不出命令是否在跑 ⇒ 取非块那条 `TerminalSessionController` 门（只 `audibleBell`），差异如实登记。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R-1（两把编辑器设置键六处成对）** —— 已接线（见 b10audit 第 2 条：settingsModel + native schema + previewSettings 白名单）。
+- **R-2（设置喂给终端面板）已接线**：`src/App.vue:2336` 的 `<TerminalPanel :settings="editorSettings" …>`。
+- **R-3（两格设置页行）已接线**：`SettingsDialog.vue:736` 的 `wheelFontChangeEnabled` / `terminalBaseFontSize` 两格。
+- **R-4（ANSI 覆盖供给侧）** —— 宿主取数已接（`TerminalPanel.vue:351` / `RunConsole.vue:161`），设置键 `general.terminalAnsiColors` 仍缺（见 b10audit 第 3 条）。
+
+结论：R-1/R-2/R-3 已接线；R-4 待 settings/native owner 补键。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「R-1/R-2/R-3 已接线；R-4 待 settings/native owner 补键。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

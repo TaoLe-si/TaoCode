@@ -276,9 +276,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
     <aside class="welcome-sidebar">
       <div class="welcome-brand">
         <div class="brand">TaoCode</div>
-        <span class="welcome-version">0.1</span>
       </div>
-      <p class="sidebar-note">{{ isDesktop ? '本地项目' : '浏览器 · 内存预览' }}</p>
       <nav class="welcome-navigation" aria-label="欢迎页导航">
         <button type="button" class="menu-button navigation-item" :class="{ selected: page === 'projects' }" :aria-current="page === 'projects' ? 'page' : undefined" @click="page = 'projects'">
           <FolderOpen :size="iconSize.action" aria-hidden="true" />项目
@@ -288,7 +286,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
         </button>
         <button
           type="button" class="menu-button navigation-item" :disabled="busy || !isDesktop"
-          :title="isDesktop ? '管理本机插件' : '浏览器预览不能读取本机插件目录'" @click="emit('plugins')"
+          @click="emit('plugins')"
         >
           <Plug :size="iconSize.action" aria-hidden="true" />插件
           <span v-if="pluginCount" class="nav-badge" :title="`${pluginCount} 个已安装插件`">{{ pluginCount }}</span>
@@ -303,7 +301,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
            WelcomeScreen.Options, not to the Settings dialog itself. -->
       <div class="welcome-quick-access">
         <button
-          type="button" class="icon-button welcome-gear" title="选项" aria-label="选项"
+          type="button" class="icon-button welcome-gear" aria-label="选项"
           aria-haspopup="menu" :aria-expanded="optionsOpen" :disabled="busy"
           @click.stop="optionsOpen = !optionsOpen"
         >
@@ -331,8 +329,8 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
         <section class="customize-group">
           <h2>主题</h2>
           <div class="theme-options" role="group" aria-label="主题">
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="iconSize.action" aria-hidden="true" /><span>月之亮面</span></button>
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="iconSize.action" aria-hidden="true" /><span>月之暗面</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="iconSize.action" aria-hidden="true" /><span>浅色</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="iconSize.action" aria-hidden="true" /><span>深色</span></button>
           </div>
         </section>
         <section class="customize-group">
@@ -363,17 +361,17 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
               <FolderPlus :size="iconSize.action" aria-hidden="true" />新建项目
             </button>
             <button type="button" class="subtle-button action-button" :disabled="busy" @click="emit('open')">
-              <FolderOpen :size="iconSize.action" aria-hidden="true" />{{ isDesktop ? '打开项目' : '打开内存示例' }}
+              <FolderOpen :size="iconSize.action" aria-hidden="true" />打开项目
             </button>
             <button
               type="button" class="subtle-button action-button" :disabled="busy"
-              :aria-describedby="!gitAvailable ? `${id}-git-note` : undefined" @click="emit('clone')"
+              @click="emit('clone')"
             >
               <GitBranch :size="iconSize.action" aria-hidden="true" />克隆仓库
             </button>
             <button
               v-if="selectedPaths.size > 1" type="button" class="subtle-button action-button"
-              :disabled="busy" :title="`仅移除选中的 ${selectedPaths.size} 项记录`"
+              :disabled="busy"
               @click="confirmForget(selectedProjects)"
             >
               <X :size="iconSize.action" aria-hidden="true" />移除所选 {{ selectedPaths.size }} 项
@@ -381,28 +379,22 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           </div>
         </header>
 
-        <p v-if="!isDesktop" class="preview-banner welcome-preview">
-          <span class="preview-dot" aria-hidden="true" />
-          <span><strong>浏览器预览</strong>：此界面与示例文件仅在内存中运行，不访问磁盘，不能真实新建或克隆项目。新建和克隆表单仅供布局预览。</span>
-        </p>
-        <p v-if="!gitAvailable" :id="`${id}-git-note`" class="git-note">安装 Git 后才能克隆仓库；可以打开克隆表单查看说明。</p>
         <div v-if="error" class="notice error welcome-error" role="alert"><span>{{ error }}</span></div>
 
         <section class="recent-section" :aria-labelledby="`${id}-recent-title`" :aria-busy="busy">
           <div class="recent-heading">
-            <h2 :id="`${id}-recent-title`">{{ isDesktop ? '近期项目' : '当前会话项目（内存）' }}</h2>
-            <button type="button" class="icon-button" :disabled="busy" title="刷新项目列表" aria-label="刷新项目列表" @click="emit('refresh')">
+            <h2 :id="`${id}-recent-title`">{{ isDesktop ? '近期项目' : '当前会话' }}</h2>
+            <button type="button" class="icon-button" :disabled="busy" aria-label="刷新项目列表" @click="emit('refresh')">
               <RefreshCw :size="iconSize.toolbar" aria-hidden="true" />
             </button>
           </div>
           <div class="project-search">
             <Search :size="iconSize.action" aria-hidden="true" />
             <input :id="`${id}-search`" ref="searchInput" v-model="query" type="search" aria-label="按项目名称、路径或分组搜索" placeholder="搜索项目名称、路径或分组" autocomplete="off" spellcheck="false" @keydown="onSearchKeydown" />
-            <button v-if="query" type="button" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearSearch"><X :size="iconSize.toolbar" aria-hidden="true" /></button>
+            <button v-if="query" type="button" class="icon-button" aria-label="清空搜索" @click="clearSearch"><X :size="iconSize.toolbar" aria-hidden="true" /></button>
           </div>
           <p class="list-status" role="status">{{ listStatus }}</p>
 
-          <p v-if="filteredProjects.length && !filteredProjects.some(project => project.available)" class="list-hint" role="status">列出的路径都不存在或不可访问：用记录右侧的「仅从列表移除」删掉记录（不会动磁盘文件），或打开其他位置的项目。</p>
           <div v-if="menuPath" class="menu-backdrop" @click="menuPath = ''" />
           <!-- 列表为空时的空状态：v-else-if / v-else 必须紧跟在 recent-list 的 v-if 之后，
                中间不能插入其它元素（否则链被打断，空状态会与列表同时渲染）。 -->
@@ -419,7 +411,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                      挂在分组行的弹层里（`PlatformActions.xml:1024` = `WelcomeScreen.EditGroup`）。
                      本仓的分组行只有这一个动作，所以给一个带文字的按钮，不再套一层弹出。 -->
                 <button v-if="group.name !== UNGROUPED" type="button" class="menu-button group-edit"
-                        :title="`${GROUP_MENU_LABELS.edit}：把「${group.name}」改成别的名字`" :aria-label="`${GROUP_MENU_LABELS.edit} ${group.name}`"
+                        :aria-label="`${GROUP_MENU_LABELS.edit} ${group.name}`"
                         @click.stop="renameGroup(group.name)">
                   <Settings :size="iconSize.control" aria-hidden="true" />{{ GROUP_MENU_LABELS.edit }}
                 </button>
@@ -428,24 +420,24 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
             <li v-for="project in group.projects" :key="project.path" :ref="element => setRow(project.path, element)" class="recent-row" tabindex="0" :aria-label="`${project.name}，Delete 键可从列表移除${selectedPaths.has(project.path) ? '（已选中）' : ''}`" :aria-selected="selectedPaths.has(project.path)" @focus="focusedPath = project.path" @click="onRowClick(project, $event)" @keydown="onRowKeydown(project, $event)" :class="{ 'menu-open': menuPath === project.path, 'is-selected': selectedPaths.has(project.path) }">
               <button
                 type="button" class="recent-open" :disabled="busy"
-                :title="project.available ? `打开 ${project.path}` : `路径不存在或不可访问：${project.path}`"
+                :title="!project.available ? `路径不存在或不可访问：${project.path}` : undefined"
                 @click="tryOpen(project)"
               >
-                <span class="project-avatar" :class="`avatar-${toneOf(project.path)}`" :style="{ backgroundImage: `linear-gradient(135deg, ${gradientOf(project.path)[0]}, ${gradientOf(project.path)[1]})` }" :title="`${project.name} 图标（${toneOf(project.path) + 1}/9）`" aria-hidden="true">{{ avatarInitials(project.displayName || project.projectName || project.name) }}</span>
+                <span class="project-avatar" :class="`avatar-${toneOf(project.path)}`" :style="{ backgroundImage: `linear-gradient(135deg, ${gradientOf(project.path)[0]}, ${gradientOf(project.path)[1]})` }" aria-hidden="true">{{ avatarInitials(project.displayName || project.projectName || project.name) }}</span>
                 <span class="project-details">
-                  <span class="project-title"><strong>{{ project.name }}</strong><span v-if="!isDesktop" class="memory-tag">内存示例</span></span>
-                  <span class="project-path" :title="project.path">{{ project.path }}</span>
+                  <span class="project-title"><strong>{{ project.name }}</strong></span>
+                  <span v-if="isDesktop" class="project-path" :title="project.path">{{ project.path }}</span>
                   <span v-if="branchOf(project.path)" class="project-branch"><GitBranch :size="iconSize.inline" aria-hidden="true" />{{ branchOf(project.path) }}</span>
-                  <span class="project-date">最近打开：<time>{{ openedDate(project.lastOpened) }}</time></span>
+                  <span v-if="isDesktop && project.lastOpened" class="project-date"><time>{{ openedDate(project.lastOpened) }}</time></span>
                 </span>
               </button>
               <div class="recent-row-actions">
-                <span v-if="!project.available" class="missing-tag">{{ isDesktop ? '路径缺失或不可访问' : '示例不可用' }}</span>
+                <span v-if="!project.available && isDesktop" class="missing-tag">路径缺失或不可访问</span>
                 <!-- RecentProjectFilteringTree.kt:536-545: the row button is a gear while the project is
                      reachable and a remove icon once its path is gone. -->
                 <button
                   type="button" class="icon-button row-menu-button" :disabled="busy"
-                  :aria-label="`打开 ${project.name} 的操作菜单`" :aria-expanded="menuPath === project.path" :title="project.available ? '更多操作' : '更多操作（路径不可用，可仅从列表移除）'"
+                  :aria-label="`打开 ${project.name} 的操作菜单`" :aria-expanded="menuPath === project.path"
                   @click.stop="toggleMenu(project.path)"
                 ><Settings v-if="project.available" :size="iconSize.control" aria-hidden="true" /><X v-else :size="iconSize.toolbar" aria-hidden="true" /></button>
               </div>
@@ -461,12 +453,12 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                      带文件管理器名；`isDirectoryOpenSupported()`（`RevealFileAction.java:108-110`）
                      就是这里那个桌面端判断的出处。 -->
                 <button
-                  type="button" class="menu-button row-menu-item" role="menuitem" :disabled="!isDesktop" :title="isDesktop ? '在资源管理器中打开项目所在目录并选中它' : '浏览器预览无法打开资源管理器'"
+                  type="button" class="menu-button row-menu-item" role="menuitem" :disabled="!isDesktop"
                   @click="revealProjectDir(project)"
                 >
                   <FolderSearch :size="iconSize.control" aria-hidden="true" />在资源管理器中显示
                 </button>
-                <button type="button" class="menu-button row-menu-item" role="menuitem" title="把项目路径复制到剪贴板" @click="copyProjectPath(project)">
+                <button type="button" class="menu-button row-menu-item" role="menuitem" @click="copyProjectPath(project)">
                   <Copy :size="iconSize.control" aria-hidden="true" />复制路径
                 </button>
                 <div class="menu-rule" role="separator" />
@@ -483,7 +475,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                 <template v-if="groupingActive">
                   <button v-for="name in moveTargets" :key="name" type="button" class="menu-button row-menu-item" role="menuitem" :disabled="groupOf(project.path) === name" @click="moveToGroup(project, name)">移入「{{ name }}」</button>
                   <div v-if="moveTargets.length" class="submenu-rule" role="separator" />
-                  <button v-if="moveTargets.length" type="button" class="menu-button row-menu-item" role="menuitem" :disabled="groupOf(project.path) === UNGROUPED" :title="`把 ${project.name} 从所属分组移出（仍留在最近项目里）`" @click="moveToGroup(project, UNGROUPED)">{{ GROUP_MENU_LABELS.removeFromGroups }}</button>
+                  <button v-if="moveTargets.length" type="button" class="menu-button row-menu-item" role="menuitem" :disabled="groupOf(project.path) === UNGROUPED" @click="moveToGroup(project, UNGROUPED)">{{ GROUP_MENU_LABELS.removeFromGroups }}</button>
                 </template>
                 <!-- 上游 `PlatformActions.xml:1026` 的 ChangeProjectIcon 就在这个位置（分组段之后、
                      最后那条分隔线之前）。上游它挂在项目窗口标题栏上；本仓项目颜色唯一可见处是
@@ -509,7 +501,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                   <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="colorAutoDisabled(project.path)" @click="resetColor(project)">{{ PROJECT_COLOR_AUTO_LABEL }}</button>
                 </div>
                 <div class="menu-rule" role="separator" />
-                <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy" :title="'仅移除记录，不删除文件'" @click="forgetSingle(project)">
+                <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy" @click="forgetSingle(project)">
                   <X :size="iconSize.control" aria-hidden="true" />仅从列表移除
                 </button>
               </div>
@@ -520,19 +512,17 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           <div v-else-if="query.trim()" class="project-empty">
             <Search :size="iconSize.hero" aria-hidden="true" />
             <h3>没有匹配的项目</h3>
-            <p>试试其他名称或路径，或清空搜索查看全部项目。</p>
             <button type="button" class="subtle-button" @click="clearSearch">清空搜索</button>
           </div>
           <div v-else class="project-empty">
             <FolderOpen :size="iconSize.hero" aria-hidden="true" />
-            <h3>{{ isDesktop ? '还没有近期项目' : '尚未打开内存示例' }}</h3>
-            <p>{{ isDesktop ? '点击“打开项目”选择已有文件夹，或点击“新建项目”创建 Java 项目或空项目。' : '点击“打开内存示例”体验编辑。真实的打开、新建和克隆需要在桌面端操作。' }}</p>
+            <h3>还没有近期项目</h3>
             <!-- IDEA EmptyStateProjectsPanel starts with a vertical group of quick actions
                  plus a "More" drop-down instead of a single hint line. -->
             <div class="empty-actions" role="group" aria-label="快捷开始">
               <button type="button" class="primary-button empty-action" :disabled="busy" @click="emit('create')"><FolderPlus :size="iconSize.toolbar" aria-hidden="true" />新建项目</button>
               <button type="button" class="subtle-button empty-action" :disabled="busy" @click="emit('open')"><FolderOpen :size="iconSize.toolbar" aria-hidden="true" />打开</button>
-              <button type="button" class="subtle-button empty-action" :disabled="busy || !gitAvailable" :title="gitAvailable ? '从远程仓库克隆' : '安装 Git 后可用'" @click="emit('clone')"><GitBranch :size="iconSize.toolbar" aria-hidden="true" />从 VCS 获取</button>
+              <button type="button" class="subtle-button empty-action" :disabled="busy || !gitAvailable" :title="!gitAvailable ? '安装 Git 后可用' : undefined" @click="emit('clone')"><GitBranch :size="iconSize.toolbar" aria-hidden="true" />从 VCS 获取</button>
               <div class="empty-more">
                 <button type="button" class="subtle-button empty-action" :aria-expanded="moreOpen" aria-haspopup="menu" @click="moreOpen = !moreOpen">更多<ChevronDown :size="iconSize.menu" aria-hidden="true" /></button>
                 <div v-if="moreOpen" class="empty-more-menu" role="menu">
@@ -552,7 +542,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           <div v-if="noticeButtonVisible(notices.length)" ref="noticeBox" class="welcome-notifications" tabindex="-1" @keydown.esc.stop="notificationsOpen = false">
             <button
               type="button" class="subtle-button welcome-notice-button" :aria-expanded="notificationsOpen"
-              aria-haspopup="dialog" :title="noticeTitle(notices)" :aria-label="noticeTitle(notices)"
+              aria-haspopup="dialog" :aria-label="noticeTitle(notices)"
               @click="notificationsOpen = !notificationsOpen"
             ><BellDot :size="iconSize.toolbar" aria-hidden="true" />{{ noticeButtonText(notices.length) }}</button>
             <NoticeList
@@ -567,81 +557,85 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 </template>
 
 <style scoped>
-.project-welcome { display: grid; grid-template-columns: 210px minmax(0, 1fr); flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--editor); }
-.welcome-sidebar { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; overflow: auto; padding: var(--space-6) var(--space-3) 0; background: var(--panel); border-right: 1px solid var(--line); }
+.project-welcome { display: grid; grid-template-columns: 204px minmax(0, 1fr); flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--editor); }
+.welcome-sidebar { position: relative; z-index: 2; display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; overflow: visible; padding: var(--space-6) var(--space-2) 0; background: var(--header-bg); border-right: 1px solid var(--header-line); color: var(--header-fg); }
 /* IDEA createQuickAccessPanel: pinned to the bottom of the sidebar (BorderLayout.SOUTH),
    left-aligned, with the New UI empty(15, 14) inset — not a lone 28px icon floating in the column. */
 .welcome-brand { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2); padding: 0 var(--space-3); }
-.welcome-brand .brand { font-size: 20px; gap: var(--space-2); }
-.welcome-version { font: 11px var(--font-mono); color: var(--muted); }
+.welcome-brand .brand { padding-left: 10px; border-left: 3px solid var(--header-accent); color: var(--header-fg); font-size: 19px; font-weight: 700; letter-spacing: -.035em; gap: var(--space-2); }
 .welcome-navigation { display: flex; flex-direction: column; gap: var(--space-1); }
-.navigation-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--ctrl-height-lg); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); text-align: left; font-size: 13px; }
-.navigation-item.selected { background: var(--selected); color: var(--bright); font-weight: 600; }
+.navigation-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--ctrl-height-lg); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); color: var(--header-fg); text-align: left; font-size: 12px; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.navigation-item:hover:not(:disabled) { background: var(--header-hover); color: var(--header-fg); }
+.navigation-item.selected { background: var(--header-hover); color: var(--header-fg); font-weight: 650; box-shadow: inset 2px 0 var(--header-accent); }
+.navigation-item:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .navigation-item > svg { flex-shrink: 0; }
-.nav-badge { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--selected); color: var(--accent); font: 600 10px/18px var(--font-ui); text-align: center; }
-.welcome-quick-access { position: relative; display: flex; align-items: center; justify-content: center; margin: auto calc(-1 * var(--space-3)) 0; padding: 15px 14px 20px; }
-.welcome-gear { width: 26px; height: 26px; }
-.welcome-options { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% - 8px); z-index: 30; display: flex; flex-direction: column; min-width: 180px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.nav-badge { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: var(--radius-lg); background: var(--header-hover); color: var(--header-accent); font: 600 10px/18px var(--font-ui); text-align: center; }
+.welcome-quick-access { position: relative; display: flex; align-items: center; justify-content: flex-start; margin: auto calc(-1 * var(--space-3)) 0; padding: 15px 14px var(--space-5); border-top: 1px solid var(--header-line); }
+.welcome-gear { width: 28px; height: 28px; color: var(--header-fg); }
+.welcome-options { position: absolute; left: 14px; bottom: calc(100% - 8px); z-index: 30; display: flex; flex-direction: column; min-width: 180px; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .welcome-options-item { display: flex; align-items: center; justify-content: flex-start; width: 100%; text-align: left; }
-.sidebar-note { margin: var(--space-2) var(--space-3) 0; color: var(--muted); font-size: 11px; }
 .welcome-main { min-width: 0; min-height: 0; overflow: auto; }
-.welcome-content { width: 100%; max-width: 1050px; margin: 0 auto; padding: clamp(24px, 5vw, 64px); }
-.customize-group { margin-bottom: var(--space-6); }
-.customize-group h2 { margin: 0 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; letter-spacing: .05em; }
-.customize-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); max-width: 420px; color: var(--text); font-size: 13px; }
-.customize-row select, .customize-row input { width: 120px; min-height: 30px; padding: var(--space-1) var(--space-2); color: var(--text); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: inherit; }
+.welcome-content { width: 100%; max-width: 1240px; margin: 0 auto; padding: clamp(28px, 5vw, 64px); container-type: inline-size; }
+.customize-group { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); align-items: start; gap: var(--space-4); margin: 0; padding: var(--space-4) 0; border-bottom: 1px solid var(--line); }
+.customize-group h2 { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0 0; color: var(--bright); font-size: 14px; font-weight: 650; }
+.customize-group h2::before { content: ''; width: var(--space-1); height: 1em; flex: 0 0 var(--space-1); border-radius: var(--radius-pill); background: var(--accent); }
+.customize-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; align-items: center; gap: var(--space-4); max-width: 640px; min-height: var(--ctrl-height-lg); color: var(--text); font-size: 12px; }
+.customize-row select, .customize-row input { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--ctrl-height); padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: inherit; }
 .theme-options { display: flex; flex-wrap: wrap; gap: var(--space-3); }
-.customize-page .theme-option { display: inline-flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; min-width: 110px; padding: var(--space-3); line-height: 18px; }
+.customize-page .theme-option { display: inline-flex; align-items: center; gap: var(--space-2); flex: 0 1 170px; min-width: 130px; min-height: var(--ctrl-height-lg); padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--panel); color: var(--text); line-height: 18px; transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.customize-page .theme-option:nth-child(2) { background: var(--editor); }
+.customize-page .theme-option:hover:not(:disabled) { border-color: var(--accent); background: var(--hover); color: var(--bright); }
+.customize-page .theme-option[aria-pressed='true'] { border-color: var(--accent); background: var(--selected); color: var(--bright); box-shadow: inset var(--space-1) 0 0 0 var(--accent); }
+.customize-page .theme-option:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .customize-page .theme-option > svg { flex-shrink: 0; }
-.welcome-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: var(--space-5); margin-bottom: var(--space-5); padding-bottom: var(--space-4); border-bottom: 1px solid var(--line); }
-.welcome-heading h1 { margin: 0; font-size: 24px; line-height: 1.4; font-weight: 600; color: var(--bright); }
-.project-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.welcome-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: 22px; padding-bottom: 18px; border-bottom: 2px solid var(--line-strong); }
+.welcome-heading h1 { display: flex; align-items: center; gap: var(--space-3); margin: 0; font: 700 34px/1.05 var(--font-brand); letter-spacing: -.055em; color: var(--bright); }
+.welcome-heading h1::before { content: ''; width: 4px; height: 1.08em; flex: 0 0 4px; background: var(--accent); }
+.project-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
 .project-actions .primary-button { margin-top: 0; }
-.action-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: var(--ctrl-height-lg); }
+.action-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: var(--ctrl-height-lg); white-space: nowrap; }
 .action-button > svg { flex-shrink: 0; }
-.welcome-preview { align-items: flex-start; gap: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); padding: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); font-size: 12px; }
-.welcome-preview .preview-dot { margin-top: var(--space-2); }
-.welcome-preview > span:last-child { min-width: 0; overflow-wrap: anywhere; }
-.git-note { margin: 0 0 var(--space-3); color: var(--muted); }
 .welcome-error { border: 1px solid var(--error); border-radius: var(--radius-xs); margin-bottom: var(--space-3); }
-.recent-section { min-width: 0; }
-.recent-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-2); }
-.recent-heading h2 { margin: 0; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .03em; }
-.project-search { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); min-height: 36px; background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); }
-.project-search:focus-within { border-color: var(--accent); }
+.recent-section { min-width: 0; padding: 0 0 var(--space-2); }
+.recent-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin: 0 0 var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--line-strong); }
+.recent-heading h2 { margin: 0; color: var(--bright); font: 650 14px/1.3 var(--font-brand); letter-spacing: -.015em; }
+.project-search { display: flex; align-items: center; gap: var(--space-2); min-width: 0; margin: 0; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); min-height: var(--ctrl-height-lg); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); }
+.project-search:focus-within { border-color: var(--accent); outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .project-search > svg { flex-shrink: 0; }
 .project-search input { flex: 1; width: 100%; min-width: 0; padding: var(--space-1); border: 0; background: var(--editor); color: var(--text); }
 .project-search input::placeholder { color: var(--muted); }
 .project-search input::-webkit-search-cancel-button { display: none; }
-.list-status { margin: var(--space-2) 0 var(--space-1); color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.list-status { margin: var(--space-2) 0 var(--space-1); color: var(--muted); font: 11px var(--font-ui); font-variant-numeric: tabular-nums; }
 /* IDEA keeps the welcome notification toolbar in the last row of the projects tab, aligned right
    (ProjectsTabFactory.kt:126-131 -> `align(AlignX.RIGHT)`); the popup reuses the status bar's list. */
 .welcome-notifications { position: relative; display: flex; justify-content: flex-end; margin-top: var(--space-3); }
 .welcome-notice-button { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 12px; }
-.list-hint { margin: 0 0 var(--space-1); padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--warning); background: var(--warning-bg); font-size: 11px; line-height: 1.7; }
-.recent-list { margin: 0; padding: 0; }
-.recent-group { margin-bottom: var(--space-1); }
-.recent-group-head { display: flex; align-items: center; gap: var(--space-1); color: var(--muted); font-size: 11px; }
-.recent-group-toggle { display: flex; flex: 1; align-items: center; gap: var(--space-2); min-width: 0; padding: 2px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font-size: 11px; cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
-.recent-group-toggle:hover { background: var(--hover); color: var(--secondary); }
-.recent-group-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.recent-list { margin: var(--space-2) 0 0; padding: 0; }
+.recent-group { margin-bottom: var(--space-3); }
+.recent-group-head { display: flex; align-items: center; gap: var(--space-1); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 11px; }
+.recent-group-toggle { display: flex; flex: 1; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--ctrl-height); padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font-size: 11px; cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.recent-group-toggle:hover { background: var(--hover); color: var(--bright); }
+.recent-group-toggle:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 .recent-group-head svg { transition: transform var(--dur-1) var(--ease); }
 .recent-group-head svg.collapsed { transform: rotate(-90deg); }
-.recent-group-name { font-weight: 600; letter-spacing: .02em; }
-.recent-group-count { margin-left: auto; font-variant-numeric: tabular-nums; }
-.group-edit { display: inline-flex; align-items: center; gap: 4px; padding: 2px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--muted); font-size: 11px; }
+.recent-group-name { color: var(--bright); font-weight: 650; }
+.recent-group-count { margin-left: auto; padding: 0 var(--space-1); border-radius: var(--radius-xs); background: var(--accent-soft); color: var(--accent); font-variant-numeric: tabular-nums; }
+.group-edit { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--muted); font-size: 11px; }
 .group-edit:hover { background: var(--hover); color: var(--secondary); }
 .group-edit svg { flex-shrink: 0; }
-.recent-group-list { list-style: none; margin: 0; padding: 0; }
-.recent-row { position: relative; display: flex; align-items: center; gap: var(--space-2); min-width: 0; border-bottom: 1px solid var(--line); }
-.recent-row.is-selected { background: var(--selected); }
-.recent-row.menu-open .recent-open { background: var(--selected); }
+.recent-group-list { list-style: none; margin: 0; padding: var(--space-1) 0 0; }
+.recent-row { position: relative; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0 var(--space-1); }
+.recent-row + .recent-row { border-top: 1px solid var(--line); }
+.recent-row.is-selected { background: var(--accent-soft); box-shadow: inset 2px 0 var(--accent); }
+.recent-row:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
+.recent-row.menu-open .recent-open { background: var(--hover); }
 /* RecentProjectFilteringTree renders name above path in one cell next to the icon; the old fixed
    2.2rem date column let the date paint over the row gear. */
-.recent-open { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-2) var(--space-4); align-items: center; flex: 1; min-width: 0; min-height: 52px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-xs); background: var(--editor); text-align: left; }
+.recent-open { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-2) var(--space-4); align-items: center; flex: 1; min-width: 0; min-height: 68px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-xs); background: transparent; text-align: left; }
 .recent-open:hover:not(:disabled) { background: var(--hover); }
 .recent-open:disabled { opacity: 1; color: var(--muted); }
-.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; align-self: center; border-radius: 50%; font-size: 12px; background-color: var(--selected); background-image: linear-gradient(135deg, var(--selected), var(--selected)); color: var(--on-accent); font: 600 11px var(--font-brand); letter-spacing: 1px; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
+.recent-open:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
+.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; align-self: center; border-radius: 3px; font-size: 12px; background-color: var(--selected); background-image: linear-gradient(135deg, var(--selected), var(--selected)); color: var(--on-accent); font: 700 11px var(--font-brand); letter-spacing: .04em; }
 /* RecentProjectIconHelper generates gradient avatars (ProjectIconPalette) for
    reachable paths and a desaturated version when the path is gone. The CSS
    gradient lives inline so the JS palette stays the single source of truth. */
@@ -651,12 +645,11 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .project-path { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--secondary); font: 11px/1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
 .project-date { overflow: hidden; text-overflow: ellipsis; color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .project-branch { display: inline-flex; align-items: center; gap: 3px; color: var(--secondary); font: 11px var(--font-mono); white-space: nowrap; }
-.memory-tag { flex-shrink: 0; color: var(--warning); font-size: 10px; }
 .recent-row-actions { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); flex-shrink: 0; }
 /* IDEA shows the row's ⋮ only while the pointer (or keyboard focus) is on the row. */
 .row-menu-button { opacity: 0; transition: opacity var(--dur-1) var(--ease); }
 .recent-row:hover .row-menu-button, .recent-row:focus-within .row-menu-button, .recent-row.menu-open .row-menu-button { opacity: 1; }
-.row-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 30; display: flex; flex-direction: column; min-width: 160px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.row-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 30; display: flex; flex-direction: column; min-width: 160px; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 /* `display: flex` 是补的：这是 `<button>`，UA 默认 inline-block，`justify-content` / `gap`
    在上面全是空操作（与 `.tool-menu-item` style.css:318、`.status-widget-item`:734 同款）。
    由 ui-icons 门禁的"写了 gap 必须是 flex"那条一并盯住。 */
@@ -668,7 +661,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 /* 子菜单自己的分隔线：与 style.css:160 的 `.menu-rule` 同一套样式，只换类名 ——
    行菜单本身那两条（上游 :1021 / :1029）由 tests/welcome-row-menu-order.test.mjs
    按 `.menu-rule` 计数，两层菜单不能混进同一个计数里。 */
-.submenu-rule { height: 1px; margin: 4px 8px; background: var(--line); }
+.submenu-rule { height: 1px; margin: var(--space-1) var(--space-2); background: var(--line); }
 .color-swatch { width: 16px; height: 16px; flex-shrink: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); }
 .color-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-backdrop { position: fixed; inset: 0; z-index: 20; }
@@ -676,20 +669,21 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 /* Source: IconUtil.desaturate in RecentProjectIconHelper when isProjectValid=false.
    CSS filter keeps the gradient visible while signalling the missing path. */
 .recent-row .recent-open:disabled .project-avatar { filter: grayscale(0.85) opacity(0.65); }
-.project-empty { padding: 42px var(--space-3); text-align: center; color: var(--muted); }
-.empty-actions { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
-.empty-action { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 168px; justify-content: flex-start; }
-.empty-more { position: relative; display: flex; flex-direction: column; align-items: center; }
-.empty-more-menu { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; min-width: 150px; margin-top: 4px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.project-empty { display: grid; justify-items: center; align-content: center; min-height: 280px; padding: var(--space-6) var(--space-3); text-align: center; color: var(--muted); }
+.empty-actions { display: flex; flex-direction: column; align-items: stretch; width: min(200px, 100%); gap: var(--space-2); margin-top: var(--space-3); }
+.empty-action { display: inline-flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--ctrl-height-lg); justify-content: flex-start; }
+.empty-more { position: relative; display: flex; flex-direction: column; align-items: stretch; }
+.empty-more-menu { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; min-width: 150px; margin-top: var(--space-1); padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .empty-more-item { display: flex; align-items: center; justify-content: flex-start; width: 100%; }
-.project-empty h3 { margin: var(--space-3) 0 var(--space-2); font-size: 15px; color: var(--text); font-weight: 500; }
-.project-empty p { max-width: 430px; margin: 0 auto var(--space-4); line-height: 1.8; overflow-wrap: anywhere; }
+.project-empty h3 { margin: var(--space-3) 0 0; font-size: 16px; color: var(--text); font-weight: 600; }
 @media (max-width: 760px) {
   .project-welcome { grid-template-columns: 155px minmax(0, 1fr); }
   .welcome-sidebar { padding: var(--space-5) var(--space-2) var(--space-4); }
   .welcome-brand { gap: var(--space-1); padding: 0 var(--space-2); }
   .welcome-brand .brand { font-size: 17px; }
-  .welcome-content { padding: var(--space-5) var(--space-5); }
+  .welcome-content { padding: var(--space-5) var(--space-4); }
+  .customize-group { grid-template-columns: minmax(100px, 140px) minmax(0, 1fr); }
+  .welcome-heading { align-items: flex-start; }
   .recent-row { flex-wrap: wrap; }
   .recent-open { flex-basis: 100%; grid-template-columns: 24px minmax(0, 1fr); align-items: center; }
   .project-details { display: flex; flex-direction: column; gap: 2px; }
@@ -703,13 +697,19 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
   .welcome-brand { padding: 0 var(--space-1); }
   .welcome-brand .brand { gap: var(--space-1); font-size: 13px; }
   .navigation-item { padding: var(--space-2); gap: var(--space-2); }
-  .sidebar-note { margin-inline: var(--space-2); }
   .welcome-content { padding: var(--space-5) var(--space-3); }
-  .welcome-heading { margin-bottom: var(--space-5); gap: var(--space-3); }
-  .welcome-heading h1 { font-size: 21px; }
+  .welcome-heading { margin-bottom: var(--space-4); gap: var(--space-3); }
+  .welcome-heading h1 { font-size: 24px; }
   .project-actions { flex-direction: column; align-items: stretch; width: 100%; }
   .project-actions .primary-button { justify-content: center; }
   .recent-open { gap: var(--space-2); padding-inline: 0; }
-  .project-avatar { width: 30px; height: 32px; font-size: 16px; }
+  .project-avatar { width: 32px; height: 32px; font-size: 16px; }
+  .customize-group { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .customize-group h2 { margin-top: 0; }
+  .customize-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+}
+@container (max-width: 42rem) {
+  .customize-group { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .customize-group h2 { margin-top: 0; }
 }
 </style>

@@ -16,7 +16,8 @@ import { blockAt, blockFoldPlan, blockRanges, commentRanges, depthOf, docComment
   levelPlan, lspFoldService, nestedWithin,
   rootAtLine, setFoldingRanges, areaStartingAtLine, areasContaining, collapseTarget, expandTarget, toggleTarget,
   recursiveScope } from '../src/editorFolding.ts'
-import { editingCommands } from '../src/editorCommands.ts'
+import { editingCommands, foldingKeymap } from '../src/editorCommands.ts'
+import { foldingLevelChords } from '../src/foldingKeymap.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -192,25 +193,25 @@ const acrossB = { from: 50, to: 250, auto: false }    // 跨过 B **尾端**的�
 const endsAtBStart = { from: 5, to: 20, auto: false }    // 尾端正好**搭**在 B 起点上的一条（containsStrict 两端都不含）
 
 test('折叠代码块：折光标处最内层那块，并把光标放到它末尾（:44-47、:55-63、:75）', () => {
-  assert.deepEqual(blockFoldPlan([C, B, A], [], 50), { from: C.from, to: C.to, caret: C.to, collapse: true })
+  assert.deepEqual(blockFoldPlan([C, B, A], [], 50), { from: C.from, to: C.to, caret: C.to, collapse: true, remove: [] })
   // 光标压在块的起止那一列上**也算**这一块：`range.containsOffset(offset)` 含端点
   //（`CollapseBlockHandlerImpl.java:36` + `TextRange.java:121-123`）。
-  assert.deepEqual(blockFoldPlan([C, B, A], [], C.to), { from: C.from, to: C.to, caret: C.to, collapse: true })
+  assert.deepEqual(blockFoldPlan([C, B, A], [], C.to), { from: C.from, to: C.to, caret: C.to, collapse: true, remove: [] })
   // 光标落在 B 与 C 之间（C 外面）⇒ C 不含光标，跳过它折 B（`:36-39` 那一支的 continue）。
-  assert.deepEqual(blockFoldPlan([C, B, A], [], 150), { from: B.from, to: B.to, caret: B.to, collapse: true })
+  assert.deepEqual(blockFoldPlan([C, B, A], [], 150), { from: B.from, to: B.to, caret: B.to, collapse: true, remove: [] })
 })
 
 test('折叠代码块：那块已经折着就往外爬一层（:48-52 记 previous、:44 折已有的展开区域）', () => {
   // C 折着 ⇒ 折父块 B（上游 C 是"已折的区域"、B 是"展开着的区域" ⇒ `setExpanded(false)` 落在 B 上）。
-  assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C)], 50), { from: B.from, to: B.to, caret: B.to, collapse: true })
+  assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C)], 50), { from: B.from, to: B.to, caret: B.to, collapse: true, remove: [] })
   // C 与 B 都折着 ⇒ 折 A。
   assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C), bounds(B)], 50),
-    { from: A.from, to: A.to, caret: A.to, collapse: true })
+    { from: A.from, to: A.to, caret: A.to, collapse: true, remove: [] })
 })
 
 test('折叠代码块：爬到顶全是折着的就只挪光标，不再叠一条（:66-73 的 previous 那一支）', () => {
   const plan = blockFoldPlan([C, B, A], [bounds(C), bounds(B), bounds(A)], 50)
-  assert.deepEqual(plan, { from: A.from, to: A.to, caret: A.to, collapse: false },
+  assert.deepEqual(plan, { from: A.from, to: A.to, caret: A.to, collapse: false, remove: [] },
     '上游这一段 `previous.setExpanded(false)` 对已折着的是空操作，可见效果只有 :75 的 moveToOffset')
   // 一条都不含光标 ⇒ 没目标（上游 :30 `element == null` 就 return）。
   assert.equal(blockFoldPlan([C, B, A], [bounds(A)], 1000), null)
@@ -223,11 +224,43 @@ test('折叠代码块：有折痕跨过这块的边界就不许新建（:54 inte
   // C 自己已经折着（不需要新建，也就谈不上搭界）⇒ 往外一层；B 的**尾**被跨住 ⇒ 停在这里，
   // 落到 :66-73 那一支：不折，只把光标放到记下的那条 previous（= C）末尾。
   assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C), acrossB], 50),
-    { from: C.from, to: C.to, caret: C.to, collapse: false })
+    { from: C.from, to: C.to, caret: C.to, collapse: false, remove: [] })
   // 跨界的那条只搭着 B 的起点一端（`containsStrict` 两端都不含）⇒ 不算搭界，B 可以折。
   assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C), endsAtBStart], 50),
-    { from: B.from, to: B.to, caret: B.to, collapse: true })
+    { from: B.from, to: B.to, caret: B.to, collapse: true, remove: [] })
 })
+
+// ── 折叠代码块要撤掉里层「用户自建的折痕」（本批 T1，`CollapseBlockHandlerImpl:50/:58-61/:66-71`） ──
+// 上游 `:49-50` 往外爬时记下"已折着、且 getPsiElement==null"（用户自建）的那条 = myPrevious，
+// 新建外层那块（`:58-61`）与爬到顶只 settle 在 previous（`:66-71`）两条路都 `removeFoldRegion(myPrevious)`
+// ⇒ 屏幕上只留外层一条。本仓用 `FoldArea.auto === false`（`areasOf` 给"折着但不在候选里"那档打的标）
+// 承接 `getPsiElement == null` 这一判定；`EditorFoldingInfo.java:44-51` 就是"没有 smart-pointer ⇒ 用户建的"。
+const handmadeInC = { from: 55, to: 90, auto: false }     // 落在 C 里、不是任何候选的手工折痕
+const outsideTarget = { from: 10, to: 60, auto: false }   // 跨在 C 外（C.from 在它里面、C.to 在它外面）
+
+test('折叠代码块：落点整条含住的那条手工折痕进 remove（:58-61 新建外层时撤 myPrevious）', () => {
+  // 折最内层那块 C：C 里那条手工折痕被 C 整条含住 ⇒ 进 remove。
+  assert.deepEqual(blockFoldPlan([C, B, A], [], 50, [handmadeInC]),
+    { from: C.from, to: C.to, caret: C.to, collapse: true, remove: [handmadeInC] })
+  // 折到外层 B（C 已折着）：C 里那条手工折痕同样落在 B 里 ⇒ B 是落点，remove 仍含它。
+  assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C)], 50, [handmadeInC]).remove, [handmadeInC])
+})
+
+test('折叠代码块：remove 反向 —— 不被整条含住、不是用户建的、就是落点本身，都不撤', () => {
+  // 手工折痕没被落点整条含住（跨在 C 外）⇒ 不撤。
+  assert.deepEqual(blockFoldPlan([C, B, A], [], 50, [outsideTarget]).remove, [])
+  // 没传 swallowed（= 落点里没有用户自建那条，全是候选/自动）⇒ 什么都不撤（对应上游 getPsiElement != null）。
+  assert.deepEqual(blockFoldPlan([C, B, A], [], 50).remove, [], '默认没有可撤的手工折痕')
+  assert.deepEqual(blockFoldPlan([C, B, A], [], 50, []).remove, [], '空集合也不撤')
+})
+
+test('折叠代码块：settle 在 previous（不新建）那一支同样把里层手工折痕撤掉（:66-71）', () => {
+  // C 已折着、B 的尾被跨住 ⇒ 停在这里，落点 = previous(C)，不折。
+  const plan = blockFoldPlan([C, B, A], [bounds(C), acrossB], 50, [handmadeInC])
+  assert.equal(plan.collapse, false)
+  assert.deepEqual(plan.remove, [handmadeInC], 'collapse:false 那一支也要撤里层用户折痕')
+})
+
 
 test('blockRanges：注释 / imports / region 那一三族不算"代码块"（CollapseBlockAction 找的是语言块）', () => {
   const kinds = [
@@ -248,8 +281,8 @@ const BLOCK_RANGES = [{ startLine: 0, endLine: 5 }, { startLine: 1, endLine: 3 }
 const blockState = (caret, folded, withRanges = BLOCK_RANGES) => {
   const placed = EditorState.create({ doc: BLOCK_DOC, selection: { anchor: caret },
     extensions: [codeFolding(), foldingRanges, lspFoldService] })
-    .update({ effects: setFoldingRanges.of(withRanges) })
-  return folded.length ? placed.update({ effects: folded.map(bounds => foldEffect.of(bounds)) }).state : placed.state
+    .update({ effects: setFoldingRanges.of(withRanges) }).state
+  return folded.length ? placed.update({ effects: folded.map(bounds => foldEffect.of(bounds)) }).state : placed
 }
 const blockSpans = state => {
   const out = []
@@ -290,6 +323,35 @@ test('fold.block 端到端：再按一次往外折一层；第三次只挪光标
   assert.equal(third.next.selection.main.head, outer.to, '光标停在外层末尾（:72 的 previous.getEndOffset()）')
 })
 
+// 正/反两档端到端：折叠代码块落外层时，**里层那条"用户自建"折痕被撤**（只剩外层），
+// 而**里层那条是服务端给的**（auto）时不撤 —— 与上游 `getPsiElement(region)` 判"是不是用户建的"一致。
+test('fold.block 端到端正档：外层折起时把里层用户自建折痕撤掉，只剩外层一条（:58-61/:66-71）', () => {
+  const doc = EditorState.create({ doc: BLOCK_DOC }).doc
+  const outer = { from: doc.line(1).from, to: doc.line(6).to }
+  // 里层那条手工折痕：只给外层服务端区间，内层没有候选 ⇒ areasOf 记成 auto:false（用户自建）。
+  const handmade = { from: doc.line(3).from, to: doc.line(4).to }
+  const caret = doc.line(1).from + 1                       // 光标在 outer 行内、handmade 外，折痕稳定留在原地
+  const { next, done } = pressBlock(blockState(caret, [handmade], [{ startLine: 0, endLine: 5 }]))
+  assert.equal(done, true)
+  assert.deepEqual(blockSpans(next), [[outer.from, outer.to]],
+    '外层折起、里层手工折痕被撤 ⇒ foldedRanges 只剩外层那一条，不套娃')
+  assert.ok(!blockSpans(next).some(([f, t]) => f === handmade.from && t === handmade.to),
+    '内层那条不在（removeFoldRegion 的等价：unfoldEffect）')
+})
+
+test('fold.block 端到端反档：里层那条来自服务端区间（auto）⇒ 不撤（getPsiElement != null 那一档不动）', () => {
+  const doc = EditorState.create({ doc: BLOCK_DOC }).doc
+  const inner = { from: doc.line(2).from, to: doc.line(4).to }
+  const outer = { from: doc.line(1).from, to: doc.line(6).to }
+  const caretIn = doc.line(3).from + 2
+  // 先折内层（BLOCK_RANGES 给了内层 ⇒ 它是候选/自动），再折外层。
+  const first = pressBlock(blockState(caretIn, [], BLOCK_RANGES)).next
+  const second = pressBlock(first).next
+  assert.deepEqual(blockSpans(second), [[outer.from, outer.to], [inner.from, inner.to]],
+    '内层是自动区间 ⇒ 折外层时保留它（与正档相反，钉住"只撤用户建的"）')
+})
+
+
 test('折叠代码块的退路仍然走语法树（没接语言服务的文件）', () => {
   const folding = read('src/editorFolding.ts')
   // 服务端一条区间都没给时，候选链 = 光标行那块 + 祖先链（`enclosingAreas`），
@@ -297,8 +359,12 @@ test('折叠代码块的退路仍然走语法树（没接语言服务的文件�
   assert.match(folding, /syntaxArea\(view\.state, pos\) \?\? enclosingAreas\(view\.state, pos\)\[0\]/,
     '光标行那块优先，摸不到才用祖先链的第一条')
   assert.match(folding, /for \(const area of enclosingAreas\(view\.state, pos\)\)/, '祖先链整条都是候选')
-  assert.match(folding, /const plan = blockFoldPlan\(areasContaining\(blocks, pos\), foldedBounds\(view\.state\), pos\)/,
-    '目标与光标落点由 blockFoldPlan 定')
+  assert.match(folding, /const plan = blockFoldPlan\(areasContaining\(blocks, pos\), folded, pos, userFolds\)/,
+    '目标与光标落点由 blockFoldPlan 定，第四个入参 `userFolds` 就是"里层用户自建折痕"的集合（:50/:58-61/:66-71）')
+  assert.match(folding, /const userFolds = areasOf\(view\.state, pos\)\.filter\(area => !area\.auto\)/,
+    'userFolds 取 `areasOf` 里 `auto === false` 那档（= 上游 getPsiElement == null 的等价物）')
+  assert.match(folding, /if \(plan\.remove\.length\) applyAreas\(view, plan\.remove, false\)/,
+    '落点算出的 remove 折完外层之后一并撤掉')
 })
 
 test('递归：根 + 套在里面的全部；收起时根已折着就换成光标处展开的那条（BaseFoldingHandler:61-76）', () => {
@@ -319,15 +385,19 @@ test('命令表：上游那一族的名字都在，且都真的指向折叠命�
 })
 
 // 键位的光靠字符串比对不够：得按**浏览器真实报出来的键名**验一遍。
-// `w3c-keyname` 按 keyCode 查表（109/189 → '-'、107/187 → '='、106 → '*'），数字键盘与主键区算同一个名字，
-// Shift 变体会先命中不带 Shift 的那条 —— 所以下面既验"按得出来"，也把**分不开的那几条**钉住。
-test('键位在浏览器的键名规则下真的对得上（用 CodeMirror 的匹配器验）', () => {
-  const editor = read('src/components/CodeEditor.vue')
+// `w3c-keyname` 按 keyCode 查表（109/189 → '-'、107/187 → '='），数字键盘与主键区算同一个名字，
+// Shift 变体会先命中不带 Shift 的那条。这一条只验**八条单段键**（收起/展开/全部/递归/选区/代码块）；
+// 展开到级别那一族不是单段 —— 它是两段式 chord，另见下一条测试（`foldingKeymap.ts`）。
+test('键位在浏览器的键名规则下真的对得上（八条单段键，用 CodeMirror 的匹配器验）', () => {
+  // 常驻 keymap 那一张表在 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限，
+  // 拆一次降一次）；判据跟着搬到新落点 —— 验的还是同一批键、同一个匹配器，没有放松。
+  const editor = read('src/editorKeymap.ts')
+  // 只截**单段那八条**：从 `Ctrl--` 到级别键（`...foldingKeymap` 展开）之前。
   const block = editor.slice(editor.indexOf("{ key: 'Ctrl--', preventDefault: true, run: editingCommands.fold! }"),
-    editor.indexOf("{ key: 'Alt-Shift-Insert'"))
-  const entries = [...block.matchAll(/\{ key: '([^']+)', preventDefault: true, run: editingCommands(?:\.([A-Za-z.]+)|\['([^']+)'\])! \}/g)]
-    .map(m => ({ key: m[1], command: m[2] || m[3] }))
-  assert.equal(entries.length, 9, `折叠键位应有 9 条，实际 ${entries.length}`)
+    editor.indexOf('...foldingKeymap'))
+  const entries = [...block.matchAll(/\{ key: '([^']+)', preventDefault: true, run: (?:editingCommands(?:\.([A-Za-z.]+)|\['([^']+)'\])|([A-Za-z]+))!? \}/g)]
+    .map(m => ({ key: m[1], command: m[2] || m[3] || (m[4] === 'foldSelection' ? 'fold.selection' : m[4]) }))
+  assert.equal(entries.length, 8, `单段折叠键应有 8 条，实际 ${entries.length}`)
   // 注释里会拿 `Ctrl-NumPad-` 当反例讲，所以只看**真的写进 keymap 的那些键**。
   const written = [...editor.matchAll(/\{ key: '([^']+)', preventDefault:/g)].map(m => m[1])
   assert.ok(!written.some(key => /NumPad|Numpad/.test(key)), '不许写 NumPad 这种 CodeMirror 匹配不到的键名（它只当后缀名，永远不命中）')
@@ -341,7 +411,7 @@ test('键位在浏览器的键名规则下真的对得上（用 CodeMirror 的�
     return hits.join(',')
   }
   const at = (key, keyCode, mods) => ({ key, keyCode, ...mods })
-  // 主键区：$default.xml 的 MINUS/EQUALS/PERIOD/MULTIPLY 那一套。
+  // 主键区：$default.xml 的 MINUS/EQUALS/PERIOD 那一套。
   assert.equal(press(at('-', 189, { ctrlKey: true })), 'fold', 'Ctrl+-')
   assert.equal(press(at('=', 187, { ctrlKey: true })), 'unfold', 'Ctrl+=')
   assert.equal(press(at('_', 189, { ctrlKey: true, shiftKey: true })), 'foldAll', 'Ctrl+Shift+-（浏览器报 _，走 Shift 回退匹配）')
@@ -350,34 +420,106 @@ test('键位在浏览器的键名规则下真的对得上（用 CodeMirror 的�
   assert.equal(press(at('=', 187, { ctrlKey: true, altKey: true })), 'unfold.recursively', 'Ctrl+Alt+=')
   assert.equal(press(at('.', 190, { ctrlKey: true })), 'fold.selection', 'Ctrl+.')
   assert.equal(press(at('>', 190, { ctrlKey: true, shiftKey: true })), 'fold.block', 'Ctrl+Shift+.')
-  assert.equal(press(at('*', 106, { ctrlKey: true })), 'unfold.level1', 'Ctrl+*（数字键盘乘号）')
-  // 数字键盘的加减号与主键区同名 ⇒ 主键区那一条就覆盖了（上游 $default.xml 的 SUBTRACT）。
+  // 数字键盘的减号与主键区同名 ⇒ 主键区那一条就覆盖了（上游 $default.xml 的 SUBTRACT）。
   assert.equal(press(at('-', 109, { ctrlKey: true })), 'fold', 'Ctrl+数字键盘减号 = 主键区减号')
-  // 分不开、也不硬凑的三条（判决 §A 登记）：数字键盘 ± 不随 Shift 改名，会先命中不带 Shift 的那条。
+  // 数字键盘的 ± 不随 Shift 改名，会先命中不带 Shift 的那条（这条与级别无关，仍成立）。
   assert.equal(press(at('-', 109, { ctrlKey: true, shiftKey: true })), 'fold', 'Ctrl+Shift+数字键盘减号只能给收起')
   assert.equal(press(at('+', 107, { ctrlKey: true })), '', '数字键盘加号没有可靠写法')
-  assert.equal(press(at('*', 106, { ctrlKey: true, shiftKey: true })), 'unfold.level1', 'Ctrl+Shift+数字键盘乘号只能给展开到级别 1')
 })
 
-test('键位照 $default.xml（级别那一条只绑到 1）', () => {
+// ── 展开到级别 = 两段式 chord（本批 B 的订正）──────────────────────────────────────────
+// 上游 `platform/platform-resources/src/keymaps/$default.xml:385-403` 的 `ExpandToLevel1..5`
+// 是 5 条独立的两段式绑定（`first-keystroke="control MULTIPLY"` + `second-keystroke="1".."5"`，
+// 每级另有一条 `NUMPAD1..5` —— 浏览器里数字键盘乘号/数字与主键区同名，故各只需一条）。
+// 上一版判词把它读成"CodeMirror 一条键对一个命令 ⇒ 只绑到级别 1"（`Ctrl+*` 单段直接触发展开到级别 1），
+// 那是误读：CodeMirror 认空格分隔的多段键名（`node_modules/@codemirror/view/dist/index.js:9164`
+// `key.split(/ (?!$)/)` + `:9165-9179` 注册前缀 + `:9222-9228`/`:9251` 补全前缀），
+// 于是 `Ctrl+*` 只是**前缀**（不触发命令），`Ctrl+* N` 才落到 `unfold.levelN`。
+// 权威表在 `src/foldingKeymap.ts`（`foldingLevelChords`），`src/editorCommands.ts` 接成 `foldingKeymap`。
+test('展开到级别 1–5 = 两段式 chord：单段 Ctrl+* 不触发，Ctrl+* N 触发第 N 级（$default.xml:385-403）', () => {
+  // ① 结构精确：键名与命令名一一钉死（不是存在性检查）。
+  assert.deepEqual(foldingLevelChords.map(b => b.key), ['Ctrl-* 1', 'Ctrl-* 2', 'Ctrl-* 3', 'Ctrl-* 4', 'Ctrl-* 5'])
+  assert.deepEqual(foldingLevelChords.map(b => b.command), ['unfold.level1', 'unfold.level2', 'unfold.level3', 'unfold.level4', 'unfold.level5'])
+  // ② 接成的 KeyBinding[] 的 run 就是同名命令（identity，防止键位表和命令表漂开）。
+  assert.equal(foldingKeymap.length, 5)
+  for (let index = 0; index < 5; index++) {
+    assert.equal(foldingKeymap[index].key, `Ctrl-* ${index + 1}`)
+    assert.equal(foldingKeymap[index].run, editingCommands[`unfold.level${index + 1}`], `Ctrl+* ${index + 1} 的 run 必须是 unfold.level${index + 1}`)
+  }
+  // ③ 真实派发（同一 view 对象：CodeMirror 的 storedPrefix 靠 view 身份匹配第二段，index.js:9222）。
+  const hits = []
+  const bindings = foldingLevelChords.map(b => ({ key: b.key, preventDefault: true, run: () => { hits.push(b.command); return true } }))
+  const state = EditorState.create({ doc: 'a\nb', extensions: [keymap.of(bindings)] })
+  const view = { state }
+  const stroke = shape => runScopeHandlers(view, { preventDefault() {}, stopPropagation() {}, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...shape }, 'editor')
+  const pressChord = level => {
+    hits.length = 0
+    stroke({ key: '*', keyCode: 106, ctrlKey: true })
+    const afterFirst = hits.join(',')
+    stroke({ key: String(level), keyCode: 48 + level })
+    return { afterFirst, afterSecond: hits.join(',') }
+  }
+  // 第一段：前缀，不触发任何命令。
+  assert.equal(pressChord(1).afterFirst, '', 'Ctrl+* 单段只是前缀，不能直接展开到级别')
+  // 第二段：每一级各自落到对应命令（分得开）。
+  for (let level = 1; level <= 5; level++) {
+    assert.equal(pressChord(level).afterSecond, `unfold.level${level}`, `Ctrl+* ${level} 要落到 unfold.level${level}`)
+  }
+})
+
+// 反向：`Ctrl+Shift+*` 与 `Ctrl+*` 在浏览器里**分不开**（乘号是字符键，`w3c-keyname` 的
+// `base[106] = shift[106] = '*'`，`@codemirror/view` 的 `modifiers`（index.js:9106-9116）首次查表把
+// Shift 去掉 ⇒ 两段都解析成前缀 `Ctrl-*`）。所以上游 `ExpandAllToLevel1..5`（`$default.xml:405-424`，
+// `control shift MULTIPLY` + 1..5）与本族绑在同一个乘号上会被完全遮蔽。给分不开的键编死绑定 = 假键位
+// （规约 §8：不为数字键盘编死键位），所以本表**只绑 caret 族**，`unfold.all.level1..5` 走 Code 菜单的
+// 「全部展开到级别」子菜单，键位面在此登记理由。
+test('全部展开到级别（Ctrl+Shift+*）与 Ctrl+* 分不开 ⇒ 不绑 chord，只走菜单（$default.xml:405-424）', () => {
+  assert.equal(foldingLevelChords.some(b => b.key.startsWith('Ctrl-Shift-')), false,
+    'foldingLevelChords 里不许有 Ctrl-Shift-* 那种永远命中不到的两段绑定')
+  assert.equal(foldingLevelChords.every(b => b.command === `unfold.level${b.key.slice(-1)}`), true,
+    '绑的只有 caret 族 unfold.level1..5（不含 unfold.all.*）')
+  // 真实派发：Ctrl+Shift+* 之后按 N 落到 caret 族（Shift 被 modifiers 去掉，不是 all 族）。
+  const hits = []
+  const bindings = foldingLevelChords.map(b => ({ key: b.key, preventDefault: true, run: () => { hits.push(b.command); return true } }))
+  const state = EditorState.create({ doc: 'a\nb', extensions: [keymap.of(bindings)] })
+  const view = { state }
+  const stroke = shape => runScopeHandlers(view, { preventDefault() {}, stopPropagation() {}, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...shape }, 'editor')
+  hits.length = 0
+  stroke({ key: '*', keyCode: 106, ctrlKey: true, shiftKey: true })
+  stroke({ key: '3', keyCode: 51 })
+  assert.equal(hits.join(','), 'unfold.level3', 'Ctrl+Shift+* 与 Ctrl+* 落到同一条 caret 绑定（证实分不开）')
+})
+
+test('键位照 $default.xml：八条单段常驻 + 展开到级别走两段式表', () => {
+  // 两张表在 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限，拆一次降一次）。
+  // 「常驻」的判据跟着搬：宿主把这张表装进 onMounted 的常驻数组、**不**装进 lspExtensions()。
+  const keymap = read('src/editorKeymap.ts')
   const editor = read('src/components/CodeEditor.vue')
-  // 折叠键位必须在**常驻** keymap 里（`onMounted` 那个数组，含 `Mod-slash` 那一段），
-  // 不能挂在 `lspExtensions()` 上 —— 未接语言服务的文件也要能折叠（真机上踩过）。
-  const alwaysOn = editor.slice(editor.indexOf("keymap.of([{ key: 'Mod-s'"), editor.indexOf('Alt-Shift-Insert'))
+  // 折叠键位必须在**常驻** keymap 里，不能挂在 `lspExtensions()` 上 —— 未接语言服务的文件也要能折叠（真机上踩过）。
+  assert.ok(keymap.includes("key: 'Ctrl--'") && keymap.includes("key: 'Ctrl-Shift-.'"), '常驻 keymap 里要有单段折叠这一族')
+  assert.ok(editor.includes('keymap.of(editorKeymap)'), '常驻 keymap 要真的装进编辑器')
   const lspPart = editor.slice(editor.indexOf('function lspExtensions()'), editor.indexOf('onMounted('))
-  assert.ok(alwaysOn.includes("key: 'Ctrl--'") && alwaysOn.includes("key: 'Ctrl-*'"), '常驻 keymap 里要有折叠这一族')
-  assert.ok(!lspPart.includes("key: 'Ctrl--'"), 'lspExtensions() 里不该有折叠键位')
+  assert.ok(!lspPart.includes('editorKeymap'), 'lspExtensions() 里不该装常驻 keymap')
   // 名字带点的写 `editingCommands['x']`，简单名字写 `editingCommands.x`（与源码一致）。
+  // 这八条是单段键；级别一族不在这里（它是两段式 chord，权威表在 `src/foldingKeymap.ts`）。
+  // `Ctrl-.` 的 run 是本地包装 `foldSelection`（不是 `editingCommands['fold.selection']`）——
+  // 它要读 `foldSelectionOutcome` 给"不许移除自动生成区域"弹提示（W-1）。
   const pairs = [
     ['Ctrl--', 'editingCommands.fold'], ['Ctrl-=', 'editingCommands.unfold'],
     ['Ctrl-Alt--', "editingCommands['fold.recursively']"], ['Ctrl-Alt-=', "editingCommands['unfold.recursively']"],
     ['Ctrl-Shift--', 'editingCommands.foldAll'], ['Ctrl-Shift-=', 'editingCommands.unfoldAll'],
-    ['Ctrl-.', "editingCommands['fold.selection']"], ['Ctrl-Shift-.', "editingCommands['fold.block']"],
-    ['Ctrl-*', "editingCommands['unfold.level1']"],
+    ['Ctrl-.', 'foldSelection'], ['Ctrl-Shift-.', "editingCommands['fold.block']"],
   ]
   for (const [key, run] of pairs) {
-    assert.ok(editor.includes(`{ key: '${key}', preventDefault: true, run: ${run}`), `缺键位 ${key} → ${run}`)
+    assert.ok(keymap.includes(`{ key: '${key}', preventDefault: true, run: ${run}`), `缺键位 ${key} → ${run}`)
   }
+  // `foldSelection` 包装确实接了提示（不是空壳）：读 outcome、命中自动生成那一档弹
+  // `CANNOT_REMOVE_AUTOGENERATED_REGION`。包装仍在 CodeEditor.vue（它要 hint 与确认框宿主）。
+  const wrapper = editor.slice(editor.indexOf('function foldSelection('), editor.indexOf('const hoverSource'))
+  assert.ok(wrapper.includes('foldSelectionOutcome') && wrapper.includes('showErrorHint(CANNOT_REMOVE_AUTOGENERATED_REGION)'),
+    'foldSelection 包装要读 foldSelectionOutcome 并弹 CANNOT_REMOVE_AUTOGENERATED_REGION')
+  // 级别一族的两段式绑定不在 CodeEditor.vue 里逐条写死，而是从模块取（键位只有一份真相）。
+  assert.equal(foldingLevelChords.length, 5, '展开到级别是 5 条两段式 chord（$default.xml:385-403）')
 })
 
 test('菜单：Code 菜单里的「折叠」子菜单照 FoldingGroup 的顺序与文案', () => {

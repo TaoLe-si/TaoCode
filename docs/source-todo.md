@@ -158,15 +158,16 @@
 - [x] 「在新标签页中打开结果」（`find.open.in.new.tab.action`，`FindUsagesSettings.showResultsInSeparateView`）
   ——状态早就有（`referencesInNewTab`），这一批把它也接到 Find 窗口自己的齿轮上（上游它就在这一组里；
   Window 菜单那一行仍在，两处**同一份状态**）。
-- [~] **「一键导航」（`autoscroll.to.source.action.name`，`UIBundle.properties:23` = "Navigate with Single Click"）
-  不接**：它要的是"单击选中 / 双击导航"这套**选择模型**，而本仓的引用行是**单击即导航**、没有选中态。
-  做一个点了没反应的勾选项就是假控件（项目硬规则 2），所以本轮**不建**，等结果列表有了选择态
-  （↑↓ 移动选中项、Enter 打开）再一起补。它不是被忘掉的：`src/usageViewGear.ts` 的注释里写明缺什么。
+- [x] **「一键导航」**（`autoscroll.to.source.action.name`，`UIBundle.properties:23-24`）：Tao 已接入独立的单击导航偏好与结果选择态
+  （`src/referenceContents.ts`、`src/usageViewGear.ts`、`src/components/ToolWindowView.vue`、`src/components/ReferencePanel.vue`）。
+  来源边界：`UsageViewContentManagerImpl.java:95-116` 的 gear 项读写 `UsageViewSettings.isAutoScrollToSource`，默认 false（`UsageViewSettings.kt:67`）；
+  全树检索未发现 Usage 安装 `AutoScrollToSourceHandler`，`UsageViewImpl.java:953-956` 实际注册的是双击与 Enter 导航。
+  Tao 的单击选择后打开按 `UIBundle.properties:23-24` 的描述“当一个元素被选中时，打开它供编辑”解释；这不代表 IDEA 当前 UsageView 已安装单击 handler。
 
 ## 11. 第三十八批（Git 日志窗口的「视图选项」齿轮）的不做项
 
 上游那一组是 `Vcs.Log.PresentationSettings`（`platform/vcs-log/impl/resources/intellij.platform.vcs.log.impl.xml`
-的 `Vcs.Log.Toolbar.RightCorner` 里那个齿轮，组文案 = 视图选项）。本仓接住两条：
+的 `Vcs.Log.Toolbar.RightCorner` 里那个齿轮，组文案 = 视图选项）。本仓已接入可由现有日志数据和布局承载的选项：
 
 - [x] 「标签名称」（`action.Vcs.Log.ShowTagNames.text`，描述"在表中显示标签名称"）—— 状态早就有
   （项目设置 `vcsLog.showTagNames`，日志行按它过滤 tag 引用）；这一批只是把入口放到 IDEA 放的那一处
@@ -176,20 +177,34 @@
   表头（`VcsLogColumns.vue`）与行单元格（`VcsLogTable.vue`）同一份判据，宽度也不参与分配
   （`fitColumns` 的余量算法只减看得见的列）。按仓库根持久化（与列宽/顺序同一家族）。
 
-不接的四条（判据都在 `src/vcsLogPresentation.ts` 的文件头）：
+仍未接的两条（判据都在 `src/vcsLogPresentation.ts` 的文件头）：
 
 - [~] 「根名称」（`Vcs.Log.ShowRootsColumnAction`）：`ShowRootsColumnAction.update` 里
   `!table.getColorManager().hasMultiplePaths()` 就整行 `isEnabledAndVisible = false` ——
   本仓的日志是**按仓库根分别打开**的（`<VcsLog :root=…>`），恒为单根 ⇒ 上游那条行本身也不会出现。
   本地 `showRootNames` 那个项目设置保留（它在单根下仍会画根名，是既有行为，改动它属于另一件事）。
-- [~] 「紧凑型引用视图」（`Vcs.Log.CompactReferencesView`）：本地引用是一排 pill，没有"只显示第一个引用"的第二套渲染。
-- [~] 「长边」（`Vcs.Log.ShowLongEdges`）：本地图只画相邻行的边（`buildLogGraph` 的 down/up/pass），跨行长边没有中间表示。
-- [~] 「提交时间戳」（`Vcs.Log.PreferCommitDate`）：日志行只有作者日期（`GitFullCommit.date`），
-  提交日期只有"提交详情"里才有（`GitCommitDetails.committerDate`）—— 要做得先让 native 的 `git.log`
-  一起回提交日期（跨层），所以这一条是"待办"，不是"不做"。
-- [~] 「左侧的引用」（`Vcs.Log.AlignLabels`）：本地引用固定在提交消息左侧，没有第二种排布。
+- [x] 「紧凑型引用视图」（`Vcs.Log.CompactReferencesView`）：`logRefGroups()` 按引用排序后将紧凑档并为首组，`VcsLogTable.vue` 只画组首 chip；组内其他引用仍可从 tooltip 查看。
+- [x] 「长边」（`Vcs.Log.ShowLongEdges`）：`VcsLog.vue` 的开关传入 `VcsLogTable.vue`，由 `buildLogGraph(..., { showLongEdges })` 绘制跨行边。
+- [x] 「提交时间戳」（`Vcs.Log.PreferCommitDate`，默认关闭）：`VcsLogDefaultColumn.kt:170-184`
+  选择 `commitTime` 而非 `authorTime`；Tao 的 `git.logFull` 在 `native/git_log.cpp` 同时返回 `%aI` / `%cI`，
+  全局偏好存于 `taocode.vcs.log.preferCommitDate`。`VcsLogTable.vue` 的日期格、速度搜索、复制文本与行 tooltip
+  共用所选日期格式；`PreferCommitDateAction.java:37-59` 的日期列可见门控也已接入。
+- [x] 「左侧的引用」（`Vcs.Log.AlignLabels`）：开关切到独立引用列；提交消息不再被引用 chip 挤占空间。
 - [~] 着色器组（`Vcs.Log.HighlightersActionGroup`）：本地只按仓库根着色（`rootColor`），
   没有按作者/按日期的着色器族。
+
+2026-10-06 vcslogdisp 批补记（`Vcs.Log.CompactReferencesView` 的显示档还剩哪几截，判据与坐标见
+`docs/batch-2026-10-06-vcslogdisp.md`）：
+
+- [x] **引用排序**（`GitLabelComparator`，`plugins/git4idea/backend/src/log/GitRefManager.kt:190-216` + 名字档
+  `NaturalComparator.java`）：已落 `src/vcsLogPresentation.ts` 的 `LOG_REF_TIERS` / `compareLogRefs()` /
+  `naturalCompareRefNames()`，消费方 = `logRefGroups()` → `VcsLogTable.vue` 的 chip。
+- [x] **组内其余引用可达**（`SimpleRefGroup.kt:32-39` 把全部引用留在一个组里 + `TooltipReferencesPanel.java:35-56`
+  十行封顶）：已落 `logRefGroups()` / `logRefTooltip()`，消费方 = chip 的 `title`。
+- [x] **引用串的可用宽度档**（`GraphCommitCellRenderer.kt:274-287`）：`VcsLogColumns.vue` 用 canvas 量提交列宽与各主题宽度，`VcsLogTable.vue` 同时提供图形列宽；`logRefAvailableWidth()` 按紧凑 `min(freeSpace, 列宽/3)`、非紧凑 `max(freeSpace, max(列宽/2, 列宽-80))` 算出 chip 宽度并传给渲染。
+- [x] **CURRENT_BRANCH 那一档的供给侧**：`useVcsLogData` 在日志首屏/刷新读取 `git.status.head`，由 `VcsLog.vue` 传入 `VcsLogTable`。
+- [x] **tracked 对子 / 预组**（`GitRefManager.kt:104-114` + `:313-330`）：`native/git.cpp:466` 从 Git 配置读取 tracking pair，`git.status` 传给 `vcsLogData`，再由 `logRefGroups()` 与提交行中的 remote ref 配对；`origin & main` 组名按 upstream 与 local 分支拼出。
+- [x] **detached head 组**（`DetachedHeadRefGroup` + `LabelPainter.createTooltip:441-447`）：`native/git.cpp:538` 用 symbolic HEAD 与 rebase 状态供给 `isOnBranch`，`logRefGroups()` 仅在 detached 状态下显示警示组与 tooltip。
 
 ## 12. 第三十九批（工具窗口注册表）留下的两处，以及它顺带判掉的两条
 
@@ -282,8 +297,7 @@
       **第九十六批已做**（面板内那条）：`src/commitChecks.ts` 的 `checksProgress` + `fixDoubleEllipsis`
       （照 `CommitChecksTaskInfo:18-23` 与 `StatusBarProgressIndicator.setText:105-125`、`:71-86`），
       渲染在 `src/components/SourceControl.vue` 的 `.sc-checks-progress`（标题 + 两档正文 + 取消）。
-      **仍缺**：`CommitChecksProgressIndicatorTooltip` 那个**悬停浮层**（点一下在指示器上方弹一个
-      `PopupCommitChecksProgressIndicator`）—— 状态栏任务行的可展开列表是另一种形态，判决里已从 `[~]` 改判 `[ ]`。
+      **已落**：`CommitChecksProgressIndicatorTooltip` 的悬停浮层（`src/commitChecks.ts`、`src/components/SourceControl.vue`）：点击进度行打开，浮层内可取消；点外部或 Esc 收起，检查停止时随行一起收起。
 - [x] **索引期间检查不可用**那条警告（`label.commit.checks.not.available.during.indexing`，`:310`）：
       **第九十六批已做**：文案 `NOT_AVAILABLE_DURING_INDEXING` + `indexingWarningVisible(analyzing, checksBusy)`。
       本仓的"分析中"= **配了语言服务但还没跑起来**（与状态栏 `smartModeLabel` 同一条判据）——
@@ -331,4 +345,4 @@
 - [x] 面板内的检查进度指示（`CommitChecksProgressIndicator`）与
       「索引期间某些提交检查不可用」那条警告（`label.commit.checks.not.available.during.indexing`）：
       **第九十六批已做**，逐条见上文两条 `[x]` 与本文件上方的记录 ——
-      仍缺的只有 `CommitChecksProgressIndicatorTooltip` 那个悬停浮层（判决里已从 `[~]` 改判 `[ ]`）。
+      `CommitChecksProgressIndicatorTooltip` 悬停浮层已落（见上文）。

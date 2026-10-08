@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createWizard, createWizardContext } from '../src/wizard.ts'
+import { createSubSteps, createWizard, createWizardContext, resolveSubStepSelection } from '../src/wizard.ts'
 import { validationError, validationWarning } from '../src/dialogValidation.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -111,4 +111,62 @@ test('接线：新建项目对话框的两步流用的是这个向导', () => {
   assert.match(dialog, /wizard\.next\(\)/, '前进没有走向导的校验门禁')
   assert.match(dialog, /wizard\.back\(\)/, '后退没有走向导')
   assert.match(dialog, /projectNameError/, '既有的纯函数校验不能在重构里丢')
+})
+
+// ── 提交拒绝与子步骤表（上游 `CommitStepException` / `AbstractNewProjectWizardMultiStepBase`）──
+
+test('提交被拒：导航不动、next/back/finish 返回 false，原因带出来', () => {
+  const commits = []
+  const steps = [
+    { id: 'a', title: 'A', commit: (_c, type) => { commits.push(`a:${type}`); return { message: '路径被占用。' } } },
+    { id: 'b', title: 'B' },
+  ]
+  const wizard = createWizard(steps)
+  assert.equal(wizard.next(), false, '提交被拒 ⇒ 不前进')
+  assert.equal(wizard.current, 0)
+  assert.deepEqual(commits, ['a:next'], '提交回调跑过一次')
+  const advance = wizard.advance('next')
+  assert.equal(advance.moved, false)
+  assert.equal(advance.error, '路径被占用。', '上游 Messages.showErrorDialog 那一句')
+  assert.equal(wizard.lastRejection()?.message, '路径被占用。')
+})
+
+test('静默取消：不报错、只是不前进（CommitStepCancelledException）', () => {
+  const steps = [
+    { id: 'a', title: 'A', commit: () => ({ silent: true }) },
+    { id: 'b', title: 'B' },
+  ]
+  const wizard = createWizard(steps)
+  const advance = wizard.advance('next')
+  assert.equal(advance.moved, false)
+  assert.equal(advance.error, null, '静默取消不弹错误框')
+  assert.equal(wizard.current, 0)
+})
+
+test('提交不返回拒绝对象 = 放行（返回别的值不当拒绝）', () => {
+  const steps = [
+    { id: 'a', title: 'A', commit: () => [1, 2].length },   // 回调里顺手返回个长度
+    { id: 'b', title: 'B' },
+  ]
+  const wizard = createWizard(steps)
+  assert.equal(wizard.next(), true, '非拒绝对象一律放行')
+  assert.equal(wizard.lastRejection(), null)
+})
+
+test('子步骤表：新增档优先、当前档还在就保持、没了退第一档', () => {
+  assert.equal(resolveSubStepSelection([], ['x', 'y'], ''), 'x', '首次给第一档')
+  assert.equal(resolveSubStepSelection(['x', 'y'], ['x', 'y', 'z'], 'y'), 'z', '新增的 z 优先（上游 addedSteps.first()）')
+  assert.equal(resolveSubStepSelection(['x', 'y'], ['x', 'y'], 'y'), 'y', '没有新增就保持当前')
+  assert.equal(resolveSubStepSelection(['x', 'y'], ['y'], 'x'), 'y', '当前档被移除 ⇒ 退第一档')
+  assert.equal(resolveSubStepSelection(['x'], [], 'x'), '', '空表给空串（不抛）')
+  assert.equal(resolveSubStepSelection(['x'], ['x'], ''), 'x', '当前为空 ⇒ 第一档')
+})
+
+test('子步骤选择：不在表里的标签被拒', () => {
+  const sub = createSubSteps(['java', 'kotlin'])
+  assert.equal(sub.selected, 'java')
+  assert.equal(sub.select('kotlin'), true)
+  assert.equal(sub.selected, 'kotlin')
+  assert.equal(sub.select('python'), false, '表里没有的不许选')
+  assert.equal(sub.selected, 'kotlin')
 })

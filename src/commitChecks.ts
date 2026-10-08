@@ -393,33 +393,65 @@ export function indexingWarningVisible(analyzing: boolean, checksBusy: boolean):
 /**
  * 「提交文件…」的**请求形状**（R1 的前端那一半）。
  *
- * 上游：`platform/vcs-impl/src/com/intellij/openapi/vcs/actions/commit/CommonCheckinFilesAction.kt:26-78`
- * 把选中的路径交给 `CheckinActionUtil.kt:100-160` 的 `pathsToCommit(...)` —— 它先把重复项并掉、
- * 再把"这一批变更"设成唯一的提交范围（`workflowHandler.setCommitState(...)` ⇒ `getIncludedChanges()`
- * 只含这些路径）。本仓的等价物就是把这批路径原样送给宿主的新 `paths` 入参，
- * 落点 `native/git.cpp` 的 `commit(..., paths)` → `git commit --only -- <paths>`。
+ * 上游（逐行开过，参考树实测）：`.../actions/commit/CommonCheckinFilesAction.kt:37-53` 的
+ * `actionPerformed` 把 `VcsContextUtil.selectedFilePaths(...)` 那批路径交给
+ * `CheckinActionUtil.kt:121-147` 的 `performCheckInAfterUpdate(...)`，同文件 `:153-167` 的
+ * `getIncludedChanges(...)` 算出"这次包含的变更"，`:135-136` 把它设成唯一的提交范围
+ * （`workflowHandler.setCommitState(initialChangeList, included, …)`）。
+ *
+ * 订正留痕（2026-10-06 partialcommit，三条都是上一路 lane 抄错的坐标，逐条重开上游核过）：
+ *  · 原写 `CommonCheckinFilesAction.kt:26-78` ⇒ 该文件共 80 行，`update()` 在 `:23-34`、
+ *    `actionPerformed` 在 `:37-53`、`isActionEnabled` 在 `:75-78`（原写 `:74-78` 的那一行是
+ *    `@ApiStatus.Internal`，函数体从 `:75` 起）；
+ *  · 原写 `CheckinActionUtil.kt:100-160` 的 `pathsToCommit(...)` ⇒ **上游没有叫 `pathsToCommit`
+ *    的函数**，它是 `performCommonCommitAction`/`performCheckInAfterUpdate`/`getIncludedChanges`
+ *    的参数名（`:77`、`:126`、`:157`）；被选 changes 与未版本管理文件各取一份在 `:104-106`，
+ *    `getIncludedChanges` 整体是 `:153-167`（原写 `:159-167` 少看了函数头）；
+ *  · 原写"落点 `git commit --only -- <paths>`"读起来像上游也这么发 ⇒ **上游不发 `--only`**：
+ *    `GitCheckinEnvironment.kt:393-434` 是被选项刷进 index（`GitFileUtils.kt:156-179`）+
+ *    不属于这次的暂存项临时退回（`GitResetAddStagingAreaStateManager.kt:30-60`）+
+ *    一次**不带 pathspec** 的 `git commit -F`（`GitRepositoryCommitter.kt:77-108`）+ 退出时恢复
+ *    （`GitStagingAreaStateManager.kt:24-28`）。`--only` 是本仓为同一 observable 结果选的短路，
+ *    口径与实测见 `src/commitScope.ts` 的文件头。
+ * 本仓的等价物就是把这批路径送给宿主的 `paths` 入参，落点 `native/git.cpp` 的
+ * `commit(..., paths)` → `git commit --only -- <paths>`。
  *
  * 三条口径：
  *  · **空 = 不带这个键**：今天的 `git.commit` 请求体一个字都不变（宿主没接这条通道之前，
- *    带上 `paths` 也只会被忽略 ⇒ 宁可不发）；
- *  · 去空白、去重、保序（`pathsToCommit` 的集合语义）；
+ *    带上 `paths` 也只会被忽略 ⇒ 宁可不发）；"我明明选了子集却一个都没选中"那一档由
+ *    `src/commitCheck.ts` 那条链说「选择要提交的文件」（`:75-84` 的 `commitIncludedCount` ⇒
+ *    `commitBlockReason` ⇒ `:106` 的文案 ⇒ 提交按钮禁用 + 面板错误行），不留到这里静默降级；
+ *    2026-10-06 partialcommit 收尾订正：这里原来写的是 `src/commitScope.ts` 的 `commitScopeProblem`，
+ *    那个符号没有任何生产消费方（同一句话的第二把尺子），已删，判据改钉真跑的那条链；
+ *  · 去空白、去重、保序（`CheckinActionUtil.kt:104-106` 那两份集合都是先去重再 concat）；
  *  · 上限 500 条与 native 的 `paths.size() > 500` 一致，超了在这里就拒掉。
  *
  * 2026-10-06（commit2）把"校验非法 paths"这一半补上，四条口径都有上游出处：
- *  · **单条路径的合法性**＝把 native 那道闸在前端先跑一遍：`native/git.cpp:259-265` 的
- *    `checked_path()` 拒空串、>512 字符、以 `-` 开头、含 CR/LF、含 `..`，抛 `INVALID_REQUEST`
- *    （在前端先拒 = 少一次往返、错误也落在"提交文件…"那一步，而不是等 git 撞死）；
+ *  · **单条路径的合法性**＝把 native 那道闸在前端先跑一遍：`native/git.cpp` 的 `checked_path()`
+ *    拒空串、>512 字符、以 `-` 开头、含控制字符（CR/LF 在内）、含 `..`、绝对路径与反斜杠分隔符，
+ *    抛 `INVALID_REQUEST`（在前端先拒 = 少一次往返、错误也落在"提交文件…"那一步，而不是等 git 撞死）；
+ *    这道闸的本体在 native，前端的 `commitPathProblem` 只是它的一份镜像，两处的数字必须一致
+ *    （`MAX_COMMIT_PATH_LENGTH`，判据在 `tests/commit-scope.test.mjs`）；
  *  · **目录与其子项同时选中 ⇒ 不并掉**：`DescindingFilesFilter.java:27-69` 会把后代路径滤掉，
  *    但 `:36-39` 一上来就先问 `AbstractVcs#allowsNestedRoots`，而 git 那一支答 **true**
  *    （`plugins/git4idea/backend/src/GitVcs.java:260-263`）⇒ 上游对 git 仓库是一个路径都不并；
  *    本仓只接 git，所以这里也**不许**做祖先折叠（上一版的注释把这一步当成"集合语义"，实际不是）；
- *  · **被忽略（noisy）的被选项 ⇒ 拒绝**：`actions/commit/CommonCheckinFilesAction.kt:74-78`
+ *  · **被忽略（noisy）的被选项 ⇒ 拒绝**：`actions/commit/CommonCheckinFilesAction.kt:75-78`
  *    的 `isActionEnabled` 要求 `status != FileStatus.IGNORED` —— 面板默认连列都不列它们
  *    （`ChangesView.ShowIgnored`），多选把它们夹进来时不能真的进这次提交；
  *  · **未跟踪的被选项 ⇒ 明确纳入**（不是拒绝）：`CheckinActionUtil.kt:104-105` 把
- *    `UNVERSIONED_FILE_PATHS_DATA_KEY` 与 `CHANGES` 各取一份，同文件 `:159-167` 的
+ *    `UNVERSIONED_FILE_PATHS_DATA_KEY` 与 `CHANGES` 各取一份，同文件 `:153-167` 的
  *    `getIncludedChanges()` 把未版本管理的那些 `concat` 进"这次包含的变更"
- *    ⇒ 路径照原样发出去，由 native 先 `git add -- <path>`（`native/git.cpp:465-469`）再 `--only` 提交。
+ *    ⇒ 路径照原样发出去，由 native 只对**未跟踪的那几条**先 `git add`（`native/git.cpp` 的
+ *    `commit(..., paths)`）再 `--only` 提交。为什么不是"全部先 add"：重命名被 `git mv` 过的那一半
+ *    已经不在 index 也不在工作区，`git add -- <旧路径>` 会 `fatal: pathspec … did not match any files`
+ *    （实测退出码 128，`--ignore-errors` 压不住），整批发出去 = 这次提交直接失败；
+ *  · **重命名对 ⇒ 补齐另一头**（2026-10-06 partialcommit）：上游一条 `ChangedPath` 同时带
+ *    `beforePath`/`afterPath`（`GitCheckinEnvironment.kt:403-404` 把两朵路径分别放进 toCommitRemoved /
+ *    toCommitAdded），所以"选中一次重命名"交出去的就是两朵路径。单边提交实测写出坏历史（只给新路径 ⇒
+ *    `A e.txt` 而 HEAD 里的旧路径还在；只给旧路径 ⇒ `D d.txt` 而新内容留在 index）。补齐这一步在
+ *    `src/commitScope.ts` 的 `expandCommitSelection`，下面 `commitPathsToSubmit` 先补齐再校验，
+ *    并且认得"某行的 `renameFrom`"也是一个有变更的路径（否则补出来的那一半会被当成陌生路径误拒）。
  *  后两条要吃"本仓当前的变更列表"（`changes`）：宿主没给这一份时**不做**这两档判断，
  *  请求形状与本批之前逐字一致（不放假校验，也不误拒）。
  */
@@ -438,37 +470,64 @@ export interface CommitRequestInput {
   changes?: readonly CommitScopeRow[]
 }
 
-/** 变更列表里"提交范围校验"要用的那三件事（与 `GitChange` / `CommitChecksFileRow` 结构相容）。 */
-export interface CommitScopeRow {
-  path: string
-  untracked: boolean
-  /** 「显示忽略的文件」开着时才列出来的那些 —— 上游 `FileStatus.IGNORED`。 */
-  ignored?: boolean
-}
+/** 变更列表里"提交范围校验"要用的那几件事：与 `src/commitScope.ts` 同一份类型，不另立（`GitChange` 结构相容）。 */
+export type { CommitScopeRow } from './commitScope.ts'
+import { type CommitScopeRow, commitScopeCovers, expandCommitSelection, normalizeCommitSelection } from './commitScope.ts'
 
 export const MAX_COMMIT_PATHS = 500
 
-/** native `checked_path()` 里那个长度上限（`native/git.cpp:260`，同一道闸同一个数）。 */
+/** native `checked_path()` 里那个长度上限（`native/git.cpp` 的 `checked_path`，同一道闸同一个数）。 */
 export const MAX_COMMIT_PATH_LENGTH = 512
 
-/** 单条路径过 native 那道闸：返回不合法的原因，合法时返回 `null`。 */
+/**
+ * 单条路径过 native 那道闸：返回不合法的原因，合法时返回 `null`。
+ * 六道口径与 native 一一对应（判据在 `tests/commit-scope.test.mjs`，它把 native 源码里的字面量
+ * 与这里逐条比）：空串由调用方先滤（空白项不算一次选择）、>512、以 `-` 开头（防读成选项）、
+ * 含控制字符（NUL 会把 argv 那一截切断 ⇒ 请求的路径和 git 拿到的路径不是同一条）、
+ * 含 `..`（防越出仓库）、绝对路径与反斜杠分隔符（pathspec 只认仓库相对的 POSIX 写法；
+ * 实测 `git add -- C:/…/c.txt` 这种仓内绝对路径**能走通**，而 `git` 对 `sub\x.txt`
+ * 报 `pathspec … did not match any file(s)` ⇒ 这两类都不是"仓库相对路径"，早点拒掉）。
+ *
+ * 两处 2026-10-06 partialcommit 收尾的订正（都是"这里说同源、其实不同"的实账）：
+ *  · **长度数的是字节不是字符**：native 那一头是 `path.size() > 512`（`std::string` = UTF-8 **字节**），
+ *    原来这里写 `path.length`（UTF-16 **码元**）⇒ 一篇 300 个汉字的路径（900 字节）前端放行、
+ *    native 拒掉，正是这条注释承诺的"同一个数"没做到。改成按 UTF-8 字节数（`utf8ByteLength`）；
+ *  · **第七条 `PATHSPEC_MAGIC_RE` 是前端先严、native 还没有的那一道**（`native/git.cpp` 不许本 lane 动，
+ *    接线请求见 `docs/wiring-requests-2026-10-06-partialcommit.md` W3）。它挡的是 git 的 pathspec
+ *    通配/魔术：实测临时仓里 `git commit --only -m x -- 'foo[1].ts'` 一次提交走了 `foo[1].ts`
+ *    **和** `foo1.ts` 两篇，`-- '*.ts'` 更是把仓库里所有 `.ts` 都提交走 ⇒ 一条"只选了一篇"的
+ *    pathspec 能提交得比用户选的更多，这是这一族最贵的错，方向上只能在前端先拒。
+ *    代价如实写在这：文件名里真带 `[` 的那一篇走不了「提交文件…」（`*`、`?` 在 Windows 上本来就
+ *    不能出现在文件名里），改走「暂存 + 整份提交」——那一条不发 pathspec，没有这个问题。
+ */
+const PATHSPEC_MAGIC_RE = /[*?[]|:\(|^:/
+function utf8ByteLength(path: string): number {
+  return new TextEncoder().encode(path).length
+}
+
 function commitPathProblem(path: string): string | null {
-  if (path.length > MAX_COMMIT_PATH_LENGTH) return '路径过长'
+  if (utf8ByteLength(path) > MAX_COMMIT_PATH_LENGTH) return '路径过长'
   if (path.startsWith('-')) return '路径不能以 - 开头'
-  if (path.includes('\n') || path.includes('\r')) return '路径不能含换行'
+  if (/[\u0000-\u001f]/.test(path)) return '路径不能含控制字符'
   if (path.includes('..')) return '路径不能含 ..'
+  if (path.startsWith('/') || path.startsWith('\\')) return '路径必须是仓库相对的'
+  if (/^[A-Za-z]:/.test(path)) return '路径必须是仓库相对的（不能带盘符）'
+  if (path.includes('\\')) return '路径分隔符必须是 /'
+  if (PATHSPEC_MAGIC_RE.test(path)) return '路径含 git 的 pathspec 通配/魔术，按字面提交会带上别的文件'
   return null
 }
 
 /**
  * 被选路径 → 这次提交的 pathspec（`commitRequestParams` 的那一步，不单独导出：
  * 请求体只有一条生成路径，别让"校验过的"和"没校验的"两种形状在界面上并存）。
- * 三条口径（详见 `commitRequestParams` 的注释）：非法的单条路径就地拒、被忽略的被选项拒、
- * 未跟踪的被选项**留**。选中目录（`src`）算得中它下面的那些变更（`src/a.ts`）。
+ * 四条口径（详见 `commitRequestParams` 的注释）：先把重命名对补齐（`src/commitScope.ts` 的
+ * `expandCommitSelection`）、非法的单条路径就地拒、被忽略的被选项拒、未跟踪的被选项**留**。
+ * 选中目录（`src`）算得中它下面的那些变更（`src/a.ts`）。
  */
 function commitPathsToSubmit(paths: readonly string[] | undefined,
                              changes?: readonly CommitScopeRow[]): string[] {
-  const selected = [...new Set((paths ?? []).map(path => path.trim()).filter(Boolean))]
+  // 有了变更列表才补得动重命名的另一头；没有列表时保持本批之前的形状（不猜伙伴）。
+  const selected = changes ? expandCommitSelection(paths, changes) : normalizeCommitSelection(paths)
   if (selected.length > MAX_COMMIT_PATHS) {
     throw new Error(`一次最多提交 ${MAX_COMMIT_PATHS} 个所选文件。`)
   }
@@ -481,11 +540,15 @@ function commitPathsToSubmit(paths: readonly string[] | undefined,
   const rejected: string[] = []
   for (const path of selected) {
     const exact = changes.find(row => row.path === path)
+    // 补出来的那一半（重命名旧路径）不是独立的一行：它就在某行的 `renameFrom` 上，
+    // 上游把这两朵路径算作同一条变更（`GitCheckinEnvironment.kt:403-404`）⇒ 这里认它。
     if (exact?.ignored) { rejected.push(`${path}（被忽略的文件不参与提交）`); continue }
     // 选中目录：它下面的变更行才算"被这次提交包含"；一行都对不上 = 上游那条 `status == NOT_CHANGED`，
-    // 那个动作对这种路径直接不启用（`CommonCheckinFilesAction.kt:74-78`）。
-    const under = path + '/'
-    if (!exact && !changes.some(row => row.path.startsWith(under))) {
+    // 那个动作对这种路径直接不启用（`CommonCheckinFilesAction.kt:75-78`）。
+    // 覆盖判定用 `src/commitScope.ts` 的 `commitScopeCovers`（目录 + 重命名另一头），
+    // 与提交按钮那把空判（`src/commitCheck.ts` 的 `commitIncludedCount`）、结果计数
+    // （`committedChangeCount`）同一条规则 —— 三份各写一遍就会漂，2026-10-06 partialcommit 收尾并成一份。
+    if (!changes.some(row => commitScopeCovers(path, row))) {
       rejected.push(`${path}（没有可提交的变更）`)
     }
   }

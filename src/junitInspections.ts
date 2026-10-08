@@ -22,6 +22,10 @@
 import { reactive } from 'vue'
 import { DirtyScopeTracker, HighlightPassRegistrar, runMainHighlightPasses, type DirtyLineRange } from './highlightPasses.ts'
 import { junitRuleProblems, type NamingOptions } from './junitRules.ts'
+// 本地检查的 **EP 宿主**（上游 `com.intellij.localInspection`）：JUnit 规则集本身作为**一条 bundled
+// 工具**登记进 EP，pass 跑的是 `runLocalInspectionTools`（全部登记的工具）—— 第三方插件按同一个
+// EP id 挂的 localInspection 会跟着一起跑，不再是写死的一条通道。
+import { registerLocalInspectionTool, runLocalInspectionTools } from './localInspectionTools.ts'
 
 /** 规则声明的严重度沿用 IDEA「警告」档（问题面板里可被严重度过滤）。 */
 const WARNING = 2
@@ -314,10 +318,22 @@ function recordDirtyRanges(path: string, ranges: readonly DirtyLineRange[]): voi
 }
 inspectionPasses.registerPass(context => {
   recordDirtyRanges(context.path, context.dirtyRanges)
-  const problems = junitInspectionProblems(context.path, context.text)
+  // pass 跑**全部登记的本地检查工具**（`com.intellij.localInspection` EP）：JUnit 规则集是其中的
+  // bundled 一条，第三方插件挂进来的 localInspection 在这里一起产诊断，进同一条本地通道。
+  const problems = runLocalInspectionTools({ path: context.path, text: context.text, code: maskNonCode(context.text) })
   if (problems.length) localDiagnostics.set(context.path, problems)
   else localDiagnostics.delete(context.path)
 }, { kind: 'main' })
+
+// JUnit 规则集作为 bundled 工具登记（上游 `plugins/junit` 的 `localInspection` 贡献在 plugin.xml 里
+// 的那几条）：`shortName` 用检查类的短名口径，第三方可用同名覆盖。
+registerLocalInspectionTool({
+  shortName: 'JUnit',
+  displayName: 'JUnit 检查',
+  groupDisplayName: 'JUnit',
+  severity: WARNING,
+  check: context => junitInspectionProblems(context.path, context.text),
+}, { source: 'bundled' })
 
 /** 重算一个文件并写通道；没有问题时删掉条目（编辑修好即从问题面板消失）。 */
 export function refreshLocalInspections(path: string, text: string): void {

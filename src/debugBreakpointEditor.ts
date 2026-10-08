@@ -54,7 +54,7 @@ export interface BreakpointEditModel {
 
 /** 一条断点在编辑器里看到的当前状态（`enabled`/`temporary`/`dependency`/`group` 都是本仓侧状态）。 */
 export function breakpointEditModel(input: {
-  point: DapBreakpoint & { logMessage?: string }
+  point: DapBreakpoint
   enabled: boolean
   conditionEnabled: boolean
   temporary: boolean

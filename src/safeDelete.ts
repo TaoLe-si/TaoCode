@@ -158,7 +158,7 @@ export function safeDeletePrompt(
   const seen = new Set<string>()
   const codeItems: string[] = []
   for (const ref of refs) {
-    const key = `${ref.path} ${ref.line} ${ref.character}`
+    const key = `${ref.path}\u0000${ref.line}\u0000${ref.character}`
     if (seen.has(key)) continue
     seen.add(key)
     codeItems.push(`引用：${place(ref.path, ref.line, ref.character)}`)

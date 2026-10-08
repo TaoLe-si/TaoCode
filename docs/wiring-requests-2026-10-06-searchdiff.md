@@ -511,3 +511,99 @@ test('块尾取 min、块首取 max；某一半没有时不合并（CodeBlockUti
 `tests/editor-code-block.test.mjs` 现在钉的是「只用括号扫描」那一条链。合并边一旦接上，需要补一条
 判据：**Python 文档里光标压在 `elif` 上时，`codeBlockTarget(…, true, 'python')` 走的是 min(结构, 括号)
 而不是括号那半**（上游 `CodeBlockUtil.java:118`），否则这条边又被退回成括号那一支而没人发现。
+
+---
+
+# 增补 · `searchdiff` lane（2026-10-06 17:0x）· 桶9「搜索 / 比对」族接线请求收拢
+
+收件人：主代理。来源 lane：`findrep2`、`ssreplace`、`ss4`、`diffverdict`、本 lane。
+**本 lane 一行保留文件都没动**（`src/App.vue` / `src/bridge.ts` / `src/components/CodeEditor.vue` / `native/main.cpp` / `docs/inventory/**` 全程只读）。
+下面每一条的**出口名与行号都是本 lane 自己打开文件核对过的当前值**；与来源 lane 原文不一致的地方**显式写"对不上"**。
+行数口径统一用 `tests/module-size.test.mjs:157` 的 `readFileSync(...).split('\n').length`（**比 `wc -l` 多 1**），门就是这么判的。
+
+| 保留文件 | 现在（门口径） | 上限 | **真实余量** |
+| --- | --- | --- | --- |
+| `src/App.vue` | 2713 | 2737 | **24**（⇦ 派单里流传的"30"是错的，实测少 6 行） |
+| `src/bridge.ts` | 905 | 905 | **0 贴顶**（只能就地改，多一个换行就红） |
+| `src/components/CodeEditor.vue` | 1145 | 1147 | **2** |
+| `native/main.cpp` | 1846 | 2000 | **154**（上限被 `module-size.test.mjs:46` 钉死"新能力一律抽成 `native/xxx.cpp`"） |
+| `src/components/SearchPanel.vue` | 898 | 900（未登记，走默认） | **2** |
+
+## 销账 · 本文件上面的 W-1 **已经落地了**，请关掉它（别再"恢复"那 321 行）
+
+`fix-searchpanel` 批写这份请求时，实现被从 `src/structuralCodeBlock.ts` 删走、消费方在别人的文件面里。现在磁盘上两半都在：
+
+- **① 已接**：`src/editorCodeBlock.ts:41` `import { findCodeBlockRange, mergeBlockEnd, mergeBlockStart } from './structuralCodeBlock.ts'`；`:168` `export function codeBlockTarget(text, caret, forward, language = '')`，`:169-172` 正是请求里那份合并体。
+- **② 已接**：`src/editorCommands.ts:50` 引 `editorLanguageId`、`:187` `codeBlockTarget(text, range.head, forward, state.facet(editorLanguageId) ?? '')`（语言档 facet 真源 `src/editorMatchBrace.ts:51`，挂载点 `src/components/CodeEditor.vue:91` + `:481`）。
+- **实现本体**：`src/structuralCodeBlock.ts:532 findCodeBlockRange` / `:541 mergeBlockEnd` / `:548 mergeBlockStart`（另带 `:409 pythonCompoundStatement`、`:515 pythonCompoundKeywordRanges`）。
+- **「附：还差的那一条判据」也已补**：`tests/editor-code-block.test.mjs:98`「合并块尾取 min(结构, 括号)（CodeBlockUtil.java:118）」、`:116`「括号那半扫不到 ⇒ 用结构那半」（fixture 光标压在 `elif` 上）。本 lane 复跑 `node --test tests/editor-code-block.test.mjs` ⇒ **tests 17 / pass 17 / fail 0**。
+
+⇒ **风险**：本文件 `:73-508` 那 321 行「待恢复的实现（逐字）」现在与 `src/structuralCodeBlock.ts` 里的真源**内容重复**。下一个读到它的人若照单"恢复"，就会做出第二份真源（本仓反复踩的那类坑）。请把 `:73-508` 标成**过期/仅供对账**，不要执行。
+
+## W-2 · 工程内替换的「保留大小写」全链（来源 `findrep2`；出口名逐条复核，**全部对得上**）
+
+上游依据本 lane 自己开树复量过（不是转抄）：`platform/util/resources/misc/registry.properties:1414` 确为 `ide.find.word.based.preserve.case=true`；`platform/lang-impl/src/com/intellij/find/impl/FindManagerBase.java:293-295` 确为 `Registry.is(...) ? PreserveCaseUtil.applyCase(foundString, replacement) : PreserveCaseUtil.replaceWithCaseRespect(replacement, foundString)`；`platform/indexing-api/src/com/intellij/find/FindModel.kt:411` 确为 `var isPreserveCase: Boolean = false`。⇒ 用户档默认关、算法默认逐词，两件事不矛盾。
+
+按依赖顺序，每条给「真实出口名（本 lane 打开核过）+ 净行数 + 余量」：
+
+| 序 | 目标 | 真实出口名 / 位置（实测） | 要加什么 | 净行数 / 余量 |
+| --- | --- | --- | --- | --- |
+| 1 | `native/main.cpp`（保留） | `:1300` `case "workspace.files"_h: case "search.run"_h: case "search.replace"_h: case "search.preview"_h: case "search.replaceSelected"_h: {`，其下 `:1302-1310` 逐字段 `params.value(...)`（`:1305` = `options.case_sensitive = params.value("caseSensitive", true);`） | `options.preserve_case = params.value("preserveCase", false);` | **+1 / 154** ✓ 挂得上 |
+| 2 | `native/search.hpp` | `:15` `struct Options {`，字段实测 `:16 query`、`:17 replacement`、`:18 regex`、`:19 case_sensitive`、`:20 whole_word`（findrep2 说的 `:15-22` 里 `:21-22` 其实是 `include/exclude`，`Options` 到 `:26` 还有 `cancelled`） | `bool preserve_case = false;` | +1（该文件 93 行，非保留） |
+| 3 | `native/search.cpp` | 两个生效点实测**与 findrep2 写的一致**：`:750` `if (match) result += build_replacement(...)`（`replace()` 内联）、`:778` `static std::string substitution_text(...)` 且 `:782` 那一行调 `build_replacement`；`build_replacement` 本体在 `:503`；`preview()` `:797` 走 `:830`、`replace_selected()` `:861` 走 `:904` | 两处各包一层 `apply_preserve_case(options.preserve_case, found, text)`，算法照 `src/preserveCase.ts:143 applyCase` | ~+6 / 176（该文件 924 行，native 默认上限 1100） |
+| 4 | `src/bridge.ts`（保留，**余量 0**） | `:192` `export interface SearchOptions { query: string; regex: boolean; caseSensitive: boolean; wholeWord: boolean; include: string; exclude: string }` —— **一行式，就地加 `preserveCase: boolean` 净 0** | 只能在同一行内改；**写成多行立刻把 `module-size` 判红** | +0 / 0 |
+| 5 | `src/components/SearchPanel.vue`（非保留，余量 **2**） | 现有三颗 `fs-toggle` 在 `:641-643`（`caseSensitive`/`regex`/`wholeWord`），无 preserve；确认语两处已改调 `replaceAllConfirmNote`（`:437`、`:446`） | 一颗 toggle + 一个 `ref` | +2 ⇒ **正好顶到 900**。先在该文件内腾 2 行（或把 toggles 抽成子组件）再加 |
+| 6 | 开关文案 | 上游图标 `AllIcons.Actions.PreserveCase` 本仓无对应物；现成先例 = `src/components/EditorFindBar.vue:212` 那颗 `Aa`（`:41` 已有 `preserveCase: boolean` prop） | 复用文本档 `Aa`，不新造图标键 | 面板侧 |
+| 7 | 持久化 | 若要记住这一档，新键**缺键补默认**（先例 `src/editorFindController.ts:143` 写 `taocode.findOptions`、`:29-30` 用 `Boolean(parsed.preserveCase)` 读回） | 缺键 = `false` | — |
+
+**挂不上的退化后果**：编辑器查找栏的「保留大小写」已经生效（`src/editorFindController.ts:231` → `preserveCaseReplacement`），工程内替换那一半只能原样插入 ⇒ **同一个功能在两个入口行为分叉**；`src/preserveCase.ts` 的逐词算法在上游是两支共用（`FindManagerBase.getStringToReplace`），本仓只有 JS 侧一份 ⇒ 上游那一档在本仓只落地了一半。
+**不许做的事**：只加面板开关不接链路 = 假控件（本仓规则⑧）；findrep2 已经据此**故意没加**那颗 toggle。
+
+## W-3 · Python 结构块在生产里走不到（来源 `ss4` §六.1；**它点名的文件有一处不准**）
+
+- `ss4` 原文说"涉及 `src/bridge.ts`" ⇒ **不准确**：真正的档表是 **`src/languages.ts:8`** `export const EDITOR_LANGUAGES = ['java', 'cpp', 'typescript', 'other'] as const`（全仓唯一一份）。`src/bridge.ts:87` 只是 `export { EDITOR_LANGUAGES } from './languages.ts'` 原样转出 ⇒ **不需要动余量 0 的 `src/bridge.ts`**。这是"名字对不上就写清真名"的现例。
+- 名单（实测）：`src/languages.ts:8`（同数组加 `'python'`，**净 0**）→ `src/editorLanguage.ts:15-18`（加一条 `forced === 'python'` 分支）→ `src/appLanguageLabels.ts:15`（`languageLabels` 那张 `Record`，现写 `java/cpp/typescript/other`）→ `src/components/FileTypesPage.vue`（**名字对、文件在**，35 KB）→ `src/components/CodeEditor.vue:91` / `:481`（`editorLanguageIdExtension` 挂载链，**余量 2**）。
+- **硬门槛（本 lane 实测）**：`@codemirror/lang-python` **既不在 `package.json`（现有 `lang-java`/`lang-cpp`/`lang-javascript`/`lang-css`/`lang-html`）也不在 `node_modules`** ⇒ 这条不是"加一行语言档"，要引新依赖；`src/fileTypeRegistry.ts:819` 那条 `{ id: 'Python', … language: 'other' }` 与 `:850 seedHashBang('Python', ['python'])` 只给**类型名**，词法层仍是空的（`src/fileTypeDetection.ts:59` 同理把 python shebang 判成 `language: 'other'`）。
+- **挂不上的退化后果**：`src/structuralCodeBlock.ts` 的 Python 那一整块（`:409`、`:515`、`:532`）在生产里永远收到 `language='other'` ⇒ `findCodeBlockRange` 返回 null，刚销账的 W-1 只剩括号那半在跑，**判据全绿但链路不通**（本仓典型的"有判据没实现"变体）。上游只有 Python 注册了这个 EP（`python/pluginResources/intellij.python.community.impl.xml:439`），所以 Java/C++/TS 返回 null 不是少做 —— 但 Python 这条在本仓是**真缺**。
+- 无法核实：Ultimate 侧是否另有 `codeBlockSupportHandler` 注册项（本机是 community 树）。
+
+## W-4 · `VcsLogTable` 速度搜索多字符追加仍丢（来源 `ssreplace` §1；**出口名全对、行号已漂**）
+
+`ssreplace` 写的行号对不上当前文件（`src/components/VcsLogTable.vue` 现在 301 行，且被别路改着：numstat +103/−38）。本 lane 实测的当前值：
+
+| 名字 | ssreplace 原文 | **实测现在** |
+| --- | --- | --- |
+| `focusHash` | `:92-98` | **`:114`** `async function focusHash(hash: string)` |
+| 抢焦点那一行 | `:96-97` | **`:118`** `const row = list.value?.querySelector<HTMLElement>(\`[data-index="${index}"]\`)` + 紧随的 `row?.focus()` |
+| 命中后定位 | `:92-98` | **`:152`**（`void focusHash(commit.hash)`）、**`:217`**（`emit('select', …)` 后 `void focusHash(…)`） |
+| `onSearchInput` / 覆盖串 | `:178-182`、`:132-133` | **`:154-155`** `function onSearchInput(value) { search.value = value }`、**`:202-203`** 键路（`searchOpen.value = true` → `onSearchInput(event.key)`） |
+| 共享件挂载 | — | **`:224`** `<SpeedSearchBar :open="searchOpen" :query="search" …>`；对外暴露 **`:219`** `defineExpose({ focusHash })` |
+
+请求（归 vcsLog lane）：速度搜索激活期间命中定位只做 `scrollIntoView`、**不要** `row?.focus()`；或改吃 `src/speedSearch.ts` 的 `speedSearchNextInput` 状态机（先例 `src/components/TodoPanel.vue:8` import、`:191` 调用），让"框在场 = 追加"由同一真源决定，不靠 DOM 焦点是否守住。
+**退化后果**：`src/components/SpeedSearchBar.vue`（ssreplace 15:25 已把焦点收放上移到 `watch(open)`）修不到这块面板 ⇒ 在 VCS 日志上连打两个字符仍只留最后一个 = 上游 SpeedSearch「输入框在场时追加」在这一处仍缺。
+**引用警告**：`src/speedSearch.ts` 在本 lane 核对期间被 `ssmatch` 改写（mtime 13:41:33 → **17:02:48**，353 → **392** 行）⇒ 引用它的**行号一律现取现说**，别照抄本报告或它报告里的数字。
+
+## W-5 · 可选清理（非必须，`ssreplace` §2）
+
+`src/components/FileTree.vue:231`（该文件现在 315 行）在 `openSpeedSearch()` 里自己 `querySelector('.speed-search-input').focus()` —— 焦点收放已上移到 `SpeedSearchBar.vue`，这处冗余但无害；删不删归 project-tree lane，`tests/speed-search-wiring.test.mjs` 只钉接线存在、不钉这行。
+
+## 门禁现状（本 lane 现跑，供主代理决定优先级）
+
+- 族门 `node --test tests/find*.test.mjs tests/search*.test.mjs tests/replace*.test.mjs tests/speed-search*.test.mjs tests/diff*.test.mjs tests/module-size.test.mjs` ⇒ **371 / 371 / 0 红**（16:53–16:55 的树；`tests/replace*.test.mjs` **无匹配文件**）。
+- 死模块门 `node .tools/find-orphan-modules.mjs --gate` ⇒ **绿**（已登记孤儿 6 / 基线 8 · 新增 0 · 本轮清掉 2）⇒ **基线该由主代理下调到 6**。
+- 引用门 `node --test tests/source-citations.test.mjs tests/source-citation-anchors.test.mjs` ⇒ 11 / 8 / **3 红**（1 条越界行号在 `docs/batch-2026-10-06-findrep2.md`，4 条 moved 锚点在 `src/commitChecks.ts`、`src/components/ProblemsPanel.vue`×2、`src/runStartupFocus.ts`）⇒ **全部不归桶9**，详见 `docs/batch-2026-10-06-searchdiff.md` §6。
+- 桶9 判决门 `tests/b9-verdict.test.mjs` **9/9 绿**、`tests/b7-verdict.test.mjs` **10/10 绿**。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1** —— 请求原文自述「已经落地了，请关掉它」。**W-2（保留大小写全链）** —— 与 findrep2 同一条（跨 VCS lane / bridge），转 owner。
+- **W-3（Python 结构块）** —— `package.json`（保留），非本 lane。
+- **W-4（VcsLogTable 速度搜索追加）** —— `src/components/VcsLogTable.vue`（本 lane，属 VCS 半区），登记。
+- **W-5** —— 可选清理。
+
+结论：零接线（W-1 已落，W-2 转 owner，W-4 登记）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（W-1 已落，W-2 转 owner，W-4 登记）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

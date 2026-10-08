@@ -9,6 +9,10 @@
 // 这个模块只管**纯规则**（挂到哪一行、点击要发什么命令）；CodeMirror 的渲染与调度在
 // `codeLensExtension.ts`。
 
+// 编辑档的静默窗口复用上游那一族的同一个常量（见 `CODE_LENS_REFRESH` 上面那条注释），
+// 不在这里另写一个毫秒数。
+import { LOW_PRIORITY_QUIESCENCE_MS } from './lspHighlightingCache.ts'
+
 export interface CodeLensItem {
   /** 显示文字（LSP 把它放在 `command.title` 里）。 */
   title: string
@@ -226,10 +230,23 @@ export function codeLensTooltip(item: CodeLensItem | undefined): string {
 
 /**
  * 什么时候重新问一次 codeLens —— **刷新时机**：
- *   · `open`：打开文件 / 语言服务刚就绪，立即补一次（此时还没有任何条目）；
- *   · `change`：编辑后与其它 LSP 能力同档去抖（行号依赖精确位置，文档一变旧条目就作废）；
+ *   · `open`：打开文件 / 语言服务刚就绪，立即补一次（此时还没有任何条目）—— 与上游"该文件的首次
+ *     拉取绕开静默窗口"同一形状（`platform/lsp-impl/src/impl/features/highlightingCommon/LspHighlightingCache.kt:146`
+ *     的 `!isFirstPullFor(file)`，判断本体在 `:161`）；
+ *   · `change`：编辑后的**静默窗口**（document 得先稳定这么久才发拉取），数值 = 上游低优先级那一族的
+ *     `platform/lsp-impl/src/impl/features/highlightingCommon/LspHighlightingCache.kt:328`
+ *     `LOW_PRIORITY_QUIESCENCE_DELAY = 300.milliseconds`；`:324-327` 把这一族点名成
+ *     "Semantic tokens, document links, folding, **code lens**, inlay hints, and colors"，
+ *     而 `:52` 的 `quiescenceDelay` 缺省就取它 —— 所以 codeLens 的编辑档与那一族是**同一个数、
+ *     同一条上游**（本仓经 `src/lspHighlightingCache.ts` 的 `LOW_PRIORITY_QUIESCENCE_MS` 复用同一份
+ *     常量，不复制数字）。行号依赖精确位置，文档一变旧条目就作废。
+ *     订正留痕（2026-10-06 hlcache300）：这一条原来写"与其它 LSP 能力**同档**去抖"配的却是
+ *     `changeMs: 400`，而本仓那一族其它点数的是 300（上游也是 300）—— 注释与数字互相矛盾，现按
+ *     上游 `:328` 对齐；400 没有任何上游出处（参考树里 `LspHighlightingCache.kt` 只有 250/300 两个数）。
  *   · `focus`：编辑器重新获得焦点（用户去别的视图里改名/加引用之后回来）—— 去抖更长，
  *     因为 alt-tab 会连着触发，而这条请求是**整文档**的（见 `native/lsp_session.cpp` 的整形）。
+ *     **这一档没有上游对应物**：上游那份缓存只由文档变更驱动，没有"重新获得焦点"这个触发点，
+ *     所以 700 是本仓自定的值，不声称与上游同源（无法核实＝上游压根没这条）。
  *
  * 视口滚动**不重查**：请求本来就是整文档的，滚动不会带来新信息；IDEA 按可见区算是因为
  * 它的 provider 按需计算，本仓的通道不是。
@@ -242,7 +259,7 @@ export interface CodeLensRefreshPolicy {
   focusMs: number
 }
 
-export const CODE_LENS_REFRESH: CodeLensRefreshPolicy = { openMs: 0, changeMs: 400, focusMs: 700 }
+export const CODE_LENS_REFRESH: CodeLensRefreshPolicy = { openMs: 0, changeMs: LOW_PRIORITY_QUIESCENCE_MS, focusMs: 700 }
 
 export function codeLensRefreshDelay(trigger: CodeLensTrigger, policy: CodeLensRefreshPolicy = CODE_LENS_REFRESH): number {
   if (trigger === 'open') return policy.openMs

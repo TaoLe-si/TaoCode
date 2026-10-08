@@ -78,7 +78,6 @@ function flip(row: { path: string; trusted: boolean; source: 'settings' | 'expli
 
 <template>
   <h3>受信任位置</h3>
-  <p class="section-description">位于这些文件夹（及其子文件夹）下的项目会被信任，其构建脚本与运行配置可以执行。对应 IDEA 的设置 › 外观与行为 › 受信任位置（TrustedHostsConfigurable，注册 id trusted.hosts）；打开未信任项目时勾选「以后不再询问」也会写进这张清单。</p>
   <fieldset class="settings-fields trusted-locations" :disabled="busy">
     <div class="trusted-add">
       <input
@@ -89,7 +88,7 @@ function flip(row: { path: string; trusted: boolean; source: 'settings' | 'expli
       <button type="button" class="subtle-button" :disabled="busy || !input" title="把输入的文件夹加入受信任清单" @click="add">添加</button>
     </div>
     <p v-if="note" class="field-hint validation-error" role="alert">{{ note }}</p>
-    <p v-if="!rows.length" class="field-hint">清单为空：打开陌生目录时会先询问，只有选择「信任并打开」后才允许构建与运行。</p>
+    <p v-if="!rows.length" class="field-hint">清单为空。</p>
     <ul v-else class="trusted-list">
       <li v-for="row in rows" :key="row.path" class="trusted-row">
         <span class="trusted-path" :title="row.path">{{ row.path }}</span>
@@ -115,7 +114,7 @@ function flip(row: { path: string; trusted: boolean; source: 'settings' | 'expli
 .trusted-list { margin: var(--space-2) 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-1); }
 .trusted-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .trusted-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; color: var(--text); }
-.trusted-state { flex-shrink: 0; padding: 0 var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); font-size: 10px; color: var(--success); }
+.trusted-state { flex-shrink: 0; padding: 0 var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 10px; color: var(--success); }
 .trusted-state.untrusted { color: var(--muted); }
 .trusted-source { flex-shrink: 0; font-size: 10px; color: var(--muted); }
 </style>

@@ -196,3 +196,11 @@
   本仓改成撞点去重，见 `src/editorCaretPerLine.ts:70-74`）。
 - 别再给 `line.sort` / `line.reverse` / `line.unique` / `cursor.above` / `cursor.below` 补键位
   （本文件开头与 §R1 已经核过：出厂 `$default.xml` 里没有它们）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1 已闭环**（按选项 2 由 keymap2 批落）：`CodeEditor.vue:865-871` 两行绑定已摘、`keymapBindings.ts:235-238` 降 `source: 'none'`、`editMenu.ts:195-196` 键位栏空。
+- **R2 已闭环**（`keymapBindings.ts:228-241` 的 `EDITOR_ACTIONS` 带 `upstreamId`）。
+- **R3 第 4 步 / 第 5 步 / 第 6 步未落** —— 目标 `src/keymapBindings.ts`（保留文件）+ `src/components/CodeEditor.vue`（禁改清单）+ `tests/editor-caret-per-line.test.mjs`（非本 lane）。复核 `grep caret.perLine` 只命中 `src/menus/editMenu.ts:121`（键位栏仍空串）⇒ `Shift+Alt+G` 键位未注册。需 **keymap owner + CodeEditor owner** 同批落（三步必须同批，否则菜单键位栏与注册条目不一致会红）。
+
+结论：R1/R2 已闭环；R3 转给 keymap/CodeEditor owner。

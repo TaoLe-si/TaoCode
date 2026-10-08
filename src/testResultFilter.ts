@@ -109,3 +109,97 @@ export function filterTestTree(nodes: readonly TestTreeNode[], filter: TestDispl
 export function toggleDisplayFilter(filter: TestDisplayFilter, key: keyof TestDisplayFilter): TestDisplayFilter {
   return { ...filter, [key]: !filter[key] }
 }
+
+// --- 「重跑失败项」这一档到底重跑哪些（上游 `AbstractRerunFailedTestsAction.getFailuresFilter`）----
+//
+// 上游依据（本轮逐条自己开文件，行号按 `grep -n` 的实际输出）：
+//   · `platform/testRunner/src/com/intellij/execution/testframework/actions/AbstractRerunFailedTestsAction.java:131-141`
+//     —— `getFailuresFilter(consoleProperties)`：`includeNonStarted` 开着时
+//     `Filter.NOT_PASSED.or(FAILED_OR_INTERRUPTED).and(IGNORED.not())`（`:138`，Java 的结合顺序是
+//     `(NOT_PASSED ∨ FAILED_OR_INTERRUPTED) ∧ ¬IGNORED`）；关着时 `FAILED_OR_INTERRUPTED.and(IGNORED.not())`（`:140`）。
+//     判的是 `model.getRoot().getAllTests()`（`:111`、`:124`）——**上一次运行报过的**节点，
+//     所以「报了开始却没跑完」的那几条在默认档里会被一起重跑。
+//   · `platform/testRunner/src/com/intellij/execution/testframework/TestConsoleProperties.java:58`
+//     —— `INCLUDE_NON_STARTED_IN_RERUN_FAILED = new BooleanProperty("includeNonStarted", true)`：默认 **true**。
+//   · `java/execution/impl/src/com/intellij/execution/actions/JavaRerunFailedTestsAction.java:22-30`
+//     —— Java/JUnit 那支在这条过滤器上再 `and(LEAF)`：`shouldAccept` 只认 `test.isLeaf()` ⇒ suite 不进重跑集。
+//   · `plugins/junit/src/com/intellij/execution/junit2/ui/actions/RerunFailedTestsAction.java:29-50`
+//     —— `getRunProfile` 把 `getFailedTests(project)`（= 上面那条过滤器的产物）交给 `TestMethods`，
+//     即「重跑哪些」完全由那条过滤器决定。
+//   · 这条开关**用户可见**（不是本仓自造的控件）：
+//     `platform/testRunner/src/com/intellij/execution/testframework/TestConsoleProperties.java:224-226`
+//     的 `createIncludeNonStartedInRerun` 取键
+//     `platform/execution/resources/messages/ExecutionBundle.properties:157`
+//     = `Include Non-Started Tests in Rerun Failed`；
+//     `plugins/junit/src/com/intellij/execution/junit2/ui/properties/JUnitConsoleProperties.java:50`
+//     在 `appendAdditionalActions` 里真的把它加进工具栏（TestNG 那支同样：
+//     `plugins/testng/src/com/theoryinpractice/testng/model/TestNGConsoleProperties.java:46`）。
+//
+// 本仓的映射（登记清楚，别当成「少写了 interrupted」）：
+//   · 上游 `isInterrupted()`（整次运行被打断）与「testStarted 之后没有结束事件」两档，在本仓
+//     都是**没有结果行**（`src/testEventChannel.ts:141-144` 的 testStarted 不产出结果）⇒ 统一落在
+//     `outcome === null`，取数处 `TestTreeBuilder.notFinished()`；
+//   · `Filter.IGNORED` ⇒ 本仓的 `skipped`（与上面 `isIgnored` 同一条口径）。这里有个必须记下来的
+//     不对称：上游 `isPassed()`（`platform/smRunner/src/com/intellij/execution/testframework/sm/runner/SMTestProxy.java:279-283`）
+//     认 SKIPPED/COMPLETE/PASSED 三档，**不认 IGNORED**（`platform/lang-api/src/com/intellij/execution/testframework/sm/runner/states/TestStateInfo.java:61-70`
+//     的 Magnitude 全集里 IGNORED_INDEX 是独立一档）⇒ 光靠 `NOT_PASSED` 会把 `@Ignore`/`@Disabled` 扫进重跑集，
+//     `IGNORED.not()` 是挡它的唯一一道（`platform/testRunner/src/com/intellij/execution/testframework/Filter.java:57-62` + `not():31`）；
+//   · `Filter.LEAF` ⇒ **不是「`kind === 'test'`」**。上游本体是
+//     `platform/smRunner/src/com/intellij/execution/testframework/sm/runner/SMTestProxy.java:238-240`
+//     的 `myChildren == null || myChildren.isEmpty()`，也就是「**没有孩子的节点**」，于是：
+//       —— 有孩子的 suite（哪怕它自己 NOT_PASSED）被挡掉，重跑集只剩方法；这挡的就是
+//          「一个套件下只有一条失败测试」那种形状 —— 不挡的话 JUnit 的 `TestMethods` 收到类名会整类重跑；
+//       —— 只报过 `testSuiteStarted`、既没长出测试也还没闭合的 suite（类加载即崩）在这里**就是叶子**，
+//          它的状态是 `SMTestProxy.setSuiteStarted():474-482` 给的 SuiteInProgressState
+//          （`platform/smRunner/src/com/intellij/execution/testframework/sm/runner/states/SuiteInProgressState.java:13`
+//          继承 `.../states/TestInProgressState.java:57-59` 的 RUNNING_INDEX）⇒ 该进默认档，
+//          这正是属性名里 "Non-Started" 的正身，取数处 `TestTreeBuilder.notStartedSuites()`；
+//       —— **闭合了的空 suite 不算**：`platform/smRunner/src/com/intellij/execution/testframework/sm/runner/states/SuiteFinishedState.java:94`
+//          的 EMPTY_SUITE 走 `:140-143` 的 COMPLETE_INDEX ⇒ `isPassed()` 为真 ⇒ NOT_PASSED 就把它挡了。
+//     所以判据是「孩子数 = 0」，不是「kind 是不是 test」；拿不准孩子数时按**有孩子**处理（宁少不多）。
+// 消费点：`src/components/TestRunnerPanel.vue` 的「失败」按钮与它的工具栏开关。
+// 判据 `tests/junit-rerun-failed-scope.test.mjs`。
+
+/** 上游 `TestConsoleProperties.java:58` 的默认值。 */
+export const DEFAULT_INCLUDE_NON_STARTED = true
+/** 上游 `ExecutionBundle.properties:157` 的原文。 */
+export const INCLUDE_NON_STARTED_NAME = 'Include Non-Started Tests in Rerun Failed'
+
+export interface RerunFailureFilter { includeNonStarted: boolean }
+export const DEFAULT_RERUN_FAILURE_FILTER: RerunFailureFilter = { includeNonStarted: DEFAULT_INCLUDE_NON_STARTED }
+
+/**
+ * 重跑集里的一条候选：需要「有几个孩子 + 结果是什么」两件事。
+ * `childCount` 是给 `LEAF` 用的（上游 `SMTestProxy.java:238-240` 判的就是孩子数，不是 kind）；
+ * 不填时按保守值取 —— `test` 算 0（本仓的测试节点在 `src/testTree.ts` 的 `build()` 里一律 `children: []`），
+ * `suite` 算「有孩子」⇒ 不进重跑集（拿不准就少跑，不多跑）。
+ */
+export interface RerunCandidate {
+  name: string
+  kind: 'test' | 'suite'
+  outcome: 'passed' | 'failed' | 'skipped' | null
+  childCount?: number
+}
+
+/** 上游 `Filter.LEAF`：`platform/smRunner/src/com/intellij/execution/testframework/sm/runner/SMTestProxy.java:238-240` 的「孩子数为 0」。 */
+export function isRerunLeaf(row: RerunCandidate): boolean {
+  return (row.childCount ?? (row.kind === 'test' ? 0 : 1)) === 0
+}
+
+/**
+ * `getFailuresFilter`（`:131-141`）+ `and(LEAF)`（`JavaRerunFailedTestsAction.java:22-30`）的翻译：
+ * 先 `LEAF`（**孩子数为 0**，不是「kind 是不是 test」），再 `¬IGNORED`，最后按开关决定
+ * 要不要把「非通过」（NOT_RUN / RUNNING / FAILED 那一支）也算进来。
+ */
+export function rerunFailureAccepted(row: RerunCandidate, filter: RerunFailureFilter = DEFAULT_RERUN_FAILURE_FILTER): boolean {
+  if (!isRerunLeaf(row)) return false
+  if (row.outcome === 'skipped') return false
+  const defectOrInterrupted = row.outcome === 'failed'
+  if (!filter.includeNonStarted) return defectOrInterrupted
+  return defectOrInterrupted || row.outcome !== 'passed'
+}
+
+/** 重跑集（上游 `getFailedTests:120-125` 的 `select`）：按输入顺序出名字，不重排。 */
+export function rerunFailureNames(rows: readonly RerunCandidate[], filter: RerunFailureFilter = DEFAULT_RERUN_FAILURE_FILTER): string[] {
+  return rows.filter(row => rerunFailureAccepted(row, filter)).map(row => row.name)
+}

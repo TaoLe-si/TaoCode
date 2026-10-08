@@ -48,10 +48,15 @@ test('按项目根读写：两个项目各自一份；存储不可用不抛（�
 })
 
 test('面板接线：启动时载入、变化时写回，项目根从 ToolWindowView 传进来', () => {
+  // 载入/写回在 2026-10-06 从 DebugPanel.vue 抽进 `src/debugWatchesStore.ts`
+  // （面板贴着 900 行上限，本批补四个监视动作时必须拆出去），规则不变。
+  const store = readFileSync('src/debugWatchesStore.ts', 'utf8')
+  assert.match(store, /loadWatches\(deps\.storage, deps\.root\(\)\)/)
+  assert.match(store, /saveWatches\(deps\.storage, deps\.root\(\)/)
+  assert.match(store, /watch\(watches, list => saveWatches/, '变化时写回')
   const panel = readFileSync('src/components/DebugPanel.vue', 'utf8')
-  assert.match(panel, /loadWatches\(storage, props\.root \?\? ''\)/)
-  assert.match(panel, /saveWatches\(storage, props\.root \?\? ''/)
   assert.match(panel, /root\?: string/)
+  assert.match(panel, /root: \(\) => props\.root \?\? ''/, '面板把项目根喂给 store')
   assert.match(panel, /跨会话保存/, '界面写明这是跨会话行为')
   const view = readFileSync('src/components/ToolWindowView.vue', 'utf8')
   assert.match(view, /<DebugPanel[^>]*:root="ctx\.root"/)

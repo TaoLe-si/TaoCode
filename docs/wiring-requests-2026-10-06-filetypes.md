@@ -211,3 +211,24 @@ export function languageFor(path: string): Language {
   且它的两个消费点一个在保留文件 `src/App.vue`、一个在设置页属主那里。**模型侧不需要新代码** ——
   这条纯粹是「把第二张表接到第一张表上」，不动 `native`。
 
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **F6 已接线**：`src/components/FileTypesPage.vue:309-312` 的 `ignoreApply()` 已回读生效后清单（`ignoreList.value = ignoredPatterns()`）。判据 `tests/file-type-ignored-list.test.mjs` **pass 18 / fail 0**。
+- **F1 / F2（忽略清单灌进过滤链 / 搜索 exclude）** —— 目标 `src/bridge.ts` / `src/bridgePreview.ts`（保留文件，非本 lane）。跳过给 bridge owner。
+- **F3（文件树右键「覆盖文件类型」）** —— 目标 `src/components/EditorPopupMenu.vue` / `src/App.vue`（本 lane 可改面）。登记为待办（需 fileTypeOverrides 的完整入口）。
+- 桶 15 W1/W3、桶 15j 的复核结论本 lane 已独立核过（见各自处理结果）。
+
+结论：F6 已接线；F1/F2 转 bridge owner，F3 登记。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「F6 已接线；F1/F2 转 bridge owner，F3 登记。」。
+F3 复核仍未接：`grep 覆盖文件类型|fileTypeOverride src/menus src/App.vue` 0 命中；入口需在 `src/menus/` 的右键菜单表 + App 状态（子菜单面），属多文件装配，登记待办。F1/F2 需 native/bridge owner。
+
+## 处理结果（EP 化收口 lane，2026-10-07）
+
+**F3 仍缺宿主挂载点（模型侧本就齐）**：`src/fileTypeOverrides.ts` 的 `overridableFileTypes()` /
+`changeFileTypeOverride()` / `overrideFailureReason()` / `revertFileType()` / `isFileTypeOverridden()` 已导出；
+文件节点右键子菜单的**组件挂载点**写在 `docs/wiring-requests-2026-10-07-epclose.md` W-4
+（App.vue 文件树 `treeMenu` 的 `kind === 'file'` 分支）。本 lane 不动 App.vue / components。F1/F2/F6 结论不变。

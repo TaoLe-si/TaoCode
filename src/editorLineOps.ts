@@ -1,4 +1,11 @@
-// 行操作一族：排序行 / 删除重复行 / 反串行。
+// 行操作一族：排序行 / 删除重复行 / 反串行；行内一族：饥饿退格。
+//
+// 口径（两族共用）：
+//  · 文档一律是 **LF** 字符串（`\n` 分隔），偏移是 0 基的 **UTF-16 码元** 下标 —— 与上游
+//    `Document` 的 offset 同口径（Java `char` 也是 UTF-16 码元）。
+//  · 选区一律是 `{ from, to }` 且 `from <= to`（调用方先把 anchor/head 归一化）；
+//    `from === to` = 空选区 = 光标。行号是 0 基（`lineStarts` 里第 i 项 = 第 i 行的行首偏移）。
+//  · 返回 `null` = 上游这条路径「什么都没做」（动作据此不吞键），不是异常。
 //
 // 上游三个动作都只是 `AbstractPermuteLinesHandler` 的一个 `permute(String[])` 实现，
 // 所以本模块把「取哪几行 → 取出这些行 → 置换 → 写回 → 光标/选区怎么放」这一整段照抄，
@@ -36,6 +43,28 @@
 //      - 去重 `…/UniqueLinesAction.java:13-18` `HashSet`：逐行 `set.add`，加不进去的置 null
 //        ⇒ **保留首次出现、保持原顺序、不排序**，比较是大小写/空白敏感的整行相等。
 //      - 反串 `…/ReverseLinesAction.java:11-19` 首尾两两交换 ⇒ 整段倒序（奇数行长不变）。
+//  · 饥饿退格 `platform/platform-impl/src/com/intellij/openapi/editor/actions/HungryBackspaceAction.java:29-50`
+//    （动作 id `EditorHungryBackSpace`，注册 `platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:177`；
+//    `$default.xml` 里没有它的键位 ⇒ 有动作、无出厂加速键，接线档见回复）：
+//    `:34-36` 光标在文档开头（`caretOffset < 1`）什么都不做；`:41` **无选区**且光标前一个字符是
+//    `StringUtil.isWhiteSpace`（`platform/util/src/com/intellij/openapi/util/text/StringUtil.java:1250-1252`
+//    → `platform/util/base/src/com/intellij/openapi/util/text/Strings.java:729-731`：口径就是 `\n`/`\t`/` `
+//    三个字符，**不是** `Character.isWhitespace`）时，`:42` 从 `caretOffset - 2` 起用 `CharArrayUtil.shiftBackward`
+//    （`platform/util/base/src/com/intellij/util/text/CharArrayUtil.java:136-151`：往回扫到第一个不在 `\t \n` 里的
+//    字符；一路扫到下标 0 之前返回 -1）往回扫，`:43` 删 `[扫描结果 + 1, caretOffset)`；否则 `:46-47`
+//    整件事交给普通退格（**有选区时也走这一支**，普通退格自己的范围本模块不猜，见函数的注释）。
+//  · C-6 同族的「光标处的词」**已经落地，不在本模块**：`src/selectWordAtCaret.ts` 就是
+//    `EditorSelectWord` / `EditorSelectWordAtCurrentCaret` 的纯文本档（`SelectWordAtCaretAction.java:40-82`
+//    + `SelectWordUtil.java:41-142` + `EditorActionUtil.isHumpBound:960-974`），判据
+//    `tests/select-word-at-caret.test.mjs` 直接对上游 `SelectWordWithoutPSITest` 的 testData，
+//    连 `SelectWordUtil.java:118-122` 的「光标贴词尾先退一格」在内都照抄了 ⇒ 这里不再写第二份。
+//    PSI 侧的 `ExtendWordSelectionHandler` 链在 `src/editorExtendSelection.ts`（命令 `selection.extend`，
+//    菜单 `src/menus/editMenu.ts` 的两行）；**实键** Ctrl+W / Ctrl+Shift+W 走的是 LSP `selectionRange`
+//    阶梯（`src/components/CodeEditor.vue:747-748` 的 `adjustSelection` → `:417-430`）。三份分工见本批报告 ⇒
+//    本模块不写第四份。
+//  · `EditorUnSelectWord`（`platform/platform-impl/src/com/intellij/openapi/editor/actions/UnselectWordAtCaretAction.java:27-31`，
+//    `$default.xml:754-756` = Ctrl+Shift+W）的平台执行体是**空方法**：收缩方向真在 PSI 侧
+//    `UnSelectWordHandler`（要 `PsiFile` + 词法高亮）⇒ 纯文本档就是「无操作」，本模块不为它写函数。
 
 import { EditorSelection } from '@codemirror/state'
 import type { Command } from '@codemirror/view'
@@ -199,3 +228,43 @@ const permuteLines = (permute: (lines: string[]) => Permutation): Command => vie
 export const sortLinesCommand = permuteLines(sortPermutation)
 export const uniqueLinesCommand = permuteLines(uniquePermutation)
 export const reverseLinesCommand = permuteLines(reversePermutation)
+
+// ── 饥饿退格（`EditorHungryBackSpace` = `HungryBackspaceAction.java:29-50`）─────────────────────
+
+/** 上游 `StringUtil.isWhiteSpace`（`StringUtil.java:1250-1252` → `Strings.java:729-731`）：`\n`/`\t`/` `。 */
+export function isHungryWhitespace(char: string): boolean {
+  return char === '\n' || char === '\t' || char === ' '
+}
+
+/**
+ * 上游 `CharArrayUtil.shiftBackward(buffer, minOffset, maxOffset, chars)`（`:136-151`；本调用走
+ * `:128-130` 的 `minOffset = 0` 重载）：从 `maxOffset` 往回跳过 `stopChars` 里的字符，返回
+ * **第一个不在集合里的下标**；一路跳过 0 之前返回 `-1`。`maxOffset` 越过文末时原样返回（`:137`）。
+ */
+export function shiftBackward(text: string, maxOffset: number, stopChars: string): number {
+  if (maxOffset >= text.length) return maxOffset                          // :137
+  let offset = maxOffset
+  while (offset >= 0 && stopChars.includes(text[offset])) offset--         // :139-150
+  return offset
+}
+
+/**
+ * 饥饿档删 `[from, to)`（`text.slice(0, from) + text.slice(to)` 就是新文档）；
+ * `plain` = 上游把这一下交给普通退格（`HungryBackspaceAction.java:46-47` 的 `ACTION_EDITOR_BACKSPACE`，
+ * 有选区时走的也是它）；`null` = 上游这条路径什么都没做，调用方据此不吞键。
+ * 普通退格自己的范围（代理对、折叠区、软换行后的视觉列）不是这条动作的算法 ⇒ 本模块不猜，交给宿主。
+ */
+export type HungryBackspace =
+  | { kind: 'delete', from: number, to: number }
+  | { kind: 'plain' }
+
+/** `HungryBackspaceAction.java:31-48`；`selection` 就是 `caret.getSelectionStart()/End()`（`:41` 只看它空不空）。 */
+export function hungryBackspace(
+  text: string, caret: number, selection: { from: number, to: number } = { from: caret, to: caret },
+): HungryBackspace | null {
+  if (caret < 1 || caret > text.length) return null                       // :34-36（`>` 是本仓护栏，上游只有 `< 1`）
+  if (selection.from !== selection.to) return { kind: 'plain' }           // :41 有选区 ⇒ :46-47
+  if (!isHungryWhitespace(text[caret - 1])) return { kind: 'plain' }      // :41 前一个字符不是那三个 ⇒ :46-47
+  return { kind: 'delete', from: shiftBackward(text, caret - 2, '\t \n') + 1, to: caret }  // :42-43
+}
+

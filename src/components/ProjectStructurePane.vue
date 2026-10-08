@@ -14,9 +14,15 @@ import { defaultProjectName } from '../projectDirectories'
 // 见 src/rootsModel.ts）：面板那棵树按「内容根 → 源根（按类型分组）→ 排除根 → 序根条目」呈现，
 // 而不是过去的一行「内容根 .」加一张扁平列表 —— 一个根下面有多个源根/测试根这件事要说得出来。
 import { buildRootModel, orderEntryKindLabel, rootModelRows, type RootModelRow } from '../rootsModel'
+// 链接进来的构建工程目录 → 内容根（Gradle 链接表 + Maven 的 pom 目录；合并与祖先去重的出处在
+// `src/buildContentRoots.ts` 的文件头，那里还写了「本仓的 linkedProjects 存的是工作区相对路径」这条不等价）。
+import { buildContentRoots } from '../buildContentRoots.ts'
 // 库实体（`src/libraryModel.ts`）与 SDK 实体（`src/rootsSdkTable.ts`）：序根条目那一段的输入。
 import { libraryFromJars } from '../libraryModel'
 import { createSdk, JAVA_SDK_TYPE } from '../rootsSdkTable'
+// 「未知/失效 SDK」的检测与修复建议（上游 `UnknownSdkCollector`/`UnknownMissingSdk`/`UnknownInvalidSdk`，
+// 见 src/unknownSdk.ts）：SDK 行的告警文案与「使用已探测到的 X」按钮都从这一份取。
+import { projectUnknownSdkSnapshot, sdkFixPatch, unknownSdkFix } from '../unknownSdk'
 import { matchedJars } from '../externalLibraries'
 // 外部库的**档案条目**（上游 `JarFileSystem` 那一族「归档当一个目录」）：取数与通道判定在
 // `src/jarEntriesSource.ts`，行模型在 `src/rootsJarEntries.ts`，画在 `JarEntriesPane.vue`。
@@ -87,6 +93,34 @@ watch(() => [props.root, props.settings] as const, ([root, settings]) => {
 // 逐根核对（文件数 / 磁盘缺失 / 排除命中）在 `src/rootsModel.ts` 里做一次，面板只读它那棵树。
 // SDK 行的呈现（`SdkAppearanceServiceImpl`）：未配路径 = SDK 默认；配了给路径 + 语言级别。
 const sdkRow = computed(() => sdkAppearance(java.value.jdkHome, java.value.jdkName))
+// 「未知/失效 SDK」的检测与修复建议（`UnknownSdkCollector`/`UnknownMissingSdk`/`UnknownInvalidSdk`
+// 的可移植一半，规则与文案在 `src/unknownSdk.ts`）：机器上探测到的 JDK 列表（`app.jdks`）作为
+// 本地候选，`jdkHome` 指向的目录不在候选里（且磁盘上没有它）⇒ invalid 告警 + 「使用已探测到的 X」。
+const detectedJdks = ref<{ home: string; version: string; name: string }[]>([])
+watch(() => props.root, () => {
+  detectedJdks.value = []
+  if (!props.root) return
+  void request<{ jdks: { home: string; version: string; name: string }[] }>('app.jdks')
+    .then(result => { detectedJdks.value = result.jdks ?? [] })
+    .catch(() => { /* 探测不到就只少一层建议，不挡住表单 */ })
+}, { immediate: true })
+const unknownSdk = computed(() => projectUnknownSdkSnapshot({
+  jdkHome: java.value.jdkHome, jdkName: java.value.jdkName,
+  detected: detectedJdks.value.map(jdk => ({ home: jdk.home, version: jdk.version, suggestedName: jdk.name })),
+  known: [],
+}))
+/** SDK 行的告警（有 unknown 才渲染）；文案与建议按钮来自 `src/unknownSdk.ts`。 */
+const sdkFix = computed(() => {
+  const request = unknownSdk.value.resolvableSdks[0]
+  return request ? unknownSdkFix(request, detectedJdks.value.map(jdk => ({ home: jdk.home, version: jdk.version, suggestedName: jdk.name })), true) : null
+})
+function applySdkFix() {
+  const suggested = sdkFix.value?.suggested
+  if (!suggested) return
+  const patch = sdkFixPatch(suggested)
+  java.value.jdkHome = patch.jdkHome
+  java.value.jdkName = patch.jdkName
+}
 const sdkHint = computed(() => java.value.jdkHome.trim()
   ? `${sdkRow.value.comment}；此处只记录本机路径，不会下载或安装 JDK。`
   : '留空时使用语言服务器自动检测的 JDK；此处只记录本机路径，不会下载或安装 JDK。')
@@ -135,6 +169,13 @@ const rootModel = computed(() => buildRootModel({
   sourcePaths: java.value.sourcePaths,
   excludedDirs: listLines(excludedText.value.split(/\r?\n/)),
   outputPath: java.value.outputPath,
+  // 链接进来的构建工程目录（Gradle 链接表 + 清单里真实存在的 pom）当**内容根**：
+  // 多工程仓库（工作区根没有构建脚本、工程在子目录的那种）不再只有一行「内容根 工作区」。
+  // 合并/去重的祖先规则与出处都在 `src/buildContentRoots.ts` 文件头。
+  buildProjectDirs: buildContentRoots({
+    linkedGradleDirs: props.settings?.buildTools?.gradle.linkedProjects ?? [],
+    files: workspaceFiles.value,
+  }),
   libraries: libraryEntities.value,
   sdk: sdkEntity.value,
   files: workspaceFiles.value,
@@ -375,6 +416,11 @@ function save() {
             </div>
             <p :id="`${id}-sdk-hint`" class="ps-comment">{{ sdkHint }}</p>
             <p v-if="invalidJdkHome" class="ps-error" role="alert">请输入绝对路径（如 D:\jdk-21）或留空。</p>
+            <!-- 未知/失效 SDK（`UnknownMissingSdk`/`UnknownInvalidSdk` 的编辑器通知）：路径不在
+                 机器探测到的列表里 ⇒ 说明缺失/损坏，并给「使用已探测到的 X」修复动作（本地候选优先，
+                 上游 `UnknownMissingSdk.createMissingSdkFix` 的判定顺序）。 -->
+            <p v-if="sdkFix" class="ps-error" role="alert">{{ sdkFix.notificationText }}</p>
+            <button v-if="sdkFix?.suggested" type="button" class="subtle-button" @click="applySdkFix">{{ sdkFix.suggestedLabel }}</button>
           </div>
         </div>
 
@@ -433,7 +479,7 @@ function save() {
         </div>
         <p v-if="filesTruncated" class="ps-comment">文件清单被截断，上面只核对了清单里的文件。</p>
         <div class="ps-toolbar">
-          <button type="button" class="subtle-button" @click="addSourceRoot"><Plus :size="iconSize.menu" /> 添加内容根…</button>
+          <button type="button" class="subtle-button" @click="addSourceRoot"><Plus aria-hidden="true" :size="iconSize.menu" /> 添加内容根…</button>
         </div>
         <div v-if="sourcePopup" class="ps-popup" role="dialog" aria-label="新目录类型">
           <input ref="sourceInput" v-model="sourceDraft" class="ps-grow" placeholder="项目内路径，例如 src/main/java" spellcheck="false" aria-label="新目录路径" @keydown.enter.prevent="applySourceRoot('sources')" @keydown.esc.prevent="closeSourcePopup()" />
@@ -474,7 +520,7 @@ function save() {
           <p v-if="!java.referencedLibraries.length" class="ps-empty-line">没有依赖条目。</p>
         </div>
         <div class="ps-toolbar">
-          <button type="button" class="subtle-button" @click="addLibrary"><Plus :size="iconSize.menu" /> 添加路径或通配符…</button>
+          <button type="button" class="subtle-button" @click="addLibrary"><Plus aria-hidden="true" :size="iconSize.menu" /> 添加路径或通配符…</button>
         </div>
         <div v-if="libraryPopup" class="ps-popup" role="dialog" aria-label="添加依赖">
           <input ref="libraryInput" v-model="libraryDraft" class="ps-grow" placeholder="lib/**/*.jar" spellcheck="false" aria-label="依赖路径或通配符" @keydown.enter.prevent="applyLibrary" @keydown.esc.prevent="libraryPopup = false" />
@@ -508,10 +554,10 @@ function save() {
 
 <style scoped>
 .ps-panel { min-width: 0; }
-.ps-form { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; margin: 0; padding: 0; border: 0; }
-.ps-title { margin: 0; font-size: 15px; color: var(--bright); font-weight: 600; }
+.ps-form { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; margin: 0; padding: 0; border: 0; }
+.ps-title { margin: 0; padding: 0 0 var(--space-3); border-bottom: 1px solid var(--line-strong); color: var(--bright); font-size: 16px; line-height: 1.4; font-weight: 650; }
 .ps-group { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; margin: 0; padding: 0; border: 0; }
-.ps-group-label { padding: 0 0 var(--space-1); color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .03em; text-transform: uppercase; }
+.ps-group-label { display: block; width: 100%; padding: 0 0 var(--space-2); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 12px; font-weight: 650; letter-spacing: .02em; }
 /* IDEA FormLayout: right-aligned label column, fields fill the rest at one shared width. */
 .ps-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--space-3); align-items: baseline; }
 .ps-label { color: var(--text); font-weight: 500; text-align: right; }
@@ -522,18 +568,20 @@ function save() {
 .ps-inline input { font-family: var(--font-mono); font-size: 12px; }
 .ps-level { min-height: var(--ctrl-height); max-width: 100%; padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: inherit; }
 .ps-comment { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
-.ps-error { margin: 0; color: var(--error); font-size: 11px; }
-.ps-banner { padding: var(--space-1) var(--space-2); border: 1px solid var(--error); border-radius: var(--radius-xs); background: var(--panel); }
-.ps-notice { margin: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); background: var(--panel); font-size: 11px; }
+.ps-error { margin: 0; color: var(--error); font-size: 11px; line-height: 1.5; }
+.ps-banner { padding: var(--space-2); border: 0; border-left: 3px solid var(--error); border-radius: 0; background: var(--panel); }
+.ps-notice { margin: 0; padding: var(--space-2); border: 0; border-left: 3px solid var(--accent); border-radius: 0; color: var(--secondary); background: var(--panel); font-size: 11px; }
 .ps-invalid { border-color: var(--error); }
-.ps-tree { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--editor); overflow: hidden; }
-.ps-tree-node { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); font: 12px/1.6 var(--font-mono); color: var(--text); }
+.ps-tree { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 0; background: var(--editor); }
+.ps-tree-node { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); color: var(--text); font: 12px/1.6 var(--font-mono); transition: background-color var(--dur-1) var(--ease); }
+.ps-tree-node > span { min-width: 0; overflow-wrap: anywhere; }
+.ps-tree-node:hover { background: var(--hover); }
 .ps-tree-node:last-child { border-bottom: 0; }
 .ps-tree-node:hover .icon-button { visibility: visible; }
 .ps-tree-node .icon-button { visibility: hidden; margin-left: auto; }
-.ps-content { color: var(--secondary); font-weight: 600; background: var(--panel); }
+.ps-content { color: var(--bright); font-weight: 650; background: var(--panel); border-bottom-color: var(--line-strong); }
 /* 分组行（「源代码根（3）」/「排除根（1）」）：比内容根轻一档，比叶子行重一档。 */
-.ps-group-row { color: var(--secondary); font-weight: 500; }
+.ps-group-row { color: var(--secondary); background: var(--rail); font-weight: 600; }
 .ps-order-invalid { color: var(--error); }
 .ps-root-icon { width: 10px; height: 10px; flex-shrink: 0; border-radius: 2px; background: var(--success); }
 /* 上游源根图标色：源根 #40B6E0、测试根 #62B543、资源/生成各一档（生成根叠灰 #9AA7B0）。 */
@@ -544,15 +592,15 @@ function save() {
 .ps-warn { color: var(--warning); font: 11px var(--font-ui); }
 .ps-root-type { color: var(--muted); font: 11px var(--font-ui); }
 /* `SidePanelCountLabel` 的计数：等宽数字，跟在类型标签后面（右侧的移除按钮仍靠 margin-left:auto 靠边）。 */
-.ps-root-count { color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.ps-root-count { color: var(--secondary); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
 .ps-empty-line { margin: 0; padding: var(--space-2); color: var(--muted); font-size: 11px; }
 .ps-toolbar { display: flex; gap: var(--space-2); }
 /* 「档案条目」按钮靠右（与 .ps-tree-node 里那个 .icon-button 同一位置，但它是常驻的）。 */
 .ps-jar-toggle { margin-left: auto; flex-shrink: 0; }
-.ps-popup { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: var(--shadow-2); }
+.ps-popup { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--popup-background); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 /* 识别根的结果区（上游 `DetectedRootsChooserDialog` 那一步的落点）：紧跟在弹层下面。 */
-.ps-scan { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel); }
-.ps-scan-title { margin: 0; color: var(--bright); font-size: 12px; font-weight: 600; }
+.ps-scan { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent); border-radius: 0; background: var(--panel); }
+.ps-scan-title { margin: 0; padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); color: var(--bright); font-size: 13px; font-weight: 650; }
 .ps-textarea { display: block; width: 100%; min-width: 0; max-width: 100%; resize: vertical; padding: var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 12px/1.7 var(--font-mono); }
 .ps-textarea[aria-invalid='true'], .ps-popup input:focus-visible { border-color: var(--error); }
 .ps-submit { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; }

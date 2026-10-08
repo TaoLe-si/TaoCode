@@ -1,7 +1,19 @@
-// 结构视图的两条缺失行为：编辑光标 ↔ 树选中的**互相跟随**，以及**按可见性排序**。
+// 结构视图的三条缺失行为：编辑光标 ↔ 树选中的**互相跟随**、**按可见性排序**、
+// 以及**折叠态按文件保存/取回**（见文件末尾那一节）。
+//
+// 上游路径速查（pvtree5 在只读树里逐条 `find` + `sed -n` 复开过；下面引的行号都是这一份的）：
+//   · `platform/structure-view-impl/src/com/intellij/ide/structureView/newStructureView/StructureViewComponent.java`
+//   · `platform/structure-view-impl/src/com/intellij/ide/structureView/impl/StructureViewFactoryImpl.java`
+//   · `platform/structure-view-impl/src/com/intellij/ide/impl/StructureViewWrapperImpl.kt`
+//   · `platform/structure-view-impl/src/com/intellij/ide/util/FileStructurePopup.java`
+//   · `java/java-structure-view/src/com/intellij/ide/structureView/impl/java/{KindSorter,VisibilitySorter,VisibilityComparator,JavaFileTreeModel,PsiMethodTreeElement,JavaVariableBaseTreeElement}.java`
+//   · `platform/editor-ui-api/src/com/intellij/ide/util/treeView/smartTree/{Sorter,SorterUtil}.java`
+//   · `java/java-psi-api/src/com/intellij/psi/util/PsiUtil.java`
+//   （注意：`StructureViewComponent.java` **不在** `platform/lang-impl/.../util/treeView/` 下，
+//   那条路径在上游树里不存在 —— 2026-10-06 有判决按那条路径找过，按这一节订正。）
 //
 // 上游依据：
-//   · 跟随编辑器：`StructureViewComponent.java:805-849`（`MyAutoScrollFromSourceHandler`
+//   · 跟随编辑器：`StructureViewComponent.java:804-849`（`MyAutoScrollFromSourceHandler`
 //     装光标监听 `:819-835`，回调 `scrollToSelectedElement()` `:655`）；两个开关是
 //     `StructureViewFactoryImpl.java:49-50` 的 `AUTOSCROLL_MODE`（选中树节点→跳源码，
 //     默认 **true**）与 `AUTOSCROLL_FROM_SOURCE`（光标→选中树节点，默认 **false**）。
@@ -142,4 +154,60 @@ export interface CaretSymbolMatch {
  */
 export function shouldRevealInEditor(autoscrollToSource: boolean, selectedKey: string, previousKey: string): boolean {
   return autoscrollToSource && selectedKey !== '' && selectedKey !== previousKey
+}
+
+// ---------------------------------------------------------------------------
+// 折叠态的「按编辑器保存 / 取回」（上游 `StructureViewComponent.java:397-428`）。
+// 上一版面板在换文件时把折叠整张清空，于是「把 A 收到只剩顶层 → 切去 B → 切回 A」
+// 之后折叠没了 —— 上游这一趟是**保留**的：
+//   · `storeState()`：`TreeState.createOn(myTree, new TreePath(root))` 存进
+//     **那个 FileEditor** 的 user data（`:400-405`），换编辑器时被调用
+//     （`StructureViewWrapperImpl.kt:478` 的 `myStructureView!!.storeState()`）；
+//   · `restoreState()`：新编辑器装好后从 user data 取回（`:415-427`，
+//     `StructureViewWrapperImpl.kt:552` 调用），**取到就用、同时把那份清掉**
+//     （`:426` 的 `editor.putUserData(STRUCTURE_VIEW_STATE_KEY, null)` —— 一次性消费，
+//     下一次隐藏时 `storeState()` 会重新写一份）；取不到才按默认深度展开（`:418-421`）。
+//
+// 本仓架构不等价之处（照实写）：面板只有一个组件实例、没有 `FileEditor` 对象可以挂状态，
+// 所以这里按**文件路径**分桶存，并给一个数量上限（超出按先到先丢，Map 保持插入序）。
+// 上游那份随编辑器销毁而消失，本仓这份随上限被淘汰 —— 用户可见的行为（切回来还在）一致。
+//
+// **同形状的两份在前，本模块为什么不复用**（账记在 `docs/batch-2026-10-06-pvclose.md` §2）：
+//   · `src/usageViewTreeModel.ts:210-217` 的 `usageTreeRowIds` 与 `:275-315` 的 `carryUsageTreeExpansion`
+//     —— 入参是 `UsageTreeRow`（要 `kind/path/line/character/count/collapsible`），做的是**同一棵树
+//     重建前后**按行 id 对账；本处不是重建，是**换根**（从 A 文件切到 B 文件），存的是
+//     「哪几个键收着」这一张集合，没有行对象可对账 ⇒ 车不上。
+//   · `src/hierarchyRows.ts:123-135` 的 `captureHierarchyExpansion` + `:152` 的 `planHierarchyExpansion`
+//     —— 同样是**同一棵树刷新前后**（抓展开过的路径、重建后按路径认回来），而且那个文件的文件头
+//     `:15-21` 已经替这条规则写过一次「为什么不复用 usage 那两份」；本处要的是**跨文件**按路径分桶
+//     + 上界淘汰，那两个函数给不出「按 path 分桶」这一维 ⇒ 也不复用。
+//   ⇒ 结论：本模块是这条规则的**第三个实例，但不同维度**（前两个 = 同树重建，本处 = 跨文件换根）。
+//     若日后 `usageView*` / `hierarchy*` 的 owner 把「按 path 分桶 + LRU 上界」抽成公共件，
+//     这一节应当并过去、别留第三份 —— 已写进 `docs/batch-2026-10-06-pvclose.md` §7 的整理请求。
+/** 与「同时最多开着这么多文件的结构视图」等价的本仓上限（上游是「编辑器开几个」）。 */
+export const COLLAPSED_MEMORY_LIMIT = 32
+const collapsedByPath = new Map<string, ReadonlySet<string>>()
+
+/** 存：换文件时把上一张折叠表挂到那个文件名下（`storeState` 那一跳）。 */
+export function rememberCollapsed(path: string, collapsed: ReadonlySet<string>): void {
+  if (!path) return
+  collapsedByPath.set(path, new Set(collapsed))
+  while (collapsedByPath.size > COLLAPSED_MEMORY_LIMIT) {
+    const oldest = collapsedByPath.keys().next()
+    if (oldest.done) break
+    collapsedByPath.delete(oldest.value)
+  }
+}
+
+/** 取：一次性消费（同 `:426` 把 user data 清空那一手），没有就空表（= 全展开）。 */
+export function restoredCollapsed(path: string): ReadonlySet<string> {
+  const stored = collapsedByPath.get(path)
+  if (!stored) return new Set<string>()
+  collapsedByPath.delete(path)
+  return stored
+}
+
+/** 判据与调试用的只读快照（不参与生产路径）。 */
+export function collapsedMemoryPaths(): string[] {
+  return [...collapsedByPath.keys()]
 }

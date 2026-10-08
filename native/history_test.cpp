@@ -13,6 +13,7 @@
 #include <windows.h>
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -23,6 +24,7 @@ namespace fs = std::filesystem;
 using taocode::Json;
 using taocode::WorkspaceError;
 using taocode::history::History;
+using taocode::history::first_obsolete_index;
 using taocode::history::unified_diff;
 using taocode::history::diff_sides;
 using taocode::history::diff_sides_from_unified;
@@ -76,6 +78,29 @@ void expects_code(History& history, const std::string& path, const std::string& 
         return;
     }
     check(false, std::string("expected ") + code + ", but record() succeeded");
+}
+
+// 把某个项目库里 index.json 的时间戳整体往回推，用来伪造「存活了多久」——快照文件名取自 id、
+// 与 millis 无关，所以只改 millis 不会让任何孤儿出现（drop_orphans 仍然全认得）。
+// newest 保持它原来的时间戳（引擎以最新一条为基准，见 first_obsolete_index），往旧每条退 step。
+void backdate_index(const fs::path& project_root, long long step_millis) {
+    bool touched = false;
+    for (const auto& item : fs::recursive_directory_iterator(project_root)) {
+        if (!item.is_regular_file() || item.path().filename() != L"index.json") continue;
+        std::ifstream in(item.path(), std::ios::binary);
+        const std::string raw{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+        Json parsed = Json::parse(raw, nullptr, false);
+        if (parsed.is_discarded() || !parsed.contains("versions") || !parsed.at("versions").is_array())
+            throw std::runtime_error("backdate_index: index.json 读不出 versions");
+        auto& versions = parsed["versions"];
+        const long long newest = versions.front().at("millis").get<long long>();
+        for (std::size_t index = 0; index < versions.size(); ++index)
+            versions[index]["millis"] = newest - static_cast<long long>(index) * step_millis;
+        std::ofstream out(item.path(), std::ios::binary | std::ios::trunc);
+        out << parsed.dump(1);
+        touched = true;
+    }
+    if (!touched) throw std::runtime_error("backdate_index: 库里没有 index.json");
 }
 }  // namespace
 
@@ -204,6 +229,95 @@ int main() {
         reopened.record(noisy, "line 59\n", "save");  // 跨实例去重依然生效
         check(reopened.list(noisy).at("entries").size() == capped.max_versions_per_file(),
               "a duplicate save through a new instance is still a no-op");
+    });
+
+    run("first_obsolete_index：间隔 <12h 累加真实毫秒，累计达标那条起过期", [&] {
+        // period=1000、interval=100，delta 全是 50（<interval）⇒ length 到第 i 条为 50*i。
+        // 50*20=1000 首次 >=period ⇒ 下标 20 起（连同更旧的）过期。
+        std::vector<long long> stamps;
+        for (std::size_t index = 0; index < 30; ++index)
+            stamps.push_back(1000000LL - static_cast<long long>(index) * 50LL);
+        const auto obsolete = first_obsolete_index(stamps, 1000, 100);
+        check(obsolete == 20, "50ms x20 恰好累到 period，期望下标 20，实得 " + std::to_string(obsolete));
+    });
+
+    run("first_obsolete_index：>=12h 的空档只累加 1（字面量），跨度再长也不过期", [&] {
+        // 同样是 30 条、真实跨度 5800ms 远超 period=1000，但每条 delta=200 >= interval=100
+        // ⇒ 按上游 :321 的 else 分支只 +1，累计 29 < 1000 ⇒ 一条都不该过期。
+        // 这条判据专杀「拿墙钟差算天数」的写法：按墙钟这里早该全清了。
+        std::vector<long long> stamps;
+        for (std::size_t index = 0; index < 30; ++index)
+            stamps.push_back(1000000LL - static_cast<long long>(index) * 200LL);
+        const auto obsolete = first_obsolete_index(stamps, 1000, 100);
+        check(obsolete == stamps.size(),
+              "空档全 >=interval 时没有任何一条过期，实得下标 " + std::to_string(obsolete));
+    });
+
+    run("first_obsolete_index 的边界是 >= 不是 >；基准是最新一条而不是墙钟", [&] {
+        std::vector<long long> exact{4000, 3750, 3500, 3250, 3000, 2750};  // delta 250，interval 1000 内
+        // length 到第 4 条正好 = 1000：用 >= 切在下标 4，用 > 会切在下标 5。
+        check(first_obsolete_index(exact, 1000, 1000) == 4,
+              "length 恰等于 period 的那条就切（>=）：期望 4，实得 " +
+                  std::to_string(first_obsolete_index(exact, 1000, 1000)));
+        check(first_obsolete_index(exact, 1001, 1000) == 5,
+              "period 多 1 毫秒就晚一条才切（证明算术是累加 delta，不是取整天数）");
+        // 单条：最新一条自身 delta 记 0（:315），所以绝不能把自己判过期。
+        check(first_obsolete_index({500}, 1, 1) == 1, "只有一条历史时不许自我清空");
+        check(first_obsolete_index({}, 1000, 100) == 0, "空历史返回 0，等价于没有任何过期项");
+    });
+
+    run("按天过期真的落盘：days_to_keep=1 时 6h 一档的历史被切到 5 条", [&] {
+        const auto root = store / "project-expire";
+        History aged{root, History::default_max_versions_per_file, 1};  // period = 24h
+        check(aged.days_to_keep() == 1, "构造参数必须真的带上");
+        const std::string path = "aging/old.txt";
+        for (int index = 0; index < 6; ++index)
+            aged.record(path, "line " + std::to_string(index) + "\n", "save");
+        check(entries(aged, path).size() == 6, "回填前 6 条都在");
+        // 往回造时间：新→旧每条比前一条早 6h（<12h ⇒ 按真实毫秒累计）。
+        backdate_index(root, 6LL * 60LL * 60LL * 1000LL);
+        aged.record(path, "line 6\n", "save");  // 这一次活动触发裁剪
+        const auto list = entries(aged, path);
+        // 新那条 delta≈0，随后每条 +6h：6h*4=24h 才达标 ⇒ 下标 5 起过期 ⇒ 留 5 条。
+        check(list.size() == 5, "期望按天过期后留 5 条，实得 " + std::to_string(list.size()));
+        check(count_files(root) == 5 + 1, "过期快照是从盘上删掉的，不是在列表里藏起来：5 张 + 1 份索引");
+        check(text(aged, path, list.front().at("id").get<std::string>()) == "line 6\n", "最新一条留下");
+        check(text(aged, path, list.back().at("id").get<std::string>()) == "line 2\n",
+              "切掉的是最旧的「line 0/line 1」，边界落在刚好满一天的那条");
+    });
+
+    run("空档 >=12h 不计龄：同样 days_to_keep=1，跨夜 39 小时的历史一条不删（上游那条 else 1）", [&] {
+        const auto root = store / "project-idle";
+        History aged{root, History::default_max_versions_per_file, 1};
+        const std::string path = "idle/old.txt";
+        for (int index = 0; index < 4; ++index)
+            aged.record(path, "line " + std::to_string(index) + "\n", "save");
+        backdate_index(root, 13LL * 60LL * 60LL * 1000LL);  // 每条相隔 13h，真实跨度 39h > 24h
+        aged.record(path, "line 4\n", "save");
+        const auto list = entries(aged, path);
+        // 按墙钟早该清空；按上游口径每条只 +1 ⇒ 一条都不许删。
+        check(list.size() == 5, "跨夜空档不计龄，期望 5 条全留，实得 " + std::to_string(list.size()));
+        check(count_files(root) == 5 + 1, "盘上也一条没少");
+    });
+
+    run("同一份 6h 一档的历史在默认 5 天下不过期（对照组，证明删与不删是天数决定的）", [&] {
+        const auto root = store / "project-keep";
+        History aged{root};
+        check(History::default_days_to_keep == 5, "上游默认 5 天写在模块里（xml:133 / ChangeListImpl.kt:20）");
+        check(aged.days_to_keep() == History::default_days_to_keep, "不传就是 5 天");
+        const std::string path = "aging/old.txt";
+        for (int index = 0; index < 6; ++index)
+            aged.record(path, "line " + std::to_string(index) + "\n", "save");
+        backdate_index(root, 6LL * 60LL * 60LL * 1000LL);
+        aged.record(path, "line 6\n", "save");
+        check(entries(aged, path).size() == 7,
+              "5 天 = 432000000ms，活动时长才 36h，什么都不该删，实得 " +
+                  std::to_string(entries(aged, path).size()));
+        // 缺值/传 0 一律回落上游默认，绝不判整份设置损坏。
+        check(History{root.parent_path() / "project-zero", 50, 0}.days_to_keep() == 5,
+              "days_to_keep=0 回落上游默认 5，不是报错也不是 0 天全清");
+        check(History{root.parent_path() / "project-neg", 50, -3}.days_to_keep() == 5,
+              "负数同样回落默认");
     });
 
     run("each relative path keeps an independent timeline", [&] {

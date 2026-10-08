@@ -4,7 +4,7 @@
 // 而 550-667 那一段与「本地历史」这个域没关系 —— 它不碰目录、句柄、版本索引、指纹，只是一段
 // 文本到一段文本的算法。留在 history.cpp 里会让"快照落盘"和"diff 怎么算"两个职责混在一个文件。
 //
-// 注意与 history.cpp 里留下的**并排差异**（tokenize / word_marks / side_rows）是两个算法：
+// 注意与 history_sides.cpp 里的**并排差异**（tokenize / word_marks / side_rows）是两个算法：
 // 那一个按词标出两侧的 [start,length] 字节区间（给并排视图上色），这一个只出 unified 文本。
 // 两者共用的只有 Row 与 split_lines，所以只有它们进这个头。
 #pragma once
@@ -27,7 +27,7 @@ struct Row {
 
 /** LCS 动态规划预算（方向表约 (a+1)*(b+1) 字节）。超预算时退化为整段替换/整块标红，
  *  输出仍是合法的 diff，但不会为巨型文件分配上百 MB 内存。
- *  两个 diff 算法（这里的 unified 脚本与 history.cpp 里的并排词级标注）共用这一个口径。 */
+ *  两个 diff 算法（这里的 unified 脚本与 history_sides.cpp 里的并排词级标注）共用这一个口径。 */
 inline constexpr std::size_t diff_cell_budget = 8'000'000;
 
 /** 去掉行尾的 '\r'（文本是 CRLF 也不该让每一行都多一个字符）。切行与 unified 解析共用这一个。 */

@@ -268,3 +268,31 @@ export function buildPlan(request: BuildRequest): BuildPlan {
       }
   }
 }
+
+/**
+ * 「编译选中/当前文件」的计划（上游 `CompileAction.java:56-59` 的 `compile(files)` 那一支，
+ * 以及 `getCompilableFiles`（`:178-208`）的过滤：只收**源码内容里**的、可编译类型的文件）。
+ * 本仓的可编译类型就是 `.java`（`src/buildHost.ts` 的 `sources` 已经是工作区里的 .java 清单）。
+ * 只有 javac 分支能真的只编这几个文件（Gradle/Maven 的任务粒度是整个模块，只编文件不是它们的语义）；
+ * 因此对 Gradle/Maven/CMake 项目退回整模块构建，并在 reason 里说清为什么。
+ */
+export function compileFilesPlan(request: BuildRequest, files: readonly string[]): BuildPlan {
+  const wanted = files
+    .map(path => path.replace(/\\/g, '/').replace(/^\.?\//, ''))
+    .filter(path => path.toLowerCase().endsWith('.java'))
+  const kind = projectKindOf(request.layout, request.gradleDelegated)
+  if (!wanted.length) {
+    return { kind, label: '编译文件', command: '', argFile: '', reason: '选中的文件里没有可编译的 Java 源文件。' }
+  }
+  if (kind === 'javac') {
+    const argFile = javacArgFilePath()
+    const subset: BuildRequest = { ...request, sources: wanted }
+    return {
+      kind, label: `编译文件（${wanted.length} 个）`, argFile: javacArgFile(wanted), command: javacCommand(subset, argFile),
+      reason: `编译 ${wanted.length} 个 Java 源文件到 ${javaOutputPath(subset)}（javac 逐文件）`,
+    }
+  }
+  // 外部系统（Gradle/Maven）与 CMake 没有"只编这几个文件"的粒度 ⇒ 退回整模块构建（如实说明）。
+  const whole = buildPlan(request)
+  return { ...whole, reason: `${projectKindLabel(kind)} 没有“只编选中文件”的粒度，退回整模块构建：${whole.reason}` }
+}

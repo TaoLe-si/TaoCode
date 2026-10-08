@@ -140,3 +140,17 @@
 没有接。要接需要宿主给一个**非响应式**的数据源（例如 `src/App.vue` 里那份一次性快照的搜索结果）。
 判词见 `docs/inventory/verdict-ui-tabs-popup.md` 族三（`PopupUpdateProcessor` 那一行仍写"真实缺口"，
 **订正**：通道已在，缺的是宿主侧的非响应式数据源，见本报告 §5）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-TW2-1（`lastActiveToolWindowId` 惰性 getter）** —— 目标 `src/App.vue:290` 的 `createToolWindowStripes({...})`。复核 `:298` 注释已提到 `lastActiveToolWindowId`，但未确认是否已传实参。登记为待复核/待办。
+- **W-TW2-2（侧条拖放落到分隔件之后）** —— `src/components/ToolStripe.vue`（本 lane 可改面），登记。
+
+结论：零接线（W-TW2-1 待复核，W-TW2-2 登记）。
+
+补充复核：**W-TW2-1 已接线** —— `src/App.vue:299-300` 的 `createToolWindowStripes({...})` 已带 `activeStack: { get value() { return activeToolWindows.value } }`（惰性 getter）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（W-TW2-1 待复核，W-TW2-2 登记）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

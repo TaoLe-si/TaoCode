@@ -163,9 +163,15 @@
 | `BookmarkBundle` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkBundle.java` | `[~]` | 资源包只是取文案的机制（`:21-28` 的 `message`/`messagePointer`）；本仓的对应物是面板与动作里的字面量（文案逐条核过本机 IDEA 2026.2 中文包），见 `src/components/BookmarksPanel.vue`。**缺**的只有 `messagePointer` 那半：它是**惰性 Supplier**（`DynamicBundle.getLazyMessage`），而本仓每一处取文案都是一次性同步求值（面板渲染、对话框标题、气球），没有"先拿指针、稍后再取"的消费者 —— 造一个没人持有的 Supplier 包装只会是空壳（与 §D 的判法同一条理由，故不判 `[-]` 而是留 `[~]` 记明这一处形态差） |
 | `BookmarkItem` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkItem.java` | `[x]` | 列表项在 `src/components/BookmarksPanel.vue`（编号气泡 + 文件 + 行号 + 移除按钮 + 键盘走查）；`setupRenderer` 的描述+行文本、`footerText`（行的 `title` 给 `路径:行`）、`updateAccessoryView`（助记键在**行尾附件位**）都已做（第七十一/七十三/七十六批）。**2026-10-04 本轮补掉最后两处**：① `speedSearchText`（`:104`）= `文件名 + 描述`，落成 `src/bookmarks.ts` 的 `bookmarkSpeedSearchText`，面板的就地速度搜索（`SpeedSearchBar` + `src/speedSearch.ts` 的 MinusculeMatcher/走序）拿它当匹配对象 —— 打字即开、上下键走命中、Esc/回车收起；② `allowedToRemove`（`:119`，恒 true）落成 `bookmarkRemovable`，面板右键「移除书签」过它；`removed`（`:123-125`）落到已有的 `removeBookmark`。判据 `tests/bookmark-item.test.mjs`（6 条，含两条面板接线）。 |
 | `BookmarkManager` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java` | `[x]` | 表与持久化：`ProjectSettings.bookmarks`（项目级）+ `src/bookmarks.ts` 的 `placeBookmark`（编号移动/取消）+ F11/Ctrl+F11（`src/keymap.ts`、`src/bookmarkActions.ts`）；编辑后重锚/查重、自动描述（按 2026.2 的 `createDescription`）、文件书签都已做（第六十七/七十一/七十四批）。**第九十五批补上排序口径**：`getValidBookmarks`（`:140-150`）的两支现在都有了 —— `orderedBookmarks(list, sortByPosition)`（真 = 按位置、假 = 按加入顺序），默认取 `UISettingsState.kt:249` 的 **false**（原先本仓只有按位置一支，与上游默认**不一致**）；组内排序由 `sortGroupBookmarks` + `SortGroupBookmarksAction` 的落点（`BookmarksPanel` 组头的「按类型和名称对书签进行排序」，文案取 `ActionsBundle.properties:76`）承担，排序**写回存档**。**2026-10-04 本轮复核：命名书签列表的 UI 那一半也已接** —— 面板分段与标题栏按钮（创建列表、书签打开的标签页）在 `src/components/BookmarksPanel.vue`，行右键的「添加另一书签…」（`AddAnotherBookmarkAction`，只对文件书签可见）/「编辑描述」/「转到」/「移除」同处，三个对话框合成 `src/components/BookmarkListDialog.vue`（由 `ToolWindowView.vue` 的 `@bookmark-tabs`/`@edit`/`@sort-group` 与 App.vue 的 `BookmarkListDialog` 挂载点接住），齿轮的 `askBeforeDeletingLists`、重写确认与持久化在 `src/bookmarkListActions.ts` + `src/bookmarkSettings.ts`（判据 `tests/bookmark-lists.test.mjs`、`tests/bookmark-order.test.mjs`、`tests/bookmark-settings.test.mjs`）。 |
-| `BookmarksListener` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarksListener.java` | `[~]` | 事件面（`:10-16` 的 added/removed/changed/orderChanged）在本仓是 Vue 响应式：书签表一变，面板、装订线图标（`src/editorGutterIcons.ts`）与跳转动作自己跟着重算；**缺** 给他人用的监听接口（本仓没有插件，也没有第二个消费者需要订阅） |
+| `BookmarksListener` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarksListener.java` | `[x]` | 事件面（`:10-16` 的 added/removed/changed/orderChanged）两头都在：① 仓内消费仍是 Vue 响应式（书签表一变，面板 `src/components/BookmarksPanel.vue`、装订线图标 `src/gutterIcons.ts` 的 `sources.bookmarks` + `src/editorGutterIcons.ts`、跳转动作 `src/bookmarkActions.ts:67-68` 的 `sortedAll`/`bookmarkLines` computed 自己重算）；② **给第三方插件的那一层 2026-10-06 已补**（`b1b7verdict` lane）：`src/bookmarkListener.ts` 把上游那条 MessageBus Topic 落成 EP `com.intellij.ide.bookmarks.BookmarksListener`（`EXTENSIONS.declareExtensionPoint`，与 `src/extensionPoints.ts` 里 `FILE_EDITOR_MANAGER_LISTENER_EP` 同口径），四个**同名**回调 `bookmarkAdded`/`bookmarkRemoved`/`bookmarkChanged`/`bookmarksOrderChanged`（缺省空、照上游 default 方法），订阅口 `onBookmarksEvent(listener)` 返回注销函数（上游 `subscribe` 的 `Disposable`），广播口 `bookmarksChangeEvents(prev, next)`（四类事件的差异算法）+ `dispatchBookmarksChange(prev, next)`（逐条投给订阅者）；插件按同一 id 挂贡献、与内建走同一条分派链。**生产消费点**在 `src/bookmarkActions.ts:82` 的 `watch(bookmarks, …)` —— 表一变就投递（所有增删改都写 `bookmarks.value`，含项目设置加载）。判据 `tests/bookmarks-listener.test.mjs`（5 条：身份键 / 四类事件语义 / 订阅与注销 / EP 作用域 / 生产消费点接线） |
 
-**四档合计**：`[x]` 3 + `[~]` 2 + `[ ]` 0 + `[-]` 0 = 5。
+**四档合计**：`[x]` 4 + `[~]` 1 + `[ ]` 0 + `[-]` 0 = 5。
+
+> **2026-10-06（b1b7verdict lane，第二轮）改判**：`BookmarksListener` `[~]` → `[x]` —— 上游那条
+> MessageBus Topic 的前端等价物落地（`src/bookmarkListener.ts`：EP `com.intellij.ide.bookmarks.BookmarksListener`
+> + 四个同名回调 + `onBookmarksEvent` 订阅/注销 + `dispatchBookmarksChange` 由前后两份表算增/删/改/重排），
+> 生产消费点在 `src/bookmarkActions.ts:82` 的 `watch`；判据 `tests/bookmarks-listener.test.mjs`。
+> 四档因此从 3/2/0/0 变成 **4/1/0/0**（只剩 `BookmarkBundle` 的 `messagePointer` 形态差）。
 
 > **2026-10-04 本轮改判（第二次）**：`BookmarkItem` `[~]` → `[x]` —— `speedSearchText` 与
 > `allowedToRemove`/`removed` 三条落地（`src/bookmarks.ts` 的 `bookmarkSpeedSearchText`/
@@ -178,3 +184,7 @@
 > ② 复核发现 `BookmarkManager` 记的"命名书签列表 UI 未接"已过时：面板行右键的「添加另一书签…」、
 > 三个列表对话框、`askBeforeDeletingLists` 与「书签打开的标签页」都已在 `src/components/BookmarksPanel.vue`
 > 与 `src/bookmarkListActions.ts` 接住。四档因此从 0/5/0/0 变成 2/3/0/0。
+
+**2026-10-06（b1b7verdict lane）复算与改判**：`BookmarksListener` 行先订正为「四种事件在本仓退化成
+『表变 ⇒ 依赖它的 computed 重算』（面板/装订线/跳转动作三处消费点），缺的只是给插件用的监听接口对象」；
+同日后一轮把那个接口对象补上（`src/bookmarkListener.ts`，见上）⇒ 该行 `[~]` → `[x]`，四档 3/2/0/0 → **4/1/0/0**。

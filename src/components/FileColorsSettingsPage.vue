@@ -126,7 +126,7 @@ defineExpose({ dirty, getDraft })
         <button type="button" title="下移" aria-label="下移" :disabled="!canMove(1)" @click="move(1)"><ArrowDown :size="iconSize.action" /></button>
         <div v-if="adding" class="color-popup">
           <div class="scope-choices">
-            <button v-for="scope in scopes" :key="scope.name" type="button" @click="addingScope = scope.name">{{ scope.name }}<ChevronRight :size="iconSize.dense" /></button>
+            <button v-for="scope in scopes" :key="scope.name" type="button" @click="addingScope = scope.name">{{ scope.name }}<ChevronRight aria-hidden="true" :size="iconSize.dense" /></button>
           </div>
           <div v-if="addingScope" class="color-choices">
             <button v-for="color in FILE_COLOR_NAMES" :key="color" type="button" :style="{ background: fileColorCss(color) ?? undefined }" @click="add(addingScope, color)">{{ color }}</button>
@@ -135,7 +135,7 @@ defineExpose({ dirty, getDraft })
         </div>
       </div>
       <div class="color-table">
-        <table aria-label="作用域文件颜色">
+        <table class="color-grid" aria-label="作用域文件颜色">
           <thead><tr><th>作用域</th><th>颜色</th><th title="与项目共享此颜色配置">共享</th></tr></thead>
           <tbody>
             <tr v-for="(entry, index) in draft" :key="`${entry.shared}:${entry.scope}`" :class="{ selected: selected === index }" @click="selected = index" @focusin="selected = index">
@@ -165,26 +165,26 @@ defineExpose({ dirty, getDraft })
 
 <style scoped>
 .file-colors-page { display: flex; flex-direction: column; gap: 10px; }
-.color-options { display: flex; flex-wrap: wrap; gap: 16px; border: 0; margin: 0; padding: 0; }
+.color-options { display: flex; flex-wrap: wrap; gap: var(--space-4); border: 0; margin: 0; padding: 0; }
 .color-options label { display: inline-flex; align-items: center; gap: 5px; }
-.color-options input { accent-color: var(--accent); }
+.color-options input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); accent-color: var(--accent); }
 .color-configurations { padding: 0; margin: 0; border: 1px solid var(--line); min-width: 0; }
 .color-toolbar { position: relative; display: flex; padding: 3px; border-bottom: 1px solid var(--line); gap: 2px; }
-.color-toolbar > button { display: inline-flex; padding: 4px; border: 0; background: transparent; color: inherit; }
+.color-toolbar > button { display: inline-flex; padding: var(--space-1); border: 0; background: transparent; color: inherit; }
 .color-table { min-height: 280px; max-height: 48vh; overflow: auto; }
-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-th, td { padding: 5px 8px; text-align: left; }
-th { border-bottom: 1px solid var(--line); font-weight: normal; }
-th:first-child { width: 50%; }
-th:last-child { width: 90px; }
-tr.selected { background: var(--selection); }
-td select { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; }
+.color-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.color-grid th, .color-grid td { padding: 5px var(--space-2); text-align: left; }
+.color-grid th { border-bottom: 1px solid var(--line); font-weight: normal; }
+.color-grid th:first-child { width: 50%; }
+.color-grid th:last-child { width: 90px; }
+.color-grid tr.selected { background: var(--selection); }
+.color-grid td select { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; }
 .color-empty { margin: 90px 0; text-align: center; color: var(--muted); }
 .color-empty button, .manage-scopes { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
 .manage-scopes { align-self: flex-start; padding: 0; }
 .color-hint { margin: 0; color: var(--muted); font-size: 12px; }
-.color-popup { position: absolute; z-index: 2; top: 100%; left: 0; display: flex; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 12px #0003; }
+.color-popup { position: absolute; z-index: 2; top: 100%; left: 0; display: flex; background: var(--popup-background); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
 .scope-choices, .color-choices { display: flex; flex-direction: column; min-width: 110px; max-height: 260px; overflow: auto; }
 .color-popup button { display: flex; justify-content: space-between; align-items: center; border: 0; text-align: left; padding: 5px 10px; color: inherit; }
-button:disabled { opacity: .45; cursor: default; }
+.file-colors-page button:disabled { opacity: .45; cursor: default; }
 </style>

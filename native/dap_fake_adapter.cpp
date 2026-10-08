@@ -213,6 +213,12 @@ int main(int argc, char** argv) {
         std::find(switches.begin(), switches.end(), std::string("--no-read-memory")) != switches.end();
     const bool no_disassemble =
         std::find(switches.begin(), switches.end(), std::string("--no-disassemble")) != switches.end();
+    // 协议侧补齐的第二批（数据断点 / 函数断点 / source）：三个能力位也都能单独关掉。
+    const bool no_data_breakpoints =
+        std::find(switches.begin(), switches.end(), std::string("--no-data-breakpoints")) != switches.end();
+    const bool no_function_breakpoints =
+        std::find(switches.begin(), switches.end(), std::string("--no-function-breakpoints")) != switches.end();
+    const bool no_source = std::find(switches.begin(), switches.end(), std::string("--no-source")) != switches.end();
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -309,6 +315,11 @@ int main(int argc, char** argv) {
                                            {"supportsStepBack", !no_step_back},
                                            {"supportsReadMemoryRequest", !no_read_memory},
                                            {"supportsDisassembleRequest", !no_disassemble},
+                                           // 协议侧补齐的第二批：数据断点 / 函数断点 / source
+                                           // （规范里这三个位都默认 false）。
+                                           {"supportsDataBreakpoints", !no_data_breakpoints},
+                                           {"supportsFunctionBreakpoints", !no_function_breakpoints},
+                                           {"supportsSourceRequest", !no_source},
                                            {"exceptionBreakpointFilters", Json::array({
                                                Json{{"filter", "all"}, {"label", "All Exceptions"}},
                                                Json{{"filter", "uncaught"}, {"label", "Uncaught Exceptions"}},
@@ -345,6 +356,15 @@ int main(int argc, char** argv) {
                     event("progressUpdate", Json{{"progressId", "load"}, {"message", "halfway"}, {"percentage", 50}});
                     event("progressEnd", Json{{"progressId", "load"}, {"message", "done"}});
                     event("exited", Json{{"exitCode", 3}});
+                    // 线程清单变化（规范 `thread` 事件）：reason + threadId，前端据此重取 dap.threads。
+                    event("thread", Json{{"reason", "started"}, {"threadId", 2}});
+                    // 带位置的控制台输出（规范 `output` 的可选 source/line/column）：
+                    // UI 据此把一条编译错误变成可跳转的 file:line 链接。
+                    event("output", Json{{"category", "stderr"},
+                                         {"output", "fake.cpp:12:3: error: scripted\n"},
+                                         {"source", Json{{"name", "fake.cpp"}, {"path", base + "/fake.cpp"}}},
+                                         {"line", 12},
+                                         {"column", 3}});
                 }
                 if (arguments.contains("__reverseTerminal")) {
                     // A reverse request: the host must really run something and hand
@@ -368,6 +388,12 @@ int main(int argc, char** argv) {
                                                  {"configuration", Json{{"program", "dap/nested.cpp"}}}}}});
                 }
                 event("stopped", Json{{"reason", "entry"}, {"threadId", 1}, {"allThreadsStopped", true}, {"description", "stopped at entry"}});
+                if (extras) {
+                    // `stopped` 的可选字段（规范）只在 --extras 下加，避免改变既有用例的输入：
+                    // `preserveFocusHint`（别抢焦点）与 `hitBreakpointIds`（命中的断点 id）。
+                    event("stopped", Json{{"reason", "breakpoint"}, {"threadId", 1}, {"allThreadsStopped", true},
+                                          {"preserveFocusHint", true}, {"hitBreakpointIds", Json::array({51})}});
+                }
             } else if (command == "setBreakpoints") {
                 const Json& source = arguments.contains("source") && arguments.at("source").is_object() ? arguments.at("source") : Json::object();
                 breakpoint_source = text(source, "path");
@@ -378,10 +404,15 @@ int main(int argc, char** argv) {
                         const auto line = number(point, "line", 0);
                         breakpoint_lines.push_back(line);
                         Json entry{{"verified", true}, {"line", line}, {"column", 1}};
-                        // Echo the condition back so the client test can prove it reached
-                        // the adapter rather than being remembered locally only.
-                        const auto condition = text(point, "condition");
-                        if (!condition.empty()) entry["message"] = "cond:" + condition;
+                        // Echo the three optional attributes back so the client test can prove
+                        // they reached the adapter rather than being remembered locally only.
+                        // 三个字段拼在同一条 message 里（响应体没有它们）。
+                        std::string echo;
+                        for (const char* key : {"condition", "hitCondition", "logMessage"}) {
+                            const auto value = text(point, key);
+                            if (!value.empty()) echo += std::string(echo.empty() ? "" : ",") + key + "=" + value;
+                        }
+                        if (!echo.empty()) entry["message"] = echo;
                         points.push_back(std::move(entry));
                     }
                 respond(seq, command, Json{{"breakpoints", points}});
@@ -398,6 +429,12 @@ int main(int argc, char** argv) {
             } else if (command == "stackTrace") {
                 const auto path = breakpoint_source.empty() ? std::string("file:///C:/TaoCode/unknown.cpp") : breakpoint_source;
                 const auto line = breakpoint_lines.empty() ? std::int64_t(4) : breakpoint_lines.front();
+                // 分页字段原样回声（响应里没有它们）：客户端测试据此证明 startFrame/levels
+                // 真的发出去了，而不是被本地吞掉。缺省时报 -1，与"没发这个键"区分开。
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: stackTrace startFrame=" +
+                                                    std::to_string(number(arguments, "startFrame", -1)) +
+                                                    " levels=" + std::to_string(number(arguments, "levels", -1))}});
                 Json frames = Json::array();
                 frames.push_back(Json{{"id", 1000},
                                       {"name", "fake_main"},
@@ -411,8 +448,11 @@ int main(int argc, char** argv) {
                                       {"source", Json{{"name", "entry.cpp"}, {"path", "file:///C:/Windows/entry.cpp"}, {"sourceReference", 0}}}});
                 respond(seq, command, Json{{"stackFrames", frames}, {"totalFrames", 2}});
             } else if (command == "scopes") {
-                Json local{{"name", "Local"}, {"variablesReference", 2000}, {"expensive", false}, {"namedVariables", 2}};
-                Json statics{{"name", "Statics"}, {"variablesReference", 3000}, {"expensive", true}};
+                // `namedVariables`/`indexedVariables`（规范可选）是分页依据，两个作用域都带上。
+                Json local{{"name", "Local"}, {"variablesReference", 2000}, {"expensive", false},
+                           {"namedVariables", 2}, {"indexedVariables", 0}};
+                Json statics{{"name", "Statics"}, {"variablesReference", 3000}, {"expensive", true},
+                             {"namedVariables", 1}};
                 respond(seq, command, Json{{"scopes", Json::array({local, statics})}});
             } else if (command == "evaluate") {
                 // Echo the expression, context and frame so the client test can prove the
@@ -420,15 +460,26 @@ int main(int argc, char** argv) {
                 const auto expression = arguments.value("expression", std::string());
                 const auto context = arguments.value("context", std::string());
                 const auto frame = number(arguments, "frameId", -1);
+                // 带 variablesReference 的结果：客户端整形必须同时给出 `reference`/`named`
+                // 与前端在用的 `variablesReference`，UI 才能接着展开（这里给 0 = 不可展开）。
                 respond(seq, command, Json{{"result", expression + " => 42 [" + context + "@" + std::to_string(frame) + "]"},
                                            {"variablesReference", 0}, {"type", "int"}});
             } else if (command == "variables") {
                 const auto reference = number(arguments, "variablesReference", 0);
+                // 分页字段原样回声（响应里没有它们）。
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: variables ref=" + std::to_string(reference) +
+                                                    " start=" + std::to_string(number(arguments, "start", -1)) +
+                                                    " count=" + std::to_string(number(arguments, "count", -1))}});
                 Json values = Json::array();
                 if (reference == 2000) {
                     values.push_back(Json{{"name", "counter"}, {"value", "7"}, {"type", "int"}, {"variablesReference", 0}, {"evaluateName", "counter"}});
+                    // `message` 带 namedVariables（分页依据）与一个**下标**子项 `chars`
+                    // （`indexedVariables` + `namedVariables: 0`）：前端「按类型分组」读的就是
+                    // 这两个可选字段与 `type`，客户端整形不许把它们丢掉（见 dap_values_test 的
+                    // `variables expose type and the two child counts`）。
                     values.push_back(Json{{"name", "message"}, {"value", "\"hello\""}, {"type", "const char *"}, {"variablesReference", 4000},
-                                          {"evaluateName", "message"}, {"namedVariables", 1}});
+                                          {"evaluateName", "message"}, {"namedVariables", 1}, {"indexedVariables", 5}});
                 } else if (reference == 3000) {
                     values.push_back(Json{{"name", "argv"}, {"value", "0x00007ff6deadbeef"}, {"type", "char **"}, {"variablesReference", 0}});
                 } else if (reference == 555) {
@@ -631,8 +682,60 @@ int main(int argc, char** argv) {
                                                                        {"path", path}}})}});
             } else if (command == "goto" || command == "restartFrame") {
                 respond(seq, command, Json::object());
-            } else if (command == "terminate" || command == "restart") {
-                // 两条都是"收到就答"，客户端测试据此证明请求真的发出去了。
+            } else if (command == "dataBreakpoints") {
+                // 三条覆盖：带 id/accessType 的完整项、只有 dataId+label 的最小项、
+                // 以及一条**缺 dataId** 的（规范必填，客户端必须丢掉）。
+                respond(seq, command, Json{{"breakpoints", Json::array({
+                    Json{{"id", "watch-1"}, {"dataId", "counter"}, {"accessType", "write"},
+                         {"label", "counter (write)"}, {"description", "int counter"}},
+                    Json{{"dataId", "flags"}, {"label", "flags"}},
+                    Json{{"label", "orphan-no-dataId"}}})}});
+            } else if (command == "setDataBreakpoints") {
+                // 把收到的 dataId/accessType 回声成 output（响应里没有这些字段），
+                // 客户端测试据此证明规范化后的参数真的发出去了（非法 accessType 被丢掉）。
+                std::string echo;
+                if (arguments.contains("breakpoints") && arguments.at("breakpoints").is_array())
+                    for (const auto& point : arguments.at("breakpoints")) {
+                        echo += " " + text(point, "dataId") + "/" + text(point, "accessType");
+                    }
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: setDataBreakpoints" + echo}});
+                Json points = Json::array();
+                if (arguments.contains("breakpoints") && arguments.at("breakpoints").is_array())
+                    for (const auto& point : arguments.at("breakpoints"))
+                        points.push_back(Json{{"verified", true}, {"id", "bp-" + text(point, "dataId")},
+                                              {"dataId", text(point, "dataId")}});
+                respond(seq, command, Json{{"breakpoints", std::move(points)}});
+            } else if (command == "setFunctionBreakpoints") {
+                // 名字回声 + 每条都 verified；第三条**没有 name** 的请求项在客户端就该被丢掉，
+                // 所以这里收到的只会是带名字的那些。
+                std::string echo;
+                if (arguments.contains("breakpoints") && arguments.at("breakpoints").is_array())
+                    for (const auto& point : arguments.at("breakpoints")) echo += " " + text(point, "name");
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: setFunctionBreakpoints" + echo}});
+                Json points = Json::array();
+                if (arguments.contains("breakpoints") && arguments.at("breakpoints").is_array())
+                    for (const auto& point : arguments.at("breakpoints"))
+                        points.push_back(Json{{"verified", true}, {"line", 12}, {"name", text(point, "name")}});
+                respond(seq, command, Json{{"breakpoints", std::move(points)}});
+            } else if (command == "source") {
+                // 按 sourceReference 取内容：非 0 的引用回一段确定性的源码；
+                // 0 且没有 source.path 时失败（适配器无从知道要取哪个源）。
+                const auto reference = number(arguments, "sourceReference", 0);
+                const auto source_path = arguments.contains("source") && arguments.at("source").is_object()
+                                             ? text(arguments.at("source"), "path") : std::string();
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: source ref=" + std::to_string(reference) +
+                                                    " path=" + source_path}});
+                if (reference <= 0 && source_path.empty()) {
+                    refuse(seq, command, "source needs a sourceReference or a source path");
+                } else {
+                    respond(seq, command, Json{{"content", "// generated source for " + std::to_string(reference) + "\nint main() { return 0; }\n"},
+                                               {"mimeType", "text/x-c"}});
+                }
+            } else if (command == "goto" || command == "restartFrame" || command == "terminate" || command == "restart") {
+                // 四条都是"收到就答"，客户端测试据此证明请求真的发出去了。
                 respond(seq, command, Json::object());
             } else if (command == "pause") {
                 respond(seq, command, Json::object());

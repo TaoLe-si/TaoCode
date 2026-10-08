@@ -3,10 +3,12 @@ import { computed, reactive, ref, watch } from 'vue'
 import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, ChevronRight, Eye, FileCode2, Filter, Folder, Group, Layers, ListChecks, LocateFixed, RefreshCw } from 'lucide-vue-next'
 import { isDesktop, request, type DocumentData, type GitChange, type GitStatus, type SearchMatch, type SearchResult, type TodoPattern } from '../bridge'
 import { buildTodoTree, flattenTodoRows, orderedItems, packageIds, type TodoItem, type TodoNode } from '../todoTree'
-import { filterTodoItemsByScope, markerMatches, matchingTodoPattern, TODO_CHANGE_LIST_SCOPE, todoItemColor, TODO_CURRENT_FILE_SCOPE } from '../todoView'
+import { filterTodoItemsByScope, keepPatternHits, markerMatches, TODO_CHANGE_LIST_SCOPE, todoItemColor, TODO_CURRENT_FILE_SCOPE } from '../todoView'
 import { TODO_MAX_DISPLAYED_LINES, todoContinuationLines, todoDisplayText, todoMarkerRegions } from '../todoMultiLine'
-import { firstSpeedSearchHit } from '../speedSearch'
+import { isSpeedSearchTypeable, speedSearchElement, speedSearchNextInput, type SpeedSearchInputEvent, type SpeedSearchInputState } from '../speedSearch'
 import { filterTodoItems, todoFilters } from '../todoFilters'
+import { needsTodoIndex } from '../todoExtraPlaces.ts'
+import { providerTodoIndexerPaths, providerTodoItems, mergeTodoItems, setTodoIndexerPatterns } from '../todoIndexerEntries.ts'
 import { iconSize } from '../uiIcons'
 
 // IDEA's Todo tool window (platform/todo TodoPanel): a vertical toolbar with the
@@ -45,17 +47,23 @@ const changeListPaths = ref<string[]>([])
 const changeListNote = ref('')
 /** 多行补全被文件数上限截住时的说明。 */
 const multilineNote = ref('')
-/** 速度搜索的当前串（`TodoPanel.java:286` 的 `installTreeSpeedSearch`：打字即选中，不裁剪列表）。 */
-const speedQuery = ref('')
+/** 「额外位置」门挡掉了多少条工作区外的标记（`com.intellij.todoExtraPlaces`，见 `src/todoExtraPlaces.ts`）。 */
+const extraPlaceNote = ref('')
+/**
+ * 速度搜索的当前串（`TodoPanel.java:286` 的 `installTreeSpeedSearch`：打字即选中，不裁剪列表）。
+ * `shown` 就是上游"搜索框在场"那一档（`SpeedSearchBase.java:1070` 的 `mySearchPopup != null`）：
+ * 本仓没有浮动的输入框，这一位决定下一次输入是**追加**还是**替换**（见 `speedSearchNextInput`）。
+ */
+const speed = ref<SpeedSearchInputState>({ pattern: '', shown: false })
+const speedQuery = computed(() => speed.value.pattern)
 const expanded = reactive(new Set<string>())
 const selected = ref<{ path: string; line: number } | null>(null)
 const preview = ref<{ path: string; line: number; lines: string[]; start: number } | null>(null)
 const previewError = ref('')
 
-// The scan queries the markers as a regex alternation (`\b(TODO|FIXME[:\s])\b`), so the
-// badge, the color and the filter all test with the same semantics（规则在 src/todoView.ts，
-// 坏正则退化为字面量包含而不是每行抛异常；IDEA TodoPattern.isCaseSensitive() 默认不区分大小写）。
-const badge = (preview: string) => matchingTodoPattern(preview, props.patterns)?.description ?? ''
+// 标记名与颜色来自**命中的那条模式**（规则在 src/todoView.ts：模式按上游原样当正则用，
+// 大小写按每条模式自己的 `caseSensitive`；坏正则退化为字面量包含而不是每行抛异常）。
+// `kind` 由扫描末尾的 `keepPatternHits` 填好（上游两段式：粗筛 + 每条模式自己定夺）。
 const itemColor = (preview: string) => todoItemColor(preview, props.patterns)
 
 const scoped = computed(() => filterTodoItemsByScope(items.value, scopeName.value, props.scopes ?? [], props.moduleName ?? '',
@@ -63,7 +71,11 @@ const scoped = computed(() => filterTodoItemsByScope(items.value, scopeName.valu
 // 命名过滤器（`TodoFilter`）优先；直接选单条标记时退回原来的逐条匹配。
 const filtered = computed(() => {
   if (filterName.value) return filterTodoItems(scoped.value, filterName.value, todoFilters.value, props.patterns)
-  return filterPattern.value ? scoped.value.filter(item => markerMatches(item.text, filterPattern.value)) : scoped.value
+  if (!filterPattern.value) return scoped.value
+  // 选中一条标记做过滤时用**那条模式自己的** caseSensitive（此前省略第三参 ⇒ 永远按不区分大小写，
+  // 勾了「区分大小写」的标记照样把反面大小写的行留下来）。
+  const chosen = props.patterns.find(pattern => pattern.pattern === filterPattern.value)
+  return scoped.value.filter(item => markerMatches(item.text, filterPattern.value, chosen?.caseSensitive))
 })
 const tree = computed(() => buildTodoTree(filtered.value, { showPackages: showPackages.value, flattenPackages: flattenPackages.value }))
 const rows = computed(() => flattenTodoRows(tree.value, expanded))
@@ -92,17 +104,58 @@ function markerSegments(line: string): Array<{ text: string; mark: boolean }> {
 // A scan is one workspace walk, so its generation guard is what keeps a slow scan of
 // the previous project from overwriting the tree of the project now open.
 let scanToken = 0
+/**
+ * 第三方索引器（`com.intellij.todoIndexer`，`src/todoIndexerEntries.ts`）补的条目。
+ * 只为**有第三方索引器认领**的那些路径各读一次文件（`providerTodoIndexerPaths` 恒空 ⇒ 一次读盘都不发）。
+ * 读不到的文件保持单行显示，不谎报（与多行 TODO 那条链同一容错口径）。
+ */
+async function providerItemsFor(paths: readonly string[]): Promise<Array<{ path: string; line: number; text: string; kind: string }>> {
+  const targets = providerTodoIndexerPaths(paths)
+  if (!targets.length) return []
+  const out: Array<{ path: string; line: number; text: string; kind: string }> = []
+  for (const path of targets) {
+    try {
+      const doc = await request<DocumentData>('file.read', { path })
+      out.push(...providerTodoItems(path, doc.content, props.patterns))
+    } catch { /* 读不到的文件不补条目，不谎报 */ }
+  }
+  return out
+}
 async function scan() {
   if (!isDesktop || !props.root || running.value) return
   const token = ++scanToken
   running.value = true
   error.value = ''
+  // 把当前项目的模式表灌给 bundled 索引器（`PlainTextTodoIndexer` 读的是全局 TodoConfiguration，
+  // 本仓的模式是项目级的 —— 见 `src/todoIndexerEntries.ts` 的 `setTodoIndexerPatterns`）。
+  setTodoIndexerPatterns(props.patterns)
   try {
-    const markers = props.patterns.map(pattern => pattern.pattern).join('|') || 'TODO'
-    const result = await request<SearchResult>('search.run', { query: `\\b(${markers})\\b`, regex: true, caseSensitive: false, wholeWord: false, include: '', exclude: '' })
+    // 粗筛：一趟 `search.run` 只有一个全局 `caseSensitive`，所以按**不区分大小写**取超集，
+    // 末尾再交给 `keepPatternHits` 按每条模式自己的档位定夺（上游同形：索引只做粗筛计数
+    // `IndexPatternSearcher.java:66-74`，命中由每条 `IndexPattern` 的 `Pattern.find()` 决定 `:239-247`）。
+    // 模式**原样**拼进查询，不再包 `\b(...)`：上游 `IndexPattern.java:80-89` 就是把用户写的串
+    // 直接 `Pattern.compile`；而且提交前 TODO 检查那条链（`src/todoScan.ts` → `SourceControl.vue:487`）
+    // 本来就是原样直送，包了就成了同一个模式在两处说两种话。表空 ⇒ 不发扫描、什么都不留。
+    const markers = props.patterns.map(pattern => pattern.pattern.trim()).filter(Boolean).join('|')
+    const result = markers
+      ? await request<SearchResult>('search.run', { query: markers, regex: true, caseSensitive: false, wholeWord: false, include: '', exclude: '' })
+      : null
     if (token !== scanToken) return
-    items.value = result.matches.map((match: SearchMatch) => ({
-      path: match.path, line: match.line, column: match.column, text: match.preview.trim(), kind: badge(match.preview) }))
+    // 「额外位置」这一道门（上游 `TodoIndexers.needsTodoIndex`）：结果必须落在工作区内容根里，
+    // 否则要有一条 `com.intellij.todoExtraPlaces` 的 checker 认领它（出厂的 ScratchTodoExtraPlaces
+    // 认 scratch 临时文件 —— 见 `src/todoExtraPlaces.ts`）。挡掉多少如实写在状态行里。
+    const hits = (result?.matches ?? []).map((match: SearchMatch) => ({
+      path: match.path, line: match.line, column: match.column, text: match.preview.trim(),
+    }))
+    const indexed = hits.filter(hit => needsTodoIndex(hit.path, props.root))
+    extraPlaceNote.value = hits.length > indexed.length
+      ? `已忽略 ${hits.length - indexed.length} 条工作区外的标记（未被任何额外位置检查器认领）。` : ''
+    // `com.intellij.todoIndexer` 那条 EP：第三方按 id 挂的索引器给这个文件补条目（`map(FileContent)`
+    // 的同名方法面，见 `src/todoIndexerEntries.ts`）。**只在真的有第三方索引器时**才为文件读一次盘
+    // （bundled 那支与 `search.run` 同一份模式表，不并进来 ⇒ 没有第三方时本仓既有行为一字不变）。
+    const providerItems = await providerItemsFor(indexed.map(hit => hit.path))
+    if (token !== scanToken) return
+    items.value = mergeTodoItems(keepPatternHits(indexed, props.patterns), providerItems)
     scanned.value = true
     // A fresh scan replaces the tree, so start from IDEA's fully-expanded view.
     expanded.clear()
@@ -127,7 +180,11 @@ async function applyMultiline(token: number) {
       const lines = doc.content.split(/\r?\n/)
       for (const item of items.value) {
         if (item.path !== path) continue
-        item.additional = todoContinuationLines(lines, item.line, item.column ?? 0, props.patterns)
+        // `SearchMatch.column` 是**桥接口径的 1 基码点列**（native/search.cpp:698 `code_points(content,
+        // line_start, pos) + 1`，`SearchPanel.vue:736` 也是直接把它当"行列"显示），
+        // 而上游续行判定比的是匹配**起始偏移**（0 基，`IndexPatternSearcher.java:285-287`）⇒ 这里换算一次。
+        // 不换算的后果（2026-10-06 todo2 读盘核出）：标记列只有一个空格的续行写法被整段丢掉。
+        item.additional = todoContinuationLines(lines, item.line, (item.column ?? 1) - 1, props.patterns)
       }
     } catch { /* 读不到的文件保持单行显示，不谎报 */ }
   }
@@ -165,20 +222,56 @@ watch(multiLine, on => { if (on && scanned.value) void applyMultiline(scanToken)
 // **选中**下一个匹配的可见行（`SpeedSearchBase.java:679` 的 selectElement），命中的是
 // 可见行的文本 —— 包/文件节点也行，条目也行。
 const speedLabels = computed(() => rows.value.map(row => row.item ? row.item.text : row.node.label))
+/** 串的每一次变化都走同一台状态机（`speedSearchNextInput`），本面板不再自己拼 `+= / slice(0,-1)`。 */
+function applySpeedEvent(event: SpeedSearchInputEvent) {
+  speed.value = speedSearchNextInput(speed.value, event)
+}
 function onTreeKeydown(event: KeyboardEvent) {
-  if (event.ctrlKey || event.metaKey || event.altKey) return
-  if (event.key === 'Escape') { speedQuery.value = ''; return }
-  if (event.key === 'Backspace') { speedQuery.value = speedQuery.value.slice(0, -1); event.preventDefault(); return }
-  if (event.key.length === 1 && !/^\s$/.test(event.key)) {
-    speedQuery.value += event.key
+  if (event.altKey) return
+  // Ctrl/Meta + Backspace = **退到上一个空白分隔符**（`SpeedSearch.java:63-70`；快捷键在
+  // `SpeedSearchBase.java:259` 注册，非 mac 是 `control BACK_SPACE`）。原来这一档被上面那句
+  // `if (event.ctrlKey || event.metaKey) return` 整条挡住，压根到不了退到词首那支。
+  if (event.key === 'Backspace' && (event.ctrlKey || event.metaKey)) {
+    if (!speed.value.pattern) return
+    applySpeedEvent({ kind: 'deleteWord' })
     jumpToSpeedHit()
     event.preventDefault()
     return
   }
-  if (event.key === 'Enter' && selected.value) { open(selected.value); event.preventDefault() }
+  if (event.ctrlKey || event.metaKey) return
+  if (event.key === 'Escape') { applySpeedEvent({ kind: 'escape' }); return }
+  if (event.key === 'Backspace') {
+    // 空串上的退格也要吞掉（`SpeedSearchBase.java:960-962`），只是不改串（`SpeedSearch.java:47-51`）；
+    // 非空时上游同样把这一键吃掉（`:999-1001`），所以下面是无条件 preventDefault。
+    applySpeedEvent({ kind: 'backspace' })
+    jumpToSpeedHit()
+    event.preventDefault()
+    return
+  }
+  // 能打进速度搜索的字符：字母数字，或 `PUNCTUATION_MARKS`（`SpeedSearch.java:25`）里的标点，
+  // 但**空白一律不行**（树/表那一支 `SpeedSearchBase.java:587` 没有"已经在搜就放行"的例外）。
+  // 原来是 `event.key.length === 1 && !/^\s$/.test(event.key)`：`(` `)` 这类不在标点表里的也能打进串，
+  // 而除 ASCII 空格以外的空白（制表符）照样放行 —— 两处都与上游不符。
+  if (event.key.length === 1 && isSpeedSearchTypeable(event.key, null)) {
+    applySpeedEvent({ kind: 'type', character: event.key })
+    jumpToSpeedHit()
+    event.preventDefault()
+    return
+  }
+  if (event.key === 'Enter' && selected.value) {
+    // 上游回车是"收起搜索框"（`SpeedSearchBase.java:965-975`），非 sticky 时旧串不留存
+    // （`:1059-1061`）⇒ 下一次输入**替换**而不是接着追加。原来是打开条目后串还留在原地。
+    applySpeedEvent({ kind: 'hide' })
+    open(selected.value)
+    event.preventDefault()
+  }
 }
 function jumpToSpeedHit() {
-  const hit = firstSpeedSearchHit(speedLabels.value, speedQuery.value)
+  // 打字定位走 `findElement`（`SpeedSearchBase.java:519-537`）：从**当前选中行（含它自己）**
+  // 往后扫、走完再回绕。原来固定用 `firstSpeedSearchHit`（永远从第 0 行重扫），
+  // 光标停在第 3 行、第 1 行也命中时，每敲一个字符高亮就被甩回头部。
+  const current = rows.value.findIndex(row => row.item && row.item.path === selected.value?.path && row.item.line === selected.value?.line)
+  const hit = speedSearchElement(speedLabels.value, speed.value.pattern, current)
   if (hit < 0) return
   const row = rows.value[hit]!
   if (row.item) revealOccurrence({ path: row.item.path, line: row.item.line })
@@ -304,6 +397,7 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
           <p v-if="!root" class="todo-note">尚未打开项目。</p>
         </template>
         <p v-if="multilineNote" class="todo-note" aria-live="polite">{{ multilineNote }}</p>
+        <p v-if="extraPlaceNote" class="todo-note" aria-live="polite">{{ extraPlaceNote }}</p>
         <p v-if="changeListNote" class="todo-note" aria-live="polite">{{ changeListNote }}</p>
         <div class="todo-scroll" role="tree" aria-label="任务列表" tabindex="0"
              @click="groupByOpen = false" @keydown="onTreeKeydown">
@@ -333,14 +427,14 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
                 :style="{ paddingLeft: `${6 + cell.row.depth * 14}px` }" :aria-expanded="cell.row.expanded"
                 @click="togglePackage(cell.row.node)" @keydown.enter.prevent="togglePackage(cell.row.node)"
               >
-                <ChevronRight :size="iconSize.dense" class="tree-chevron" :class="{ expanded: cell.row.expanded }" /><Folder :size="iconSize.dense" class="folder-icon" /><span class="todo-node-label">{{ cell.row.node.label }}</span>
+                <ChevronRight aria-hidden="true" :size="iconSize.dense" class="tree-chevron" :class="{ expanded: cell.row.expanded }" /><Folder aria-hidden="true" :size="iconSize.dense" class="folder-icon" /><span class="todo-node-label">{{ cell.row.node.label }}</span>
               </button>
               <div v-else class="todo-node file" :style="{ paddingLeft: `${6 + (cell.row.depth + 1) * 14}px` }">
                 <FileCode2 :size="iconSize.dense" /><span class="todo-node-label">{{ cell.row.node.label }}</span><span class="todo-node-count">{{ cell.row.node.items.length }}</span>
               </div>
             </template>
           </template>
-          <div v-else-if="scanned" class="todo-empty">{{ items.length ? '没有符合当前过滤标记的任务。' : '没有找到标记。到 设置 › 项目结构 里增减 TODO 模式。' }}</div>
+          <div v-else-if="scanned" class="todo-empty">{{ items.length ? '没有符合当前过滤标记的任务。' : '没有找到标记。到 设置 › 编辑器 › TODO 里增减 TODO 模式。' }}</div>
           <div v-else class="todo-empty">打开项目后自动扫描注释中的 TODO / FIXME 等标记。</div>
         </div>
         <p v-if="showPreview && previewError" class="todo-error">{{ previewError }}</p>
@@ -364,54 +458,55 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
 </template>
 
 <style scoped>
-.todo-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
-.todo-body { display: flex; flex: 1; min-height: 0; }
-.todo-toolbar { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; padding: var(--space-1) 2px; border-right: 1px solid var(--line); background: var(--rail); }
-.todo-toolbar .icon-button.toggled { color: var(--bright); background: var(--selected); }
-.todo-filter-button { position: relative; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-xs); color: var(--secondary); cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.todo-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--editor); color: var(--text); }
+.todo-body { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.todo-toolbar { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; padding: var(--space-1) 2px; border-right: 1px solid var(--line-strong); background: var(--rail); }
+.todo-toolbar .icon-button.toggled { color: var(--accent); background: var(--accent-soft); }
+.todo-filter-button { position: relative; display: grid; place-items: center; width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); border-radius: var(--radius-xs); color: var(--secondary); cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
 .todo-filter-button:hover { background: var(--hover); color: var(--bright); }
+.todo-filter-button:focus-within { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .todo-filter-button select { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: inherit; }
 .todo-groupby { position: relative; }
-.groupby-popup { position: absolute; left: 26px; top: 0; z-index: 5; display: flex; flex-direction: column; gap: 2px; min-width: 148px; padding: var(--space-1) var(--space-2); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--shadow-2); }
-.groupby-popup label { display: flex; align-items: center; gap: var(--space-2); font-size: 11px; color: var(--text); }
+.groupby-popup { position: absolute; left: 26px; top: 0; z-index: 5; display: flex; flex-direction: column; gap: 2px; min-width: 148px; padding: var(--space-1) var(--space-2); background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
+.groupby-popup label { display: flex; align-items: center; gap: var(--space-2); min-height: var(--menu-row-height); font-size: 12px; color: var(--text); }
 .groupby-popup label.disabled { color: var(--muted); }
-.groupby-popup input { accent-color: var(--accent); }
-.todo-stack { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
-.todo-note, .todo-error { margin: 0; padding: var(--space-2) var(--space-3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.groupby-popup input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); accent-color: var(--accent); }
+.todo-stack { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--editor); }
+.todo-note, .todo-error { margin: 0; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .todo-note { color: var(--secondary); background: var(--rail); }
-.todo-error { color: var(--error); background: var(--panel); border-bottom: 1px solid var(--line); }
-.todo-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: var(--space-2); }
-.todo-node { display: flex; align-items: center; gap: var(--space-1); width: 100%; border: 0; background: transparent; color: var(--text); text-align: left; font-size: 11px; }
-.todo-node.package, .todo-node.file { padding: 1px 6px; color: var(--secondary); }
-.todo-node.file { color: var(--accent); }
-.todo-row { padding: 1px 6px; gap: var(--space-2); color: var(--secondary); cursor: pointer; }
+.todo-error { border-left: 2px solid var(--error); background: var(--error-bg); color: var(--error); }
+.todo-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: var(--space-1) 0 var(--space-2); }
+.todo-node { display: flex; align-items: center; gap: var(--space-1); width: 100%; min-height: var(--tree-row-h); border: 0; background: transparent; color: var(--text); text-align: left; font: 12px/1.4 var(--font-ui); }
+.todo-node.package, .todo-node.file { padding-top: 0; padding-right: var(--space-2); padding-bottom: 0; color: var(--secondary); }
+.todo-node.file > svg { color: var(--accent); }
+.todo-row { gap: var(--space-2); padding-top: 2px; padding-right: var(--space-3); padding-bottom: 2px; color: var(--text); cursor: pointer; }
 .todo-row:hover, .todo-node:hover { background: var(--hover); }
-.todo-row.selected { background: var(--selected); color: var(--bright); }
-.todo-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.todo-row.selected { background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); color: var(--bright); }
+.todo-row:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .todo-node-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.todo-node-count { color: var(--muted); font-variant-numeric: tabular-nums; }
-.todo-kind { flex-shrink: 0; color: var(--warning); }
+.todo-node-count { margin-left: auto; color: var(--muted); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
+.todo-kind { flex-shrink: 0; color: var(--warning); font-size: 10px; font-weight: 600; }
 /* 颜色方案列（IDEA TodoPanel 的标记颜色）：模式自带的 #RRGGBB，缺省中性色。 */
 .todo-color-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; }
-.todo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px/1.6 var(--font-mono); }
+.todo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/1.45 var(--font-mono); }
 /* 多行任务（`MultiLineTodoRenderer.java:16,64-76` 的等价形状）：主行在上、续行逐行跟在下面，
    超过 10 行只给一行「更多」提示，和上游的 myMoreLabel 一样不硬塞。 */
 .todo-text { display: flex; flex-direction: column; align-items: flex-start; }
 .todo-head, .todo-extra, .todo-more { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.todo-extra, .todo-more { color: var(--muted); }
+.todo-extra, .todo-more { color: var(--muted); font-size: 11px; }
 /* 速度搜索的当前串（`SpeedSearchBase` 那个浮动搜索框在本仓就是一行状态文字）。 */
-.todo-speed { margin: 0; padding: 2px var(--space-3); color: var(--secondary); background: var(--rail); border-bottom: 1px solid var(--line); font: 10px var(--font-mono); }
-.todo-scroll:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.todo-speed { margin: 0; padding: var(--space-2) var(--space-3); color: var(--secondary); background: var(--rail); border-bottom: 1px solid var(--line-strong); font: 11px var(--font-mono); }
+.todo-scroll:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 /* 预览里标记词的上色（`TodoHighlightVisitor.java:96-107`）：颜色来自模式表，不写死。 */
 .preview-line .marked { font-weight: 600; background: var(--selected); }
-.todo-pos { flex-shrink: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+.todo-pos { flex-shrink: 0; color: var(--muted); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
 .tree-chevron { flex-shrink: 0; transition: transform var(--dur-1) var(--ease); }
 .tree-chevron.expanded { transform: rotate(90deg); }
 .folder-icon { flex-shrink: 0; color: var(--accent); }
-.todo-empty { padding: var(--space-4) var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; }
+.todo-empty { margin: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3); border-left: 2px solid var(--line-strong); color: var(--secondary); font-size: 12px; line-height: 1.6; }
 .todo-preview { flex-shrink: 0; max-height: 40%; overflow: auto; border-top: 1px solid var(--line-strong); background: var(--panel); }
-.preview-head { padding: 2px var(--space-3); color: var(--muted); font: 10px var(--font-mono); border-bottom: 1px solid var(--line); }
+.preview-head { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line-strong); background: var(--rail); color: var(--secondary); font: 11px var(--font-mono); }
 .preview-lines { margin: 0; padding: var(--space-2) var(--space-3); font: 11px/1.6 var(--font-mono); color: var(--secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
 .preview-line { display: block; }
-.preview-line.current { color: var(--bright); background: var(--selected); }
+.preview-line.current { color: var(--bright); background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); }
 </style>

@@ -16,6 +16,7 @@ import { ref } from 'vue'
 import { EDITOR_LANGUAGES } from './languages.ts'
 import { fileTypeManager } from './fileTypeRegistry.ts'
 import { looksBinary } from './vcsFileUtil.ts'
+import { APPLICATION_SCOPE, EXTENSIONS, type ExtensionHandle, type RegisterExtensionOptions } from './extensionPoints.ts'
 // 按文件覆盖类型（`lp/exclude` 的 `OverrideFileTypeManager`）：上游 `getFileTypeByFile` 在
 // **任何**按名字/内容的判定之前先问覆盖表（`FileTypeManagerImpl.java:916-923` 的 `getByOverrides`，
 // 实现是 `UserFileTypeOverrider.java:17-24` 的 `findFileTypeByName`），本仓同序。
@@ -110,6 +111,37 @@ const DEFAULT_DETECTORS: readonly ContentDetector[] = [
 
 const detectorTable: ContentDetector[] = [...DEFAULT_DETECTORS]
 
+// ── EP 宿主：`com.intellij.fileTypeDetector`（`FileTypeRegistry$FileTypeDetector`） ────────
+//
+// 上游 EP 声明 `platform/core-api/resources/intellij.platform.core.xml:99`
+// `<extensionPoint name="fileTypeDetector" interface="com.intellij.openapi.fileTypes.FileTypeRegistry$FileTypeDetector"
+//  dynamic="true"/>`（`name` 属性在默认命名空间下 = `com.intellij.fileTypeDetector`）。
+// 内置探测表按 bundled 贡献登记，第三方按同一 EP id 挂的探测器由 `detectByContent()`
+// （`resolveEditorLanguage`/`detectFileType` 的真实判定点）合并；先注册/先声明先判（order 小的优先）。
+
+/** EP id（逐字取自上游 `intellij.platform.core.xml:99` 的 `name` 属性，默认命名空间）。 */
+export const FILE_TYPE_DETECTOR_EP = 'com.intellij.fileTypeDetector'
+
+/** 声明 EP（幂等）。 */
+export function declareFileTypeDetectorExtensionPoint(): void {
+  EXTENSIONS.declareExtensionPoint({ id: FILE_TYPE_DETECTOR_EP, name: '文件类型探测器', scope: APPLICATION_SCOPE, dynamic: true })
+}
+
+/** 插件贡献一个内容探测器（等价于上游 plugin.xml 的 `<fileTypeDetector implementation=…/>`）。 */
+export function registerFileTypeDetector(detector: ContentDetector, options: RegisterExtensionOptions = {}): ExtensionHandle {
+  return EXTENSIONS.registerExtension(FILE_TYPE_DETECTOR_EP, detector.id, detector, options)
+}
+
+/** 注销一条探测器贡献。 */
+export function unregisterFileTypeDetector(id: string): boolean {
+  return EXTENSIONS.unregisterExtension(FILE_TYPE_DETECTOR_EP, id)
+}
+
+/** 当前 EP 上的全部探测器（bundled + 第三方）。 */
+export function fileTypeDetectorsFromExtensions(scope: string = APPLICATION_SCOPE): ContentDetector[] {
+  return EXTENSIONS.extensionsOf<ContentDetector>(FILE_TYPE_DETECTOR_EP, scope)
+}
+
 /**
  * 追加一条内容探测器（`order` 小的先判；同 order 按注册顺序）。
  * 返回一个注销函数 —— 上游 EP 注销就是从 `ExtensionPointImpl` 的列表里摘掉。
@@ -133,10 +165,14 @@ export function contentDetectors(): readonly ContentDetector[] {
   return detectorTable
 }
 
-/** 按内容探测（走探测器表；返回 null 表示认不出，不猜）。 */
+/** 按内容探测（走探测器表 + EP 贡献；返回 null 表示认不出，不猜）。 */
 export function detectByContent(content: string): { type: string; language: string; confidence: 'high' | 'low' } | null {
   const head = content.slice(0, 4096)
-  for (const detector of detectorTable) {
+  const merged = new Map<string, ContentDetector>()
+  for (const detector of detectorTable) merged.set(detector.id, detector)
+  for (const detector of fileTypeDetectorsFromExtensions()) if (!merged.has(detector.id)) merged.set(detector.id, detector)
+  const ordered = [...merged.values()].sort((a, b) => a.order - b.order)
+  for (const detector of ordered) {
     const hit = detector.match(head)
     if (hit) return hit
   }
@@ -349,3 +385,8 @@ export function fileTypeDetectionCacheSize(): number { return detectionCache.siz
 fileTypeManager.addFileTypeListener({
   fileTypesChanged: () => { clearFileTypeDetectionCache(); fileTypeRevision.value += 1 },
 })
+
+// bundled：内置探测表按上游 plugin.xml 的 `<fileTypeDetector/>` 形态登记在 EP 上。
+declareFileTypeDetectorExtensionPoint()
+for (const detector of DEFAULT_DETECTORS)
+  EXTENSIONS.registerExtension(FILE_TYPE_DETECTOR_EP, detector.id, detector, { source: 'bundled' })

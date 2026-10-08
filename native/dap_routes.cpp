@@ -134,6 +134,49 @@ RouteOutcome dispatch_dap_route(const std::string& method, const Json& params, c
                                      answer_to(host, id));
         return RouteOutcome::answered_async;
     }
+    // DAP `dataBreakpoints`（IDEA 的字段观察点候选清单）：能力门控与整形都在 `Client::data_breakpoints`
+    // （native/dap_values.cpp），没声明 `supportsDataBreakpoints` 时回 DAP_UNSUPPORTED —— 调用方据此
+    // 不渲染入口，而不是把"没有候选"当成结论。
+    if (method == "dap.dataBreakpoints") {
+        auto& session = host.route_client();
+        if (!session.running()) throw WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+        session.data_breakpoints(answer_to(host, id));
+        return RouteOutcome::answered_async;
+    }
+    // DAP `setDataBreakpoints`（IDEA `JavaFieldBreakpointType` 的字段观察点）：装/清数据断点。
+    // 请求项的 dataId 必填，空条目在 `normalize_data_breakpoints` 里被丢掉（与规范一致）。
+    if (method == "dap.setDataBreakpoints") {
+        auto& session = host.route_client();
+        if (!session.running()) throw WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+        const Json requested = params.contains("breakpoints") && params.at("breakpoints").is_array()
+                                   ? params.at("breakpoints")
+                                   : Json::array();
+        session.set_data_breakpoints(requested, answer_to(host, id));
+        return RouteOutcome::answered_async;
+    }
+    // DAP `setFunctionBreakpoints`（IDEA 的 `JavaMethodBreakpointType`，按**函数名**停住）：
+    // 能力位 `supportsFunctionBreakpoints` 默认 false，未声明回 DAP_UNSUPPORTED。
+    if (method == "dap.setFunctionBreakpoints") {
+        auto& session = host.route_client();
+        if (!session.running()) throw WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+        const Json requested = params.contains("breakpoints") && params.at("breakpoints").is_array()
+                                   ? params.at("breakpoints")
+                                   : Json::array();
+        session.set_function_breakpoints(requested, answer_to(host, id));
+        return RouteOutcome::answered_async;
+    }
+    // DAP `source`（IDEA 的「下载源代码」/适配器动态生成的源）：按 `sourceReference` 取内容，
+    // 是 `file.read` 在调试侧的等价物。规范里 sourceReference 与 source 二者至少给一个。
+    if (method == "dap.source") {
+        auto& session = host.route_client();
+        if (!session.running()) throw WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+        const auto reference = long_of(params, "sourceReference", 0);
+        const auto path = params.value("path", std::string());
+        if (reference <= 0 && path.empty())
+            throw WorkspaceError("INVALID_REQUEST", "取源内容需要 sourceReference 或 path 之一。");
+        session.source(reference, path, answer_to(host, id));
+        return RouteOutcome::answered_async;
+    }
 
     // --- 执行控制 -------------------------------------------------------------
 
@@ -180,9 +223,15 @@ RouteOutcome dispatch_dap_route(const std::string& method, const Json& params, c
         auto& session = host.route_client();
         if (!session.running()) throw WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
         const auto cb = answer_to(host, id);
-        if (method == "dap.stackTrace") session.stack_trace(long_of(params, "threadId", 1), cb);
+        if (method == "dap.stackTrace")
+            // `startFrame`/`levels` 是 DAP 的分页字段（规范里都可选，<= 0 = 不指定）。
+            session.stack_trace(long_of(params, "threadId", 1), long_of(params, "startFrame", 0),
+                                long_of(params, "levels", 0), cb);
         else if (method == "dap.scopes") session.scopes(long_of(params, "frameId", 0), cb);
-        else session.variables(long_of(params, "reference", 0), cb);
+        else
+            // `start`/`count` 是 DAP `variables` 的分页字段（大数组一次只取一页）。
+            session.variables(long_of(params, "reference", 0), long_of(params, "start", 0),
+                              long_of(params, "count", 0), cb);
         return RouteOutcome::answered_async;
     }
     // IDEA 的 XValue.setValue（Variables 树里改值）与 Watches 视图的「Set Value」。
@@ -205,11 +254,11 @@ RouteOutcome dispatch_dap_route(const std::string& method, const Json& params, c
     if (method == "dap.evaluate") {
         auto& session = host.route_client();
         if (!session.running()) throw WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-        session.request("evaluate",
-                        {{"expression", params.value("expression", std::string())},
-                         {"context", params.value("context", std::string("hover"))},
-                         {"frameId", params.value("frameId", 0)}},
-                        answer_to(host, id));
+        // 走 `Client::evaluate`（dap_values.cpp）：`context` 原样透传（规范里的 watch/repl/hover/
+        // variables/clipboard），回参整形出可展开的 `reference`/`variablesReference` 与
+        // `namedVariables`/`indexedVariables`，前端才能用 `dap.variables` 那套继续展开。
+        session.evaluate(params.value("expression", std::string()), params.value("context", std::string("hover")),
+                         long_of(params, "frameId", 0), answer_to(host, id));
         return RouteOutcome::answered_async;
     }
     if (method == "dap.exceptionInfo") {

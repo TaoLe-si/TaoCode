@@ -12,6 +12,7 @@
 #include <shellapi.h>
 
 #include "workspace_detail.hpp"
+#include "workspace_codec.hpp"  // 编码表 + BOM + UTF-16/UTF-32 转换 + 三档行尾（2026-10-06 拆出）
 
 #include <algorithm>
 #include <array>
@@ -74,12 +75,21 @@ std::wstring api_path(const std::filesystem::path& path) {
 // native/workspace_detail.hpp，定义仍然只有各自那一个 TU 里的一份）。下面这排 using 让本文件
 // 与拆出去的那个 TU 里的调用保持原样，不必改成 detail::xxx(...)；它必须排在匿名命名空间**之前**，
 // 因为匿名命名空间里的 helper 也在调它们。
+// 2026-10-08 拆「路径守卫」一族到 native/workspace_paths.cpp 时同理：equal_name /
+// validate_component / parse_relative / plain_path / within 的**定义**跟着搬走，这里只多一排
+// using（本文件不 include fsops.hpp，而那里面另有一份同名的 taocode:: 名字 —— 两个都进候选集
+// 就会是 C2668 重载不明确）。
 using detail::api_path;
 using detail::copy_tree;
+using detail::equal_name;
 using detail::fail;
+using detail::parse_relative;
+using detail::plain_path;
 using detail::remove_tree;
 using detail::utf8_path;
+using detail::validate_component;
 using detail::win_error;
+using detail::within;
 
 namespace {
 namespace fs = std::filesystem;
@@ -128,146 +138,14 @@ private:
     HANDLE value_;
 };
 
-bool valid_utf8(const std::string& text) {
-    if (text.empty()) return true;
-    if (text.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
-        return false;
-    return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
-                              static_cast<int>(text.size()), nullptr, 0) != 0;
-}
-
-// Text encodings. The bridge only carries UTF-8 JSON, so a non-UTF-8 file is decoded
-// to wide text and re-encoded as UTF-8 on the way in, and saved by the inverse path.
-// Every conversion is strict: an undecodable byte sequence, or a character the target
-// code page cannot represent, is an error — never a '?' written over the user's text.
-// The SDK headers do not name the UTF-16 code pages, so their numbers live here.
-constexpr uint32_t utf16le_page = 1200, utf16be_page = 1201;
-
-struct Encoding {
-    const char* key;     // the token the UI sends back verbatim
-    uint32_t page;       // Windows code page; the UTF-16 pair is handled by hand
-    const char* bom;     // byte-order mark to write when the caller asks for one
-};
-
-const Encoding encoding_list[] = {
-    {"utf-8", CP_UTF8, "\xEF\xBB\xBF"},
-    {"gbk", 936, ""},
-    {"cp1252", 1252, ""},
-    {"system", CP_ACP, ""},
-    {"utf-16le", utf16le_page, "\xFF\xFE"},
-    {"utf-16be", utf16be_page, "\xFE\xFF"},
-};
-
-const Encoding& encoding_for(const std::string& key) {
-    for (const auto& item : encoding_list)
-        if (key == item.key) return item;
-    fail("INVALID_ENCODING", "不支持的文件编码：" + key);
-}
-
-bool utf16_page(uint32_t page) { return page == utf16le_page || page == utf16be_page; }
-
-std::wstring decode_wide(const char* data, std::size_t size, const Encoding& encoding) {
-    const std::string label(encoding.key);
-    if (size == 0) return {};
-    if (utf16_page(encoding.page)) {
-        if (size % 2) fail("ENCODING_MISMATCH", "UTF-16 文本的字节数必须是偶数：" + label);
-        std::wstring text;
-        text.reserve(size / 2);
-        for (std::size_t index = 0; index + 1 < size; index += 2) {
-            const auto low = static_cast<unsigned>(static_cast<unsigned char>(data[encoding.page == utf16le_page ? index : index + 1]));
-            const auto high = static_cast<unsigned>(static_cast<unsigned char>(data[encoding.page == utf16le_page ? index + 1 : index]));
-            text.push_back(static_cast<wchar_t>(low | (high << 8)));
-        }
-        return text;
-    }
-    const auto needed = MultiByteToWideChar(encoding.page, MB_ERR_INVALID_CHARS, data, static_cast<int>(size), nullptr, 0);
-    if (!needed)
-        fail("ENCODING_MISMATCH", "文件内容不是 " + label + " 编码的有效文本。");
-    std::wstring text(needed, L'\0');
-    MultiByteToWideChar(encoding.page, MB_ERR_INVALID_CHARS, data, static_cast<int>(size), text.data(), needed);
-    return text;
-}
-
-std::wstring decode_wide(const std::string& bytes, const Encoding& encoding) {
-    return decode_wide(bytes.data(), bytes.size(), encoding);
-}
-
-std::string encode_bytes(const std::wstring& text, const Encoding& encoding) {
-    if (text.empty()) return {};
-    if (utf16_page(encoding.page)) {
-        std::string bytes;
-        bytes.reserve(text.size() * 2);
-        for (const auto unit : text) {
-            const auto value = static_cast<unsigned>(unit);
-            const auto low = static_cast<char>(value & 0xFF), high = static_cast<char>(value >> 8);
-            bytes += encoding.page == utf16le_page ? std::string{low, high} : std::string{high, low};
-        }
-        return bytes;
-    }
-    const auto needed = WideCharToMultiByte(encoding.page, 0, text.data(), static_cast<int>(text.size()),
-                                           nullptr, 0, nullptr, nullptr);
-    if (!needed) fail("ENCODING_FAILED", std::string("无法用 ") + encoding.key + " 编码写入文件。");
-    std::string bytes(needed, '\0');
-    WideCharToMultiByte(encoding.page, 0, text.data(), static_cast<int>(text.size()), bytes.data(), needed, nullptr, nullptr);
-    // lpUsedDefaultChar is unreliable across code pages, so verify by decoding the
-    // bytes back: a silent substitution changes the text and fails here instead.
-    if (decode_wide(bytes, encoding) != text)
-        fail("ENCODING_LOSS", std::string("有字符无法用 ") + encoding.key + " 编码表示，文件未保存。");
-    return bytes;
-}
-
-// The encoding to read with: an explicit choice wins, otherwise a byte-order mark
-// decides, otherwise UTF-8 is assumed and enforced.
-const Encoding& resolve_read(const std::string& bytes, const std::string& requested, std::size_t& bom_length) {
-    bom_length = 0;
-    if (requested.empty() || requested == "auto") {
-        for (const auto& candidate : encoding_list) {
-            const auto size = std::char_traits<char>::length(candidate.bom);
-            if (size && bytes.compare(0, size, candidate.bom) == 0) { bom_length = size; return candidate; }
-        }
-        return encoding_for("utf-8");
-    }
-    const auto& chosen = encoding_for(requested);
-    const auto size = std::char_traits<char>::length(chosen.bom);
-    if (size && bytes.compare(0, size, chosen.bom) == 0) bom_length = size;
-    return chosen;
-}
-
-// What goes to disk: the encoded text, optionally with the encoding's byte-order mark.
-std::string encode_document(const std::string& utf8, const Encoding& encoding, bool bom) {
-    std::string bytes = encoding.page == CP_UTF8 ? utf8 : encode_bytes(decode_wide(utf8, encoding_for("utf-8")), encoding);
-    if (bom) bytes.insert(bytes.begin(), encoding.bom, encoding.bom + std::char_traits<char>::length(encoding.bom));
-    return bytes;
-}
-
-// ConvertToWindows/UnixLineSeparatorsAction: normalize every line ending to the
-// requested separator. CRLF collapses to one break; a lone CR is one too.
-std::string convert_endings(const std::string& text, const std::string& separator) {
-    std::string out;
-    out.reserve(text.size());
-    for (std::size_t index = 0; index < text.size(); ++index) {
-        const auto character = text[index];
-        if (character == '\r') {
-            if (index + 1 < text.size() && text[index + 1] == '\n') ++index;
-            out += separator;
-            continue;
-        }
-        if (character == '\n') { out += separator; continue; }
-        out += character;
-    }
-    return out;
-}
-
 void validate_bytes(const std::string& content, const Encoding& encoding) {
     if (content.size() > max_bytes)
         fail("FILE_TOO_LARGE", "文件超过 " + std::to_string(max_bytes / (1024 * 1024)) + " MiB 限制。");
-    // A NUL byte means binary data unless the encoding is a UTF-16 pair, where NUL is
-    // an ordinary half of almost every Latin character.
-    if (!utf16_page(encoding.page) && content.find('\0') != std::string::npos)
+    // A NUL byte means binary data unless the encoding is a UTF-16/UTF-32 family member,
+    // where NUL is an ordinary half (or three quarters) of almost every Latin character.
+    if (!nul_is_text(encoding.page) && content.find('\0') != std::string::npos)
         fail("BINARY_FILE", "文件含有 NUL 字节，不能作为文本打开或保存。");
 }
-
-const Encoding& utf8_encoding() { return encoding_for("utf-8"); }
 
 void validate_content(const std::string& content) {
     if (content.size() > max_bytes)
@@ -278,75 +156,12 @@ void validate_content(const std::string& content) {
         fail("INVALID_UTF8", "文件不是有效的 UTF-8 文本。");
 }
 
-bool equal_name(std::wstring_view left, std::wstring_view right) {
-    return CompareStringOrdinal(left.data(), static_cast<int>(left.size()),
-                                right.data(), static_cast<int>(right.size()), TRUE)
-           == CSTR_EQUAL;
-}
-
-void validate_component(const std::wstring& name) {
-    if (name.empty() || name == L"." || name == L".." ||
-        name.back() == L'.' || name.back() == L' ')
-        fail("INVALID_PATH", "路径含有不允许的目录或文件名。");
-    for (wchar_t ch : name) {
-        if (ch < 32 || std::wstring_view(L":<>\"|?*").find(ch) != std::wstring_view::npos)
-            fail("INVALID_PATH", "路径含有非法字符或 NTFS 数据流名称。");
-    }
-    const auto base = std::wstring_view(name).substr(0, name.find(L'.'));
-    if (equal_name(base, L"CON") || equal_name(base, L"PRN") ||
-        equal_name(base, L"AUX") || equal_name(base, L"NUL") ||
-        equal_name(base, L"CONIN$") || equal_name(base, L"CONOUT$"))
-        fail("INVALID_PATH", "不允许访问 Windows 设备名称。");
-    if (base.size() == 4 &&
-        (equal_name(base.substr(0, 3), L"COM") || equal_name(base.substr(0, 3), L"LPT")) &&
-        ((base[3] >= L'1' && base[3] <= L'9') || base[3] == L'\u00b9' ||
-         base[3] == L'\u00b2' || base[3] == L'\u00b3'))
-        fail("INVALID_PATH", "不允许访问 Windows 设备名称。");
-}
-
-fs::path parse_relative(const std::string& relative) {
-    if (relative.find('\0') != std::string::npos || !valid_utf8(relative))
-        fail("INVALID_PATH", "路径必须是没有 NUL 字节的 UTF-8 文本。");
-    if ((!relative.empty() && (relative.front() == '/' || relative.front() == '\\')) ||
-        relative.find(':') != std::string::npos)
-        fail("INVALID_PATH", "只允许工作区相对路径，不允许绝对路径、盘符或数据流。");
-    std::string portable = relative;
-    std::replace(portable.begin(), portable.end(), '\\', '/');
-    const auto input = fs::path(std::u8string(portable.begin(), portable.end()));
-    if (input.has_root_name() || input.has_root_directory() || input.is_absolute())
-        fail("INVALID_PATH", "只允许工作区相对路径。");
-    fs::path result;
-    for (const auto& part : input) {
-        if (part.empty() || part == L".") continue;
-        validate_component(part.native());
-        result /= part;
-    }
-    return result;
-}
-
-fs::path plain_path(std::wstring path) {
-    if (path.starts_with(L"\\\\?\\UNC\\")) {
-        path = L"\\\\" + path.substr(8);
-    } else if (path.starts_with(L"\\\\?\\")) {
-        if (path.size() < 7 || path[5] != L':' || path[6] != L'\\' ||
-            !((path[4] >= L'A' && path[4] <= L'Z') || (path[4] >= L'a' && path[4] <= L'z')))
-            fail("INVALID_PATH", "只允许普通盘符路径或 UNC 共享路径，不允许设备命名空间。");
-        path.erase(0, 4);
-    }
-    auto result = fs::path(path).lexically_normal();
-    while (result.has_relative_path() && result.filename().empty())
-        result = result.parent_path();
-    return result;
-}
-
-bool within(const fs::path& path, const fs::path& root) {
-    auto actual = path.begin();
-    for (auto expected = root.begin(); expected != root.end(); ++expected, ++actual) {
-        if (actual == path.end() || !equal_name(actual->native(), expected->native()))
-            return false;
-    }
-    return true;
-}
+// 「路径文本 → 可信 fs::path」的守卫一族（equal_name / validate_component / parse_relative /
+// plain_path / within）2026-10-08 整段搬进了 native/workspace_paths.cpp —— 那一族只做一件事：
+// 把不可信的路径字符串规范化成 fs::path，并守住"不出工作区、不碰 Windows 设备名/NTFS 数据流"，
+// 与留在本文件的读写、编码、回收站、引用扫描、外部链接不共一个职责域。搬动时**实现一个字没改**：
+// 声明见 native/workspace_detail.hpp，定义只剩新文件那一份（上面那排 using 照旧让本文件的调用
+// 不必改成 detail::xxx(...)）。
 
 BY_HANDLE_FILE_INFORMATION file_info(HANDLE handle) {
     BY_HANDLE_FILE_INFORMATION result{};
@@ -508,23 +323,40 @@ Handle open_regular(const fs::path& path, const fs::path& root, DWORD sharing = 
     return handle;
 }
 
-std::string read_bytes(HANDLE handle) {
+std::string workspace_search_ignore_fingerprint(const fs::path& root) {
+    try {
+        auto file = open_regular(root / L".zcodeignore", root,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+        const auto info = file_info(file.get());
+        return std::to_string(info.ftLastWriteTime.dwHighDateTime) + ":" +
+               std::to_string(info.ftLastWriteTime.dwLowDateTime) + ":" +
+               std::to_string(info.nFileSizeHigh) + ":" + std::to_string(info.nFileSizeLow);
+    } catch (const std::exception&) {
+        return "none";
+    }
+}
+
+std::string read_bytes(HANDLE handle, std::size_t byte_limit = max_bytes) {
     LARGE_INTEGER length{};
     if (!GetFileSizeEx(handle, &length)) win_error("无法读取文件大小");
-    if (length.QuadPart < 0 || length.QuadPart > static_cast<LONGLONG>(max_bytes))
-        fail("FILE_TOO_LARGE", "文件超过 " + std::to_string(max_bytes / (1024 * 1024)) + " MiB 限制。");
+    if (length.QuadPart < 0 || length.QuadPart > static_cast<LONGLONG>(byte_limit))
+        fail("FILE_TOO_LARGE", "文件超过 " + std::to_string(byte_limit / (1024 * 1024)) + " MiB 限制。");
     std::string content;
     content.reserve(static_cast<std::size_t>(length.QuadPart));
     std::array<char, 65536> buffer{};
     for (;;) {
+        const auto remaining = byte_limit - content.size();
+        if (remaining == 0) break;
         DWORD count = 0;
-        if (!ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &count, nullptr))
+        const auto request = static_cast<DWORD>(std::min<std::size_t>(buffer.size(), remaining));
+        if (!ReadFile(handle, buffer.data(), request, &count, nullptr))
             win_error("读取文件失败");
         if (!count) break;
-        if (count > max_bytes - content.size())
-            fail("FILE_TOO_LARGE", "文件超过 " + std::to_string(max_bytes / (1024 * 1024)) + " MiB 限制。");
         content.append(buffer.data(), count);
     }
+    if (!GetFileSizeEx(handle, &length)) win_error("无法读取文件大小");
+    if (length.QuadPart < 0 || length.QuadPart > static_cast<LONGLONG>(byte_limit))
+        fail("FILE_TOO_LARGE", "文件超过 " + std::to_string(byte_limit / (1024 * 1024)) + " MiB 限制。");
     return content;
 }
 
@@ -725,6 +557,108 @@ Json Workspace::list(const std::string& relative) {
     });
 }
 
+Json Workspace::search_files(const std::function<bool()>& cancelled) {
+    return boundary([&]() -> Json {
+        constexpr auto cache_ttl = std::chrono::seconds(60);
+        fs::path root;
+        PinnedDirectory root_pin;
+        {
+            std::lock_guard lock(mutex_);
+            require_open(root_);
+            root_pin = pin_directory(root_, root_);
+            root = root_pin.path;
+        }
+
+        const auto root_key = utf8_path(root);
+        const auto ignore_fingerprint = workspace_search_ignore_fingerprint(root);
+        const auto now = std::chrono::steady_clock::now();
+        std::shared_ptr<const std::vector<SearchFileEntry>> cached_index;
+        {
+            std::lock_guard lock(mutex_);
+            if (search_file_index_ && search_file_index_root_ == root_key &&
+                search_file_index_ignore_fingerprint_ == ignore_fingerprint &&
+                now - search_file_index_cached_at_ < cache_ttl)
+                cached_index = search_file_index_;
+        }
+
+        const auto make_reply = [&](const std::vector<SearchFileEntry>& index) {
+            Json entries = Json::array();
+            std::size_t count = 0;
+            for (const auto& entry : index) {
+                if ((count++ & 1023U) == 0 && cancelled && cancelled())
+                    return Json{{"entries", Json::array()}, {"cancelled", true}};
+                entries.push_back({{"path", entry.path},
+                                   {"type", entry.directory ? "directory" : "file"}});
+            }
+            return Json{{"entries", std::move(entries)}, {"cancelled", false}};
+        };
+        if (cached_index) return make_reply(*cached_index);
+
+        std::vector<fs::path> pending{fs::path{}};
+        std::vector<SearchFileEntry> entries;
+        bool cancelled_hit = false;
+        while (!pending.empty()) {
+            if (cancelled && cancelled()) { cancelled_hit = true; break; }
+            auto relative = std::move(pending.back());
+            pending.pop_back();
+            PinnedDirectory directory;
+            try {
+                directory = pin_directory(root / relative, root);
+            } catch (const WorkspaceError& error) {
+                if (relative.empty()) throw;
+                if (error.code == "REPARSE_POINT" || error.code == "NOT_FOUND" ||
+                    error.code == "NOT_DIRECTORY") continue;
+                throw;
+            }
+
+            WIN32_FIND_DATAW data{};
+            const HANDLE search = FindFirstFileW(api_path(directory.path / L"*").c_str(), &data);
+            if (search == INVALID_HANDLE_VALUE) {
+                const auto error = GetLastError();
+                if (error == ERROR_FILE_NOT_FOUND || (!relative.empty() && error == ERROR_PATH_NOT_FOUND)) continue;
+                win_error("无法列出工作区目录", error);
+            }
+            struct FindGuard {
+                HANDLE handle;
+                ~FindGuard() { FindClose(handle); }
+            } guard{search};
+            do {
+                if (cancelled && cancelled()) { cancelled_hit = true; break; }
+                const std::wstring name(data.cFileName);
+                if (name == L"." || name == L".." ||
+                    (data.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DEVICE)))
+                    continue;
+                const fs::path child = relative / name;
+                const bool is_directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                if (!is_directory && relative.empty() && name == L".zcodeignore") continue;
+                if (!is_directory && name.starts_with(L".taocode-replace-")) continue;
+                if (is_directory) pending.push_back(child);
+                entries.push_back({utf8_path(child), is_directory});
+            } while (FindNextFileW(search, &data));
+            if (cancelled_hit) break;
+            const auto error = GetLastError();
+            if (error != ERROR_NO_MORE_FILES)
+                win_error("读取工作区目录失败", error);
+        }
+        if (cancelled_hit || (cancelled && cancelled()))
+            return {{"entries", Json::array()}, {"cancelled", true}};
+        std::sort(entries.begin(), entries.end(), [](const auto& left, const auto& right) {
+            return left.path < right.path;
+        });
+        auto index = std::make_shared<const std::vector<SearchFileEntry>>(std::move(entries));
+        {
+            std::lock_guard lock(mutex_);
+            if (root_ == root) {
+                search_file_index_ = index;
+                search_file_index_root_ = root_key;
+                search_file_index_ignore_fingerprint_ = ignore_fingerprint;
+                search_file_index_cached_at_ = std::chrono::steady_clock::now();
+            }
+        }
+        return make_reply(*index);
+    });
+}
+
 Json Workspace::read(const std::string& relative, const std::string& encoding) {
     return boundary([&]() -> Json {
         std::lock_guard lock(mutex_);
@@ -740,19 +674,32 @@ Json Workspace::read(const std::string& relative, const std::string& encoding) {
         // The version fingerprints the bytes actually on disk, BOM included, so an
         // external edit is still detected whatever encoding the buffer is shown in.
         auto version = fingerprint(bytes);
-        std::string content;
-        if (chosen.page == CP_UTF8) {
-            bytes.erase(0, bom_length);  // UTF-8 travels unchanged: no decode copy
-            if (!valid_utf8(bytes))
-                fail("INVALID_UTF8", "文件不是有效的 UTF-8 文本；若是中文旧文件，请用 GBK 编码重新打开。");
-            content = std::move(bytes);
-        } else {
-            content = encode_bytes(decode_wide(bytes.data() + bom_length, bytes.size() - bom_length, chosen),
-                                   utf8_encoding());
-        }
+        // The UTF-8 vs decode choice, the byte-order mark and the strict UTF-8 check all
+        // live in the codec now (native/workspace_codec.hpp) — one copy of the messages
+        // and one copy of the rules, whatever the encoding on disk.
+        const auto content = decode_document(bytes, chosen, bom_length);
         return {{"path", utf8_path(path)}, {"content", std::move(content)}, {"version", std::move(version)},
                 {"encoding", chosen.key}, {"bom", bom_length != 0},
                 {"readOnly", (file_info(handle.get()).dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0}};
+    });
+}
+
+Json Workspace::read_from_root(const fs::path& root, const std::string& relative,
+                               const std::string& encoding, std::size_t byte_limit) {
+    return boundary([&]() -> Json {
+        if (byte_limit == 0 || byte_limit > max_bytes)
+            fail("INVALID_LIMIT", "读取大小限制无效。");
+        const auto path = parse_relative(relative);
+        if (path.empty()) fail("NOT_FILE", "工作区根目录不是正规文件。");
+        const auto pinned_root = pin_directory(root);
+        const auto pinned_parent = pin_directory(pinned_root.path / path.parent_path(), pinned_root.path);
+        auto handle = open_regular(pinned_parent.path / path.filename(), pinned_root.path);
+        auto bytes = read_bytes(handle.get(), byte_limit);
+        std::size_t bom_length = 0;
+        const auto& chosen = resolve_read(bytes, encoding, bom_length);
+        validate_bytes(bytes, chosen);
+        const auto content = decode_document(bytes, chosen, bom_length);
+        return {{"path", utf8_path(path)}, {"content", content}};
     });
 }
 
@@ -842,8 +789,9 @@ Json Workspace::set_read_only(const std::string& relative, bool read_only) {
     });
 }
 
-// ConvertToWindows/UnixLineSeparatorsAction: rewrite the file on disk with every line
-// ending normalized to `separator` ("crlf" | "lf"). `content` is the editor buffer as
+// ConvertToWindows/Unix/MacLineSeparatorsAction: rewrite the file on disk with every line
+// ending normalized to `separator` ("crlf" | "lf" | "cr" — the three tiers of
+// `LineSeparator.java:17-20`). `content` is the editor buffer as
 // it would be saved (its encoding/BOM are supplied by the caller through write(); here
 // the payload is UTF-8, matching what a save of that buffer produces). A version check
 // rejects any external change first, and a read-only file is refused before touching.
@@ -852,8 +800,9 @@ Json Workspace::convert_line_separators(const std::string& relative, const std::
     return boundary([&]() -> Json {
         std::lock_guard lock(mutex_);
         require_open(root_);
-        if (separator != "crlf" && separator != "lf")
-            fail("INVALID_SETTINGS", "行分隔符只能是 crlf 或 lf。");
+        // The single tier table: anything other than crlf/lf/cr fails here, before the
+        // file is opened, and no tier falls through to a default byte sequence.
+        const auto& terminator = line_separator_bytes(separator);
         validate_content(content);
         const auto path = parse_relative(relative);
         if (path.empty()) fail("NOT_FILE", "工作区根目录不是正规文件。");
@@ -875,7 +824,7 @@ Json Workspace::convert_line_separators(const std::string& relative, const std::
         std::size_t bom_length = 0;
         validate_bytes(current, resolve_read(current, "auto", bom_length));
         original.reset();  // ReplaceFileW cannot touch a file this handle still holds open.
-        const std::string converted = convert_endings(content, separator == "crlf" ? "\r\n" : "\n");
+        const std::string converted = convert_endings(content, terminator);
         const auto payload = encode_document(converted, utf8_encoding(), false);
         validate_bytes(payload, utf8_encoding());
         if (payload == current)
@@ -916,7 +865,10 @@ Json Workspace::write(const std::string& relative, const std::string& content,
         // The document's line endings are a buffer property (CodeMirror keeps LF in
         // memory and joins with EditorState.lineSeparator), so the bytes written must
         // carry them too — otherwise saving a CRLF file silently converts it to LF.
-        const std::string separator = content.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+        // The tier is *counted*, not matched: `LoadTextUtil.java:801-813` weighs CRLF,
+        // lone CR and LF against each other, because a classic-Mac buffer contains no
+        // "\r\n" at all and the old two-way sniff rewrote all of its line endings to LF.
+        const auto separator = detect_separator(content);
         const auto bytes = encode_document(convert_endings(content, separator), chosen, bom);
         validate_bytes(bytes, chosen);
         auto pinned = pin_directory(root_ / path.parent_path(), root_);
@@ -965,6 +917,32 @@ Json Workspace::write(const std::string& relative, const std::string& content,
         // 同实例串行且替换前复核内容；不承诺跨进程的原子比较并交换。
         replace_safely(target, temporary, backup, original_identity);
         return result;
+    });
+}
+
+Json Workspace::write_new(const std::string& relative, const std::string& content) {
+    return boundary([&]() -> Json {
+        std::lock_guard lock(mutex_);
+        require_open(root_);
+        const auto path = parse_relative(relative);
+        if (path.empty()) fail("INVALID_PATH", "请填写要创建的文件名。");
+        validate_content(content);
+        const auto& encoding = utf8_encoding();
+        const auto bytes = encode_document(convert_endings(content, detect_separator(content)), encoding, false);
+        validate_bytes(bytes, encoding);
+        auto pinned = pin_directory(root_ / path.parent_path(), root_);
+        const auto target = pinned.path / path.filename();
+        auto temporary = TemporaryFile::create(pinned.path);
+        write_temporary(temporary, bytes);
+        if (!MoveFileExW(temporary.name.c_str(), api_path(target).c_str(), MOVEFILE_WRITE_THROUGH)) {
+            const auto error = GetLastError();
+            if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS)
+                fail("EXISTS", "同名文件已存在。");
+            win_error("无法原子创建文件", error);
+        }
+        temporary.cleanup = false;
+        return {{"path", utf8_path(path)}, {"version", fingerprint(bytes)}, {"bytes", bytes.size()},
+                {"encoding", encoding.key}, {"bom", false}};
     });
 }
 

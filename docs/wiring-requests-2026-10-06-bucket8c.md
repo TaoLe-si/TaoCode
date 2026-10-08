@@ -121,3 +121,12 @@ usePopupLayer(treeMenuBox, treeMenuShown, () => { treeMenu.value = null; treeSub
 它今天正让 `tests/sfc-single-root.test.mjs`、`tests/ui-icons.test.mjs` 两个文件**整文件**红。
 本桶不碰别人的在途文件，请属主补那一个闭合标签。证据与复现见 `docs/batch-2026-10-06-bucket8c.md` §8.1 第 5 条。
 
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **B1 已接线**：`src/App.vue:1305-1307` `treeMenuBox` + `bindTreeMenuBox` + `usePopupLayer(treeMenuBox, computed(() => treeMenu.value !== null), …)`；模板侧 `AnchoredMenu` 已带 `ref`（`bindTreeMenuBox` 取 `AnchoredMenu` 暴露的 `box`）。
+- **B2 已接线**：`src/App.vue:1303-1304` `moreMenuBox` + `usePopupLayer(moreMenuBox, hiddenTabsOpen, …)`；模板 `:2251` 的 `.output-tabs-more-menu` 已带 `ref="moreMenuBox"`。
+- **B3 已闭环**（`TabContextMenu.vue` 自己注册，见 `AnchoredMenu.vue:23` 的 `defineExpose({ box })`）。
+- **本轮新增的非接线待办（TodoPanel 缺闭合标签）** —— `src/components/TodoPanel.vue` 属本 lane 可改面。复核现状：`node --test tests/sfc-single-root.test.mjs tests/ui-icons.test.mjs` ⇒ **pass 38 / fail 0**，该红已被别人修掉。
+
+结论：B1/B2 已接线（本份请求已落地）；TodoPanel 已修。

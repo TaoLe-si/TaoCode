@@ -15,7 +15,7 @@
 // 表外的加减法与校验都在 `src/projectTreeNestingDialog.ts`，这里只做 DOM 与焦点。
 // 落盘走 `projectTreeState` 的 `updateNesting`（开关 + 规则表一起交，见那边注释）。
 import { computed, ref, watch } from 'vue'
-import { Check, Plus, Trash2 } from 'lucide-vue-next'
+import { Plus, Trash2 } from 'lucide-vue-next'
 import { nestingRowsOf, nestingRulesOf, newNestingRow, validateNestingRows, type NestingRuleRow } from '../projectTreeNestingDialog'
 import { DEFAULT_NESTING_RULES, type NestingRule } from '../projectTreeNesting'
 import { iconSize } from '../uiIcons'
@@ -82,15 +82,19 @@ function apply() {
           </tbody>
         </table>
         <div class="nesting-table-actions">
-          <button class="subtle-button" type="button" @click="addRow"><Plus :size="iconSize.control" />新增规则</button>
+          <button class="subtle-button" type="button" @click="addRow"><Plus aria-hidden="true" :size="iconSize.control" />新增规则</button>
           <button class="subtle-button" type="button" @click="resetToDefault">重置为默认(R)</button>
         </div>
       </fieldset>
       <p v-if="error" class="nesting-error" role="alert">{{ error }}</p>
       <p v-if="persistenceError" class="nesting-error" role="status">{{ persistenceError }}</p>
       <div class="dialog-actions">
+        <!-- 顺序 = `DialogWrapper.createActions()` 的 [OK, Cancel]（`DialogWrapper.java:1234-1238`）。
+             上游 `DialogWrapper.OkAction`（`:2100-2105`）只设 `DEFAULT_ACTION` 与 `MAC_ACTION_ORDER`，
+             **没有**图标；`createJButtonForAction`（`:951-975`）也不给它加 —— 原先这里画了一个勾，
+             是"确定 = 勾"的发明形状，本批删掉。 -->
+        <button class="primary-button" @click="apply">确定</button>
         <button class="subtle-button" @click="emit('close')">取消</button>
-        <button class="primary-button" @click="apply"><Check :size="iconSize.control" />确定</button>
       </div>
     </section>
   </div>

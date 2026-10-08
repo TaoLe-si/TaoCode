@@ -59,9 +59,9 @@ test('3 · 菜单行的图标位真的渲染（尺寸走阶梯，不是写死的
   // （状态栏那两处是别的槽，不在这三条断言里）。
   assert.match(app, /<span class="menu-item-icon"><component :is="menuRowIcon\(row\.icon\)" v-if="menuRowIcon\(row\.icon\)"/,
     '子菜单触发行（原本是空槽）没接上行图标')
-  assert.match(app, /<Check v-if="child\.checked && child\.checked\(\)"[^>]*\/><component v-else-if="menuRowIcon\(child\.icon\)"/,
+  assert.match(app, /<IdeaCheckedIcon v-if="child\.checked && child\.checked\(\)"[^>]*\/><component v-else-if="menuRowIcon\(child\.icon\)"/,
     '子菜单里的子行：勾选记号之外没有行图标位')
-  assert.match(app, /<Check v-if="row\.checked && row\.checked\(\)"[^>]*\/><component v-else-if="menuRowIcon\(row\.icon\)"/,
+  assert.match(app, /<IdeaCheckedIcon v-if="row\.checked && row\.checked\(\)"[^>]*\/><component v-else-if="menuRowIcon\(row\.icon\)"/,
     '顶层菜单行：勾选记号之外没有行图标位')
   // 尺寸只能来自 uiIcons 的阶梯，模板里不许出现写死的像素。
   for (const hit of app.match(/<component[^>]*menuRowIcon[^>]*>/g) ?? []) {
@@ -93,8 +93,10 @@ test('4 · 键位面板挂在设置树里（上游的真实入口位置）', () 
     '上游注册证据那行不在注释里了（intellij.platform.ide.impl.xml:950-952）')
   assert.match(meta, /key: 'preferences\.keymap', label: '键盘映射', icon: Keyboard, parent: null/,
     'Keymap 节点必须是顶层节点（parent: null，对应上游 groupId="root"）')
-  assert.match(meta, /'reference\.settingsdialog\.project\.gradle',\n  'preferences\.keymap'\]/,
-    '页面键没进 PAGE_KEYS —— 没进就渲染不出内容')
+  // 这两个键都要在 `PageKey` 联合里 —— **不钉它们相邻**（原写法要求 Gradle 页键后面紧跟
+  // keymap 页键，于是往联合尾部加 `agent` 页键就把这条判据打红了：那是形状，不是意图）。
+  assert.match(meta, /'reference\.settingsdialog\.project\.gradle',[\s\S]{0,120}'preferences\.keymap'/,
+    '页面键没进 PageKey 联合 —— 没进就渲染不出内容')
   assert.match(meta, /\n\s+\| 'preferences\.keymap'/,
     '页面键没进 PageKey 联合')
   const dialog = read('src/components/SettingsDialog.vue')

@@ -1164,71 +1164,11 @@ void Client::step_out(long thread_id, Reply on_reply) {
     send("stepOut", Json{{"threadId", thread_id}}, wrap_ok(std::move(on_reply)));
 }
 
-void Client::stack_trace(long thread_id, Reply on_reply) {
-    send("stackTrace", Json{{"threadId", thread_id}},
-         shaped(std::move(on_reply), [this](const Json& body) { return shape_frames(*this, body); }));
-}
-
-void Client::scopes(long frame_id, Reply on_reply) {
-    send("scopes", Json{{"frameId", frame_id}}, shaped(std::move(on_reply), [](const Json& body) { return shape_scopes(body); }));
-}
-
-void Client::variables(long variables_reference, Reply on_reply) {
-    send("variables", Json{{"variablesReference", variables_reference}},
-         shaped(std::move(on_reply), [](const Json& body) { return shape_variables(body); }));
-}
-
-void Client::set_variable(long variables_reference, const std::string& name, const std::string& value, Reply on_reply) {
-    send("setVariable", Json{{"variablesReference", variables_reference}, {"name", name}, {"value", value}},
-         shaped(std::move(on_reply), [](const Json& body) { return shape_set_variable(body); }));
-}
-
-void Client::set_expression(const std::string& expression, const std::string& value, long frame_id, Reply on_reply) {
-    Json arguments{{"expression", expression}, {"value", value}};
-    // frameId 在规范里是可选的：0 表示不指定栈帧（全局表达式）。
-    if (frame_id > 0) arguments["frameId"] = frame_id;
-    send("setExpression", std::move(arguments),
-         shaped(std::move(on_reply), [](const Json& body) { return shape_set_variable(body); }));
-}
-
-void Client::exception_details(long thread_id, Reply on_reply) {
-    send("exceptionInfo", Json{{"threadId", thread_id}},
-         shaped(std::move(on_reply), [](const Json& body) { return shape_exception_info(body); }));
-}
-
-void Client::completions(const std::string& text, long column, long frame_id, long line, Reply on_reply) {
-    if (!supports_completions()) {
-        on_reply(Json(nullptr), Json{{"code", "DAP_UNSUPPORTED"},
-                                     {"message", "适配器未声明 supportsCompletionsRequest，不支持调试表达式补全。"}});
-        return;
-    }
-    Json arguments{{"text", text}, {"column", column}};
-    // `frameId` 与 `line` 都是可选：没有它们时**不发**这两个键（发 0 会被适配器当成
-    // "第 0 帧 / 第 0 行"，那是另一个上下文，补出来的符号可能完全不对）。
-    if (frame_id > 0) arguments["frameId"] = frame_id;
-    if (line > 0) arguments["line"] = line;
-    send("completions", std::move(arguments),
-         shaped(std::move(on_reply), [](const Json& body) { return shape_completions(body); }));
-}
-
-void Client::breakpoint_locations(const std::string& rel_path, long line, long end_line, long column,
-                                 long end_column, Reply on_reply) {
-    if (!supports_breakpoint_locations()) {
-        on_reply(Json(nullptr), Json{{"code", "DAP_UNSUPPORTED"},
-                                     {"message", "适配器未声明 supportsBreakpointLocationsRequest，无法预览断点位置。"}});
-        return;
-    }
-    const auto key = slash_form(rel_path);
-    // `source.path` 取与 `setBreakpoints` 同一条规则（URI + sourceReference:0）：同一行上
-    // "能不能放断点"和"放上去"必须按同一个文件解释，两条路径规则不一致会让适配器对不上。
-    // （注：`goto_targets` 用的是 native 路径，两种形式目前并存 —— 见 docs/enum-lsp-dap.md 的待核项。）
-    Json arguments{{"source", Json{{"path", to_uri(key)}, {"sourceReference", 0}}}, {"line", line}};
-    if (end_line > 0) arguments["endLine"] = end_line;
-    if (column > 0) arguments["column"] = column;
-    if (end_column > 0) arguments["endColumn"] = end_column;
-    send("breakpointLocations", std::move(arguments),
-         shaped(std::move(on_reply), [](const Json& body) { return shape_breakpoint_locations(body); }));
-}
+// `stackTrace` / `scopes` / `variables` / `setVariable` / `setExpression` / `evaluate` /
+// `exceptionInfo` / `completions` 这一族（栈帧、变量、求值）搬进了 native/dap_values.cpp ——
+// dap.cpp 贴着机检 1480 行上限，而这一族只做"取值 + 整形"，与会话/管道机制不共职责域。
+// 分页形式（stackTrace 的 startFrame/levels、variables 的 start/count）与数据/函数断点、
+// `source` 也都在那边。
 
 // Waits (bounded) for the reader thread to observe that the adapter is gone. Used
 // by disconnect() so the caller can drop the Client without racing a callback.

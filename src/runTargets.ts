@@ -13,6 +13,9 @@
 // 纯逻辑（零宿主依赖，输入是文件清单 + 少数文件内容），`node --test` 可直接测。
 import { hasMainMethod, javaRunCommand, javaRunArgs, javaExecutable, mainClassFor } from './javaRun.ts'
 import { GRADLE_BUILD_FILES, GRADLE_RUN_DEFAULTS, detectGradle, gradleCommand } from './gradle.ts'
+// 生产者抑制器（上游 `com.intellij.runConfigurationProducerSuppressor` 的 `isIgnored` 那一格，
+// EP 宿主在 `src/executionExtensionPoints.ts`）：`discoverRunTargets` 是它在**本仓的真实消费点**。
+import { producerSuppressed } from './executionExtensionPoints.ts'
 import type { RunConfig } from './bridge'
 
 /** Frontend-only producer metadata. Never send these fields to project.settings.update. */
@@ -142,7 +145,7 @@ export function cmakeArtifacts(files: readonly string[]): string[] {
  * 只报**有确证**的：源文件里真有 `main` / `scripts` 里真有脚本 / 构建脚本里真有 application 插件 /
  * 文件清单里真有 `.exe`。宁可少报，也不要给一个点下去就报错的候选。
  */
-export function discoverRunTargets(inputs: RunTargetInputs): RunTarget[] {
+export function discoverRunTargets(inputs: RunTargetInputs, project: { root?: string | null; name?: string | null } = {}): RunTarget[] {
   const targets: RunTarget[] = []
   const outputs = inputs.java.outputPaths
   const classpath = inputs.java.classpath
@@ -207,5 +210,10 @@ export function discoverRunTargets(inputs: RunTargetInputs): RunTarget[] {
       command: `"${artifact}"`, program: artifact, reason: '工作区里已有构建产物', source: artifact,
     })
 
-  return targets
+  // 上游 `com.intellij.runConfigurationProducerSuppressor`（EP id 逐字，见
+  // `platform/lang-api/src/com/intellij/execution/RunConfigurationProducerService.kt:17`）：
+  // 被抑制的生产者**根本不问**（`isIgnored`，`:54-60`）。本仓每个 kind 就是一条生产者
+  // （Java/Node/Python/Gradle/CMake），抑制即不产出该类的候选。没有插件时抑制器为空表
+  // ⇒ 返回的表与接线前逐字一致；第三方按 id 挂进来即在这里生效。
+  return targets.filter(target => !producerSuppressed({ id: `runTarget.${target.kind}`, typeId: target.kind }, project))
 }

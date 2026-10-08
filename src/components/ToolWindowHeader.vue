@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, computed, ref } from 'vue'
-import { Check, Maximize2, Minimize2, MoreVertical, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-vue-next'
+import { Maximize2, Minimize2, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-vue-next'
 import ToolWindowGearRows from './ToolWindowGearRows.vue'
 import { headerAction } from '../toolWindowHeader'
 import { usePopupAnchor } from '../popupAnchor'
@@ -9,6 +9,9 @@ import { usePopupLayer } from '../popupStack.ts'
 import { VIEW_MODE_GROUP_TITLE, viewModeCapabilityFromDom, viewModeRows } from '../toolWindowViewMode.ts'
 import type { MenuRow } from '../menus/types'
 import { iconSize } from '../uiIcons'
+import { IdeaMoreVerticalIcon } from './icons/toolWindowIcons.ts'  // 齿轮 = AllIcons.Actions.More（New UI 竖排三点）
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 
 // IDEA's ToolWindowHeader (platform/platform-impl/src/com/intellij/toolWindow/ToolWindowHeader.kt):
 // a title bar that renders the tool window title on the left and an action toolbar on the right,
@@ -144,7 +147,7 @@ function focusHeader() {
     <button
       ref="gear" type="button" class="icon-button" :aria-expanded="menuOpen" :aria-label="`${title} 选项`"
       title="移动、最大化或隐藏此工具窗口" @click.stop="toggleMenu"
-    ><MoreVertical :size="iconSize.control" />
+    ><IdeaMoreVerticalIcon :size="iconSize.control" />
     </button>
     <!-- Teleport 到 body：侧栏/右 dock 面板是 `overflow: hidden`，长在里面的菜单会被裁掉
          （与 ToolWindowGear.vue / ToolWindowAnchorMenu.vue 同一个理由）。 -->
@@ -179,7 +182,7 @@ function focusHeader() {
           role="menuitemradio" :aria-checked="row.checked ? row.checked() : false"
           :title="typeof row.title === 'string' ? row.title : undefined" @click="pickViewMode(row)"
         >
-          <span class="menu-item-icon"><Check v-if="row.checked?.()" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ row.title }}</span>
+          <span class="menu-item-icon"><IdeaCheckedIcon v-if="row.checked?.()" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ row.title }}</span>
         </button>
         <div class="menu-rule" role="separator" />
       </template>
@@ -210,8 +213,10 @@ function focusHeader() {
 </template>
 
 <style scoped>
+.tool-strip-heading { padding-inline: var(--space-3); color: var(--bright); font-size: 12px; letter-spacing: normal; background: var(--panel); }
 .tool-strip-title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-strip-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tool-strip-heading.menu-open > .icon-button { color: var(--accent); background: var(--selected); }
+.tool-strip-heading:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 /* `.tool-menu` 默认是 `position: absolute; top: 100%; right: …` —— 那是给"长在面板里"的形态用的。
    这张已经 Teleport 到 body，位置由 `usePopupAnchor` 按实测尺寸给，必须换成 fixed 并清掉
    `right`，否则内联的 left 与样式表的 right 会把菜单同时拉向两边。 */

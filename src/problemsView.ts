@@ -472,15 +472,21 @@ export function groupMuteKeys(group: { key: string; rows: readonly ProblemRow[] 
 }
 
 // 严重度计数：级别归属只在 `src/highlightLevels.ts` 的 `levelForSeverity` 一处定义，
-// 计数只在这函数里做一次。面板标题行已经在读它（`src/components/ProblemsPanel.vue` 的 `tableCounts`）；
-// 状态栏那一格**还没接**（`src/App.vue` 仍就地 `filter(p => p.severity === 1)`）⇒ 接线请求见
-// `docs/wiring-requests-2026-10-06-prob3.md` R1，钉桩见 `tests/problem-count-single-source.test.mjs`。
+// 「哪一级进错误/警告两格、哪一级折进信息格」也只在那一份的 `counted` 字段上定义，
+// 计数只在这函数里做一次。两个生产消费方：问题面板的标题行（`src/components/ProblemsPanel.vue` 的 `tableCounts`）
+// 与状态栏那一格（`src/App.vue` 的 `statusProblemCounts`，2026-10-06 落地 `docs/wiring-requests-2026-10-06-prob3.md` R1）。
+// 钉桩见 `tests/problem-count-single-source.test.mjs`（就地重数一处都不许留）。
+// 订正：旧实现把 `WEAK_WARNING + INFO` 两个 id 硬写在第三格里，于是级别表上那个
+// `counted` 布尔**没有任何生产消费方**（只有判据在读它）—— 现在第三格由 `counted === false`
+// 折出来，改级别表就能改到计数（判据 `tests/inspection-severity-mapping.test.mjs` 第二条）。
+// 前两格仍按 id 取：那两格的名字本身就分别是 ERROR / WARNING 两级，上游同一形状
+// （`TrafficLightRenderer.kt:374-390` 逐级出条目、每级的文案由级别自己给）。
 export function problemCounts(rows: readonly ProblemRow[]): { errors: number; warnings: number; infos: number } {
   const at = new Map(levelCountsOf(rows).map(item => [item.id, item.count]))
   const one = (id: HighlightLevelId) => at.get(id) ?? 0
-  // 三格口径不变（`src/highlightLevels.ts` 的 WEAK_WARNING/INFO 两档一起进「信息」格），
-  // 只是不再自己数一遍 —— 与逐级别计数同一份实现，两处不会漂。
-  return { errors: one('ERROR'), warnings: one('WARNING'), infos: one('WEAK_WARNING') + one('INFO') }
+  const infos = HIGHLIGHT_LEVELS.filter(level => !level.counted)
+    .reduce((sum, level) => sum + one(level.id as HighlightLevelId), 0)
+  return { errors: one('ERROR'), warnings: one('WARNING'), infos }
 }
 
 // —— 逐严重级的计数（上游树节点尾巴上那一串「3 errors 1 warning」）——

@@ -13,7 +13,8 @@ import { placeMenu } from './menuPlacement.ts'
 import { pushNotice, upsertNotice, type NoticeAction, type NoticeEntry } from './notices.ts'
 import { playNotificationSound } from './notificationBeeper.ts'
 import { armRemindLater, canShowNotice } from './notificationDoNotAsk.ts'
-import { balloonFadeoutMs, noticeGroup, showsBalloon, type NotificationDisplayType } from './notificationGroups.ts'
+import { balloonFadeoutMs, noticeGroup, noticeGroupId, showsBalloon, type NotificationDisplayType } from './notificationGroups.ts'
+import { shouldLogNotice } from './notificationLogSetting.ts'
 import { clearNoticeStatus, setNoticeStatus } from './statusBarText.ts'
 import { focusableWidgets, navigateWidget, resolveRestoreTarget, shouldFocusFirstWidget, type NavDirection } from './statusBarNav.ts'
 import { wireLspProgressNotices } from './progressNotices.ts'
@@ -88,7 +89,10 @@ function notify(message: string, error = false, onClick?: () => void, detail?: s
   // `pushNotice` carries IDEA's `expirePreviousAndNotify` rule (ShowNotificationCommitResultHandler
   // .kt:97): the notification with the same display id is expired first, so repeated commits replace
   // one entry instead of filling the notification centre with history.
-  noticeLog.value = pushNotice(noticeLog.value, entry)
+  // `NotificationSettings.isShouldLog`（NotificationsManagerImpl.java:205 那条门控的本仓等价物，
+  // 见 src/notificationLogSetting.ts）：这一组关掉「写入通知中心」时**不进** noticeLog，
+  // 气球那一拍由 displayType 单独决定（关日志不等于关气球，上游 expire() 也只撤日志条目）。
+  if (shouldLogNotice(noticeGroupId(entry))) noticeLog.value = pushNotice(noticeLog.value, entry)
   // 通知进状态栏那一段文字（IDEA `ApplicationNotificationsModel` 推 statusMessage，由
   // `StatusPanel.updateText` 显示并**带相对时间**）。`stamp` 用真实 epoch：上游拿它算"刚刚/N 分钟前"。
   if (balloon) setNoticeStatus({ message, stamp: Date.now() })
@@ -105,6 +109,10 @@ function notifyFromPanel(message: string, error = false, displayId?: string, det
 // 进度型通知：同一个 displayId 就地刷新（跑完由调用方把 percent 收成数字或 null，行就留在列表里）。
 function notifyProgress(entry: Omit<NoticeEntry, 'id' | 'at'>) {
   if (!canShowNotice(entry, projectRoot())) return
+  // 同一道 `isShouldLog` 门控（见 src/notificationLogSetting.ts）：Info/Log 级 LSP 日志
+  // 走 `LSP window/logMessage: info, log; $/logTrace` 组，注册项的 `isLogByDefault=false`
+  // ⇒ 默认不进通知中心（上游 `NotificationsManagerImpl.java:205` 的 `!isShouldLog()` 那一档）。
+  if (!shouldLogNotice(noticeGroupId(entry))) return
   const at = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   // id 与气球那条共用一个序列：`upsertNotice` 命中同 displayId 时会沿用旧 id，所以这里给新号即可。
   noticeLog.value = upsertNotice(noticeLog.value, { ...entry, id: ++noticeSeq, at })

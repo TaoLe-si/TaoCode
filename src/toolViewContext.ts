@@ -12,6 +12,7 @@ import { DEFAULT_BOOKMARKS_VIEW } from './bookmarksView.ts'
 import { addBookmarkToNamedList, runWithChosenList } from './bookmarkListActions.ts'
 import { requestBookmarkEdit } from './bookmarkActions.ts'
 import { isDesktop, type BookmarksViewState } from './bridge.ts'
+import { DEFAULT_DATE_TIME_FORMAT_SETTINGS } from './dateTimeFormat.ts'
 import { getProjectTreeState } from './projectTreeState.ts'
 // 引用面板（Find 窗口那条用法视图 Content）的数据源：条目存储与行模型都在这个模块里，
 // 宿主只负责"挂不挂这一格"，状态不在这里再存一份。
@@ -53,6 +54,8 @@ export interface ToolViewContext {
   openMnemonicPrompt: any
   openSettings: any
   outline: any
+  /** 结构视图「继承成员」的父类型取数（`src/outlineSupertypes.ts` 的三跳；透传给 OutlinePanel）。 */
+  outlineSupertypes?: any
   projectSettings: any
   projectViewFileColor: (path: string, isDirectory?: boolean) => string | null
   refreshTree: any
@@ -86,10 +89,15 @@ export interface ToolViewContext {
   runNoticeAction?: (action: { label: string; run: () => void }) => void
   expireNotice?: (id: number) => void
   clearNotices: any
-  workspace: any}
+  workspace: any
+  /** Agent 装配层（`src/agentHostWire.ts` 建好递进来；没开项目 = null）。 */
+  agentHost?: import('./agentHost.ts').AgentHost | null
+  /** 面板齿轮 → 设置 › Agent（Agent 设置单开一栏）。 */
+  openAgentSettings?: (section?: 'modelProvider') => void
+}
 
 export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewContext {
-  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, notifyFromPanel, showToolWindow, onSearchOpen, onSearchReplaced, onTreeContext, onTreeRename, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, openTabPaths, savePath, searchPanelRef, sortedAll, sortBookmarkGroup, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace, generalSettings } = ctx
+  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, notifyFromPanel, showToolWindow, onSearchOpen, onSearchReplaced, onTreeContext, onTreeRename, openFile, openMnemonicPrompt, openSettings, outline, outlineSupertypes, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, openTabPaths, savePath, searchPanelRef, sortedAll, sortBookmarkGroup, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace, generalSettings } = ctx
   return {
   // Notifications 工具窗口（`intellij.platform.ide.impl.xml:1210`，anchor="right"）：
   // 复用状态栏那份通知列表，两个入口看到的是同一批 `notices`。
@@ -104,6 +112,13 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
     unmuteOnStop: generalSettings?.value?.debuggerUnmuteOnStop === true,
     evaluationMode: generalSettings?.value?.debuggerEvaluationMode === 'codeFragment' ? 'codeFragment' : 'expression',
   },
+  dateTimeFormat: {
+    ...DEFAULT_DATE_TIME_FORMAT_SETTINGS,
+    overrideSystemDateFormat: generalSettings.value.overrideSystemDateFormat,
+    dateFormatPattern: generalSettings.value.dateFormatPattern,
+    use24HourTime: generalSettings.value.use24HourTime,
+    prettyFormattingAllowed: generalSettings.value.prettyFormattingAllowed,
+  },
   root: workspace.value?.root ?? '',
   active: explorer.value && Boolean(workspace.value),
   workspace: workspace.value ? { root: workspace.value.root, name: workspace.value.name, entries: workspace.value.entries } : null,
@@ -115,6 +130,7 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   lspReady: lspReady.value,
   isDesktop,
   outline: outline.value,
+  outlineSupertypes,
   sortedBookmarks: sortedAll.value,
   historyEpoch: historyEpoch.value,
   todoPatterns: projectSettings.value.todoPatterns,
@@ -216,5 +232,12 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   expandWithSingleClick: editorSettings.value.expandNodesWithSingleClick,
   onToggleCompactIndents: () => { void saveSettingsPatch({ compactTreeIndents: !editorSettings.value.compactTreeIndents }) },
   onToggleExpandWithSingleClick: () => { void saveSettingsPatch({ expandNodesWithSingleClick: !editorSettings.value.expandNodesWithSingleClick }) },
+  // Agent 对话窗口（本仓自己的窗口）：装配层原样递进，名字与根取当前工作区 —— Agent 没有
+  // "项目分区"，自动读当前 TaoCode 项目（用户 2026-10-07 的要求）。
+  agentHost: ctx.agentHost ?? null,
+  agentProjectName: workspace.value?.name ?? '',
+  agentProjectRoot: workspace.value?.root ?? '',
+  onAgentOpenSettings: (section?: 'modelProvider') => openSettings(section === 'modelProvider' ? 'agent.modelProvider' : 'agent'),
+  onAgentNotify: (message: string, error?: boolean) => notify(message, error),
 }
 }

@@ -152,19 +152,24 @@ test('消费链：面板装了 link provider、OSC 8 handler、中键粘贴与 L
   assert.match(panel, /await openExternalUrl\(url\)/, '面板不再自己直连宿主：未信任项目里点链接也先过那一句')
   assert.match(panel, /addEventListener\('mousedown', \(event\) => onMiddleClick\(pane, event as MouseEvent\), true\)/,
     '中键粘贴要在捕获阶段抢在 xterm 之前')
-  assert.match(panel, /ON_LINUX && terminalCopyOnSelect\(true\)/, '选中即复制只有 Linux')
+  assert.match(panel, /terminalCopyOnSelect\(ON_LINUX, props\.settings\?\.copyOnSelection \?\? false\)/,
+    '选中即复制门 = Linux 或「Copy to clipboard on selection」旋钮（真身子类 copyOnSelect()），旋钮缺省 false')
 })
 
-test('中键与选中即复制的门（JBTerminalSystemSettingsProviderBase.java:297-304）', () => {
-  assert.equal(terminalPasteOnMiddleClick(), true, '上游那条覆写没有条件')
+test('中键与选中即复制的门（JBTerminalSystemSettingsProvider.java:74-86 子类真身，非基类 isLinux/无条件 true）', () => {
+  // 中键粘贴：子类 pasteOnMiddleMouseClick() = getPasteOnMiddleMouseButton()，缺省 true（TerminalOptionsProvider.kt:78）。
+  assert.equal(terminalPasteOnMiddleClick(true), true, '旋钮开着（缺省档）中键粘贴')
+  assert.equal(terminalPasteOnMiddleClick(false), false, '取消勾选「Paste from clipboard on middle mouse button click」后中键不再粘贴（此前是死开关）')
   assert.equal(terminalIsMiddleButton({ button: 1 }), true)
   assert.equal(terminalIsMiddleButton({ button: 0 }), false, '左键不算')
   assert.equal(terminalIsMiddleButton({}), false, '事件没有 button 字段时不算')
-  assert.equal(terminalCopyOnSelect(true), true)
-  assert.equal(terminalCopyOnSelect(false), false, '上游就是 SystemInfo.isLinux，Windows/macOS 不复制')
+  // 选中即复制：子类 copyOnSelect() = isSystemSelectionSupported()（Linux，CopyPasteManager.java:83）|| getCopyOnSelection()（缺省 false）。
+  assert.equal(terminalCopyOnSelect(true, false), true, 'Linux 天生复制')
+  assert.equal(terminalCopyOnSelect(false, false), false, 'Windows/macOS 没勾旋钮不复制（缺省档，与改造前一致）')
+  assert.equal(terminalCopyOnSelect(false, true), true, 'Windows/macOS 勾了「Copy to clipboard on selection」就复制（此前这个开关是死的）')
   const panel = readFileSync(new URL('../src/components/TerminalPanel.vue', import.meta.url), 'utf8')
-  assert.match(panel, /if \(!terminalIsMiddleButton\(event\) \|\| !terminalPasteOnMiddleClick\(\)\) return/,
-    '面板先认中键、再问上游那条门')
+  assert.match(panel, /if \(!terminalIsMiddleButton\(event\) \|\| !terminalPasteOnMiddleClick\(props\.settings\?\.pasteOnMiddleMouseClick \?\? true\)\) return/,
+    '面板先认中键、再读旋钮值（缺省 true）')
 })
 
 // 终端输出里的裸文件路径 → 行号（`TerminalGenericFileFilter` 一族的可判定部分）。

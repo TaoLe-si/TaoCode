@@ -45,7 +45,7 @@ export const FIRST_PARENT_TITLE = '第一个父项'
 export const FIRST_PARENT_DESCRIPTION = '看到合并提交后，仅跟随第一个父提交'
 /** `vcs.log.filter.no.merges` = 无合并。 */
 export const NO_MERGES_TITLE = '无合并'
-/** `action.vcs.log.branches.separator` = 分支操作（`VcsLogBundle.properties:36`，随 IDE 发货的中文包同值）。 */
+/** `action.vcs.log.branches.separator` = Branch Actions（`VcsLogBundle.properties:36`；本树只有英文包，中文措辞**无法核实**，此处沿用本仓界面口径）。 */
 export const LOG_BRANCH_ACTIONS_SEPARATOR = '分支操作'
 /** `action.title.collapse.linear.branches` = 收起线性分支（`VcsLogBundle.properties:44`）。 */
 export const LOG_COLLAPSE_TITLE = '收起线性分支'
@@ -259,9 +259,10 @@ export function hasNonDefaultGraphOptions(state: LogGraphOptionState): boolean {
  *    `action.process.collapsing.linear.branches` / `action.process.expanding.linear.branches`）——
  *    **本批已接**（原登记为"不做"，理由写的是「折叠要有一层隐藏行的中间表示，本仓没有」。
  *    实际读上游 `CollapsedActionManager.java:214-241` 后核对：`COLLAPSE_ALL` 做的就是把
- *    「单父 & 独子」线性链的**中间节点 hideNode**，`EXPAND_ALL` = `resetNodesVisibility()` ——
+ *    上游 `LinearFragmentGenerator.getFragment`（`:126-166`，判据 = 下一排**收窄回一条道**，
+ *    不是「单父 & 独子」）算出的那段**中间节点 hideNode**，`EXPAND_ALL` = `resetNodesVisibility()` ——
  *    作用域只在**已加载的那一页**上（`dataPack.getVisibleGraph()`），本仓同样只在已加载列表上做，
- *    等价物 = `src/vcsLogGraph.ts` 的 `collapseLinearBranches()` + `collapsedLinearHashes()`。）
+ *    等价物 = `src/vcsLogGraph.ts` 的 `collapseFragments()`（出口 `collapseLinearBranches()` + `collapsedLinearHashes()`。）
  */
 export const LOG_GRAPH_OPTION_GAPS: ReadonlyArray<{ id: string; title: string; why: string }> = [
   { id: 'PermanentGraph.Options.LinearBek', title: '线性化合并', why: '上游门在 Registry vcs.log.linear.bek.sort（默认关）后面，出厂弹层里没有这一行；且它是纯显示层重排，没有 git 旗标，本仓分页记账也接不住' },

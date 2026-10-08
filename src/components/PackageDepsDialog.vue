@@ -221,7 +221,7 @@ const ruleTitle = (rule: DependencyRule) => ruleDisplayText(rule)
               </select>
             </label>
             <label class="deps-option"><input v-model="draft.deny" type="checkbox" />拒绝（不勾就是「仅允许」）</label>
-            <button class="deps-clear" @click="addDraftRule"><Plus :size="iconSize.rail" />添加</button>
+            <button class="deps-clear" @click="addDraftRule"><Plus aria-hidden="true" :size="iconSize.rail" />添加</button>
           </div>
           <p v-if="rulesNote" class="deps-error">{{ rulesNote }}</p>
         </div>
@@ -321,15 +321,15 @@ const ruleTitle = (rule: DependencyRule) => ruleDisplayText(rule)
 .deps-error { margin: 0; padding: var(--space-2) var(--space-3); color: var(--error); font-size: 12px; }
 .deps-toolbar { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); }
 .deps-option { display: flex; align-items: center; gap: var(--space-1); color: var(--secondary); font-size: 11px; }
-.deps-option select { color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); font-size: 11px; }
-.deps-focus { margin: 0 var(--space-3); padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); }
+.deps-option select { color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
+.deps-focus { margin: 0 var(--space-3); padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); }
 .deps-focus-head { margin: 0 0 var(--space-1); color: var(--secondary); font-size: 12px; }
-.deps-clear { margin-left: var(--space-2); padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 11px; }
+.deps-clear { display: inline-flex; align-items: center; gap: var(--space-1); margin-left: var(--space-2); padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 11px; }
 .deps-body { flex: 1; min-height: 0; overflow: auto; padding: 0 var(--space-3) var(--space-3); }
 .deps-section { margin-top: var(--space-2); }
 .deps-section h3 { margin: 0 0 var(--space-1); color: var(--secondary); font-size: 12px; font-weight: 500; }
 .deps-badge { margin-left: var(--space-1); color: var(--muted); font-size: 11px; }
-.deps-cycle { margin-bottom: var(--space-2); padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs, 3px); }
+.deps-cycle { margin-bottom: var(--space-2); padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); }
 .deps-cycle-path { margin: 0 0 var(--space-1); color: var(--warning, var(--error)); font: 12px var(--font-mono); overflow-wrap: anywhere; }
 .deps-bucket { margin-bottom: var(--space-1); }
 .deps-bucket-head { margin: var(--space-1) 0 0; color: var(--muted); font-size: 11px; }
@@ -342,7 +342,7 @@ const ruleTitle = (rule: DependencyRule) => ruleDisplayText(rule)
 .deps-specifier { flex-shrink: 0; }
 .deps-focus-button { flex-shrink: 0; padding: 0 var(--space-1); border: 0; background: transparent; color: var(--accent); font-size: 10px; }
 .deps-toggle { padding: 0; border: 0; background: transparent; color: var(--secondary); font-size: 12px; font-weight: 500; }
-.deps-rules { margin: var(--space-1) var(--space-3) 0; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); }
+.deps-rules { margin: var(--space-1) var(--space-3) 0; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); }
 .deps-rules-title { margin: 0 0 var(--space-1); color: var(--secondary); font-size: 12px; font-weight: 500; }
 .deps-rule-list { margin: 0 0 var(--space-1); padding: 0; list-style: none; }
 .deps-rule { display: flex; align-items: center; gap: var(--space-2); font-size: 11px; }

@@ -14,6 +14,8 @@ export type Dock = 'side' | 'bottom' | 'editor'
 /** 底部 dock（`App.vue` 的 `.output-panel`）与侧栏 dock（`.explorer-panel`）的容器类名。 */
 export const BOTTOM_DOCK_SELECTOR = '.output-panel'
 export const SIDE_DOCK_SELECTOR = '.explorer-panel'
+/** 右侧那条侧栏 dock 的容器（`App.vue` 的 `.explorer-panel.right-dock`）。 */
+export const RIGHT_DOCK_SELECTOR = '.explorer-panel.right-dock'
 
 /** 只看得到 `closest` 的元素即可（真实 DOM 与单测夹具同一条路）。 */
 export interface ElementWithClosest {
@@ -25,6 +27,12 @@ export function dockOf(element: ElementWithClosest | null | undefined): Dock {
   if (element?.closest(BOTTOM_DOCK_SELECTOR)) return 'bottom'
   if (element?.closest(SIDE_DOCK_SELECTOR)) return 'side'
   return 'editor'
+}
+
+/** 焦点在哪一侧的侧栏 dock（左右两条各自独立后，`dockOf` 只回答到 'side' 这一层）。 */
+export function sideDockOf(element: ElementWithClosest | null | undefined): 'left' | 'right' | null {
+  if (!element?.closest(SIDE_DOCK_SELECTOR)) return null
+  return element.closest(RIGHT_DOCK_SELECTOR) ? 'right' : 'left'
 }
 
 /** 这条 dock 装的是哪一侧（自动隐藏按这一位去收面板）。 */

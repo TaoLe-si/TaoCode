@@ -64,3 +64,15 @@
   它作用在 `RunnerLayoutUi` 的多视图格上（`AbstractFocusOnAction.java:20-26`、`:33-36`），本仓运行视图是扁平单标签条，
   接不进任何组件；`RunnerLayoutSettings`/`CustomContentLayoutSettings` 那个「布局设置页」也就没有可设的对象，同源不请求。
 - 按页加载的大文件编辑器（`DocumentOfPagesModel.java`）：要改宿主读盘范围（`file.read`），不是一处接线，属独立批次。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+本桶 6 条与 `docs/wiring-requests-2026-10-06-b10audit.md` 逐条同源（该审计文件是它的复核版），状态见该文件的「处理结果」一节。摘要：
+
+- **Run Anything cwd**：已接线（`App.vue:2638` + `RunAnythingDialog.vue:51/:153-154`）。
+- **终端两格设置（Ctrl+滚轮 / 基准字号）**：已接线（settingsModel + native schema + SettingsDialog + TerminalPanel + App 挂载）。
+- **ANSI 16 色覆盖**：宿主取数已接（`TerminalPanel.vue:351`、`RunConsole.vue:161/:163`），**设置键 `general.terminalAnsiColors` 仍缺**（`GeneralSettingsState` 无该字段）⇒ 需 settings owner + native owner 同批补键。
+- **大文件动作替换**：菜单侧本 lane 已接（`App.vue` 的 `editable` 与 `runEditor` 门，`src/largeFileMode.ts:81/:88`）；键位面与查找栏替换行在 `CodeEditor.vue` / `EditorFindBar.vue` 名下 ⇒ 需对应 owner。
+- **大文件正则提示 / `RunStartParams.elevate`**：不落（前提不成立 / 缺传输层），维持原判。
+
+App.vue 行数：2677 → 2695（跨本文件与 b10audit 同一批）。

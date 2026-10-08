@@ -77,12 +77,15 @@ test('四档计数自洽，且与表尾那句一致', () => {
   const count = letter => rows.filter(row => row.verdict === letter).length
   // 2026-10-04 本轮第二次：BookmarkItem 从 [~] 改判 [x]（speedSearchText / allowedToRemove /
   // removed 三条落地，判据 tests/bookmark-item.test.mjs）。
-  assert.equal(count('[x]'), 3)
-  assert.equal(count('[~]'), 2)
+  // 2026-10-06（b1b7verdict lane 第二轮）：BookmarksListener [~] → [x] —— 上游 MessageBus Topic
+  // 的前端等价物落地（src/bookmarkListener.ts 的 EP + 四条同名回调 + 订阅/注销 + 差异分派，
+  // 生产消费点 src/bookmarkActions.ts:82 的 watch），判据 tests/bookmarks-listener.test.mjs。
+  assert.equal(count('[x]'), 4)
+  assert.equal(count('[~]'), 1)
   assert.equal(count('[ ]'), 0)
   assert.equal(count('[-]'), 0)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 5)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 3 \+ `\[~\]` 2 \+ `\[ \]` 0 \+ `\[-\]` 0 = 5/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 4 \+ `\[~\]` 1 \+ `\[ \]` 0 \+ `\[-\]` 0 = 5/,
     '表尾的和数要与逐条表一致')
 })
 

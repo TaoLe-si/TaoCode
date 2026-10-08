@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from 'vue'
 import { RefreshCw, PanelRight, ArrowLeft, ArrowRight, Settings2 } from 'lucide-vue-next'
-import { Check } from 'lucide-vue-next'
 import { copyToClipboard } from '../clipboard'
-import { isDesktop, type GitCommitChange, type GitLogQuery } from '../bridge'
+import { isDesktop, type GitCommitChange, type GitFullCommit, type GitLogQuery } from '../bridge'
 import VcsLogDiff from './VcsLogDiff.vue'
 import { useVcsLogData } from '../vcsLogData'
 import VcsLogTable from './VcsLogTable.vue'
@@ -16,15 +15,24 @@ import { hiddenColumns, toggleColumn, type LogColumn } from '../vcsLogColumns'
 import { isEmptyLogQuery, logFilterStorageKey, parseLogQuery, serializeLogQuery } from '../vcsLogFilterStore'
 import { LOG_PRESENTATION_DEFAULTS, LOG_VIEW_OPTIONS_TITLE, logPresentationModel } from '../vcsLogPresentation'
 import { LOG_NO_MATCHING_COMMITS, LOG_RESET_FILTERS, logCommitMenu, logRefMenu, type LogMenuRow } from '../vcsLogMenu'
-import { canCollapseLinearBranches, logDate } from '../vcsLogGraph'
+import { canCollapseLinearBranches, clickLinearFragment, collapsedLinearSpans } from '../vcsLogGraph'
+import type { CollapsedSpan } from '../vcsLogGraph'
+import { prettyLogDate } from '../vcsLogDisplay.ts'
+import type { DateTimeFormatSettings } from '../dateTimeFormat.ts'
 import { iconSize } from '../uiIcons'
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 
-const props = defineProps<{ root: string; active: boolean; showTagNames?: boolean; showRootNames?: boolean }>()
-// 「标签名称」是**项目设置**（`vcsLog.showTagNames`），写回走宿主；其余行是本窗口自己的排布。
+const props = defineProps<{ root: string; active: boolean; dateFormat?: DateTimeFormatSettings; showTagNames?: boolean; showRootNames?: boolean }>()
+// 「标签名称」是项目设置；「提交时间戳」是应用级偏好；其余视图行是本窗口自己的排布。
 const emit = defineEmits<{ setTagNames: [value: boolean] }>()
+const preferCommitDate = ref<boolean>(LOG_PRESENTATION_DEFAULTS.preferCommitDate)
+try { preferCommitDate.value = localStorage.getItem('taocode.vcs.log.preferCommitDate') === 'true' } catch { /* Use the default. */ }
+const dateText = (commit: GitFullCommit | undefined) => prettyLogDate(
+  preferCommitDate.value ? commit?.committerDate ?? '' : commit?.date ?? '', Date.now(), props.dateFormat)
 const { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,
   canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick,
-  resetTo, uncommit, createTagOn, deleteTag, loadBranchNames, loadTagNames, scope } =
+  resetTo, uncommit, createTagOn, deleteTag, loadBranchNames, loadTagNames, scope, currentBranch, branchTrackInfos, isOnBranch } =
   useVcsLogData(toRef(props, 'root'), toRef(props, 'active'), () => {
     try { return parseLogQuery(localStorage.getItem(logFilterStorageKey(props.root))) } catch { return {} }
   })
@@ -48,9 +56,9 @@ const menuRows = computed<LogMenuRow[]>(() => {
   if (!row) return []
   const commit = commits.value.find(c => c.hash === row.hash)
   return logCommitMenu(
-  { hash: row.hash, shortHash: row.shortHash, isHead: row.isHead, subject: commit?.subject, author: commit?.author, dateText: logDate(commit?.date ?? ''), parents: commit?.parents ?? [] },
+  { hash: row.hash, shortHash: row.shortHash, isHead: row.isHead, subject: commit?.subject, author: commit?.author, dateText: dateText(commit), parents: commit?.parents ?? [] },
   {
-    copy: () => { copyHash(); closeMenu() },
+    copy: () => { copyRevision(row.hash); closeMenu() },
     reset: () => {
       const hash = menu.value?.hash ?? ''
       closeMenu()
@@ -71,7 +79,7 @@ const menuRows = computed<LogMenuRow[]>(() => {
     },
     // 上游 `VcsLogNavigationUtil.jumpToGraphRow`：选中那一行（本仓的 navigate 也会按需加载它的历史）。
     goTo: hash => { closeMenu(); void jump(hash) },
-  }, commits.value.map(c => ({ hash: c.hash, shortHash: c.shortHash, isHead: false, subject: c.subject, author: c.author, dateText: logDate(c.date), parents: c.parents })))
+  }, commits.value.map(c => ({ hash: c.hash, shortHash: c.shortHash, isHead: false, subject: c.subject, author: c.author, dateText: dateText(c), parents: c.parents })))
 })
 function openMenu(payload: { hash: string; x: number; y: number }) {
   const commit = commits.value.find(c => c.hash === payload.hash)
@@ -105,13 +113,24 @@ function toggleLogColumn(column: LogColumn) {
   hidden.value = toggleColumn(hidden.value, column)
   try { localStorage.setItem(columnsKey.value, JSON.stringify(hidden.value)) } catch { /* Session-only. */ }
 }
-// 「视图选项」里那几条勾选项的**本仓存档**（与列显隐同一族键，按仓库根各存各的）。
-// 上游这些值在 `VcsLogApplicationSettings` 的 OptionTag 上（`COMPACT_REFERENCES_VIEW` /
-// `LABELS_LEFT_ALIGNED` / `SHOW_CHANGES_FROM_PARENTS` / `DIFF_PREVIEW_VERTICAL_SPLIT`，
-// `VcsLogApplicationSettings.kt:106-122`），缺省值抄 `LOG_PRESENTATION_DEFAULTS`；
-// 旧存档缺键 = 用缺省，**不按字段数量判损坏**（这一族本来就是可缺的视图偏好）。
+function setPreferCommitDate(value: boolean) {
+  preferCommitDate.value = value
+  try { localStorage.setItem('taocode.vcs.log.preferCommitDate', String(value)) } catch { /* Session-only. */ }
+}
+// 「视图选项」的偏好按上游作用域分开：`preferCommitDate` 在应用级单独存；其余本窗口排布按仓库根存。
+// 上游把其余值再分两层：`compactReferences` / `alignLabels` / `showChangesFromParents` / `diffPreviewAtBottom`
+// 在应用级 `VcsLogApplicationSettings.kt`，而 `showLongEdges` 在日志 UI 级 `VcsLogUiPropertiesImpl.kt:121-122`。
+// **订正留痕**：这一段原写"这些值都在 `VcsLogApplicationSettings.kt:106-122`"—— 长边那一条不在那份 State 里，
+// 收尾复核按两个文件逐行打开后分开写。本仓五档一律按仓库根存（作用域与上游不同一条，已登记在归属报告）。
+// 缺省值抄 `LOG_PRESENTATION_DEFAULTS`；旧存档缺键 = 用缺省，**不按字段数量判损坏**（这一族本来就是可缺的视图偏好）。
 const viewPrefs = ref<{ compactReferences: boolean; showLongEdges: boolean; alignLabels: boolean;
-  diffPreviewAtBottom: boolean; showChangesFromParents: boolean }>({ ...LOG_PRESENTATION_DEFAULTS })
+  diffPreviewAtBottom: boolean; showChangesFromParents: boolean }>({
+  compactReferences: LOG_PRESENTATION_DEFAULTS.compactReferences,
+  showLongEdges: LOG_PRESENTATION_DEFAULTS.showLongEdges,
+  alignLabels: LOG_PRESENTATION_DEFAULTS.alignLabels,
+  diffPreviewAtBottom: LOG_PRESENTATION_DEFAULTS.diffPreviewAtBottom,
+  showChangesFromParents: LOG_PRESENTATION_DEFAULTS.showChangesFromParents,
+})
 function viewPrefKey(id: string) { return `taocode.vcs.log.${encodeURIComponent(props.root)}.${id}` }
 function readViewPref(id: string, fallback: boolean): boolean {
   try {
@@ -120,24 +139,34 @@ function readViewPref(id: string, fallback: boolean): boolean {
   } catch { return fallback }
 }
 const viewPrefKeys = ['compactReferences', 'showLongEdges', 'alignLabels', 'diffPreviewAtBottom', 'showChangesFromParents'] as const
-// 「收起线性分支」（`Vcs.Log.CollapseAll` / `Vcs.Log.ExpandAll`）：只影响已加载这一页的可见行。
-const collapsed = ref(false)
+// 「收起线性分支」的状态 = **收起着的那几条链**（不是一句布尔）：菜单里那两条按钮收全部/展全部
+// （上游 `Vcs.Log.CollapseAll` / `Vcs.Log.ExpandAll`），在图形上点一次只动那一条
+// （上游 `GraphCommitCellController.java:58-64` 的 MOUSE_CLICK ⇒ `LINEAR_COLLAPSE_CASE` / `LINEAR_EXPAND_CASE`）。
+// 两种写法都只影响已加载这一页的可见行。
+const collapsedSpans = ref<CollapsedSpan[]>([])
+const collapsed = computed(() => collapsedSpans.value.length > 0)
+function setCollapsedAll(value: boolean) { collapsedSpans.value = value ? collapsedLinearSpans(commits.value) : [] }
+function foldFragment(hash: string) {
+  const next = clickLinearFragment(commits.value, collapsedSpans.value, hash)
+  if (next) collapsedSpans.value = next
+}
 const canCollapse = computed(() => canCollapseLinearBranches(commits.value))
 watch(() => props.root, () => {
   for (const id of viewPrefKeys) viewPrefs.value[id] = readViewPref(id, LOG_PRESENTATION_DEFAULTS[id])
   // 折叠是**视图态**（上游记在图上、不进 UI 属性）⇒ 换仓库根就回到展开态。
-  collapsed.value = false
+  collapsedSpans.value = []
 }, { immediate: true })
 function setViewPref(id: typeof viewPrefKeys[number], value: boolean) {
   viewPrefs.value = { ...viewPrefs.value, [id]: value }
   try { localStorage.setItem(viewPrefKey(id), String(value)) } catch { /* Session-only. */ }
 }
 // 日志窗口自己的齿轮（上游 `Vcs.Log.PresentationSettings`，日志工具条右角）：模型在
-// src/vcsLogPresentation.ts，只给真能接住的行（不做的四条在 docs/source-todo.md §11）。
+// src/vcsLogPresentation.ts，只给真能接住的行（未接项登记在 docs/source-todo.md §11）。
 const gearOpen = ref(false)
 const presentationRows = computed(() => logPresentationModel(
-  { showTagNames: props.showTagNames !== false, hidden: hidden.value, ...viewPrefs.value },
+  { showTagNames: props.showTagNames !== false, hidden: hidden.value, ...viewPrefs.value, preferCommitDate: preferCommitDate.value },
   { setShowTagNames: value => emit('setTagNames', value), toggleColumn: toggleLogColumn,
+    setPreferCommitDate,
     setCompactReferences: value => setViewPref('compactReferences', value),
     setShowLongEdges: value => setViewPref('showLongEdges', value),
     setAlignLabels: value => setViewPref('alignLabels', value),
@@ -167,17 +196,29 @@ function copyFallback(text: string): boolean {
   area.select()
   try { return document.execCommand('copy') } finally { area.remove(); focused?.focus() }
 }
-async function copyHash() {
-  if (!selectedCommit.value) return
-  const hash = selectedCommit.value.hash
+/** 写系统剪贴板（走 `src/clipboard.ts` 那一处真源：同时进剪贴板环）。失败时回落 execCommand，再不行才报错。 */
+async function writeClipboard(text: string, failure: string) {
+  if (!text) return
   const current = scope()
-  try { await copyToClipboard(hash) }
+  try { await copyToClipboard(text) }
   catch {
     if (!current()) return
-    try { if (copyFallback(hash)) return } catch { /* Show the manual-copy fallback. */ }
-    error.value = '无法写入剪贴板，请手动选中详情里的完整哈希复制。'
+    try { if (copyFallback(text)) return } catch { /* Show the manual-copy fallback. */ }
+    error.value = failure
   }
 }
+/**
+ * 「复制修订号」= `Vcs.CopyRevisionNumberAction`：完整哈希
+ * （`platform/vcs-log/impl/src/com/intellij/vcs/log/util/VcsLogUtil.java:231-232` 给的是
+ * `TextRevisionNumber(hash.asString(), ...)`，而 `platform/vcs-impl/src/com/intellij/openapi/vcs/history/actions/CopyRevisionNumberAction.java:34-36`
+ * 拼的是 `asString()` ⇒ 40 位那一条，不是行上显示的那 7 位短哈希）。
+ * 上游多选时是"旧→新、空格分隔"（同文件 `:24` 的 `ContainerUtil.reverse` + `:35` 的 join " "）——
+ * 本仓日志是单选，那条拼装路径走不到，所以这里不预置多选代码。
+ */
+function copyRevision(hash: string) { void writeClipboard(hash, '无法写入剪贴板，请手动选中详情里的完整哈希复制。') }
+/** 表格里的 Ctrl+C = 上游 `performCopy` 的整行文本（可见列 `" "` 分隔，`VcsLogGraphTable.java:690-709`）。 */
+function copyRowText(text: string) { void writeClipboard(text, '无法写入剪贴板，请手动选中日志行复制。') }
+function copyHash() { if (selectedCommit.value) copyRevision(selectedCommit.value.hash) }
 async function history(direction: 'back' | 'forward') {
   const hash = await travel(direction)
   if (hash) void table.value?.focusHash(hash)
@@ -196,7 +237,7 @@ async function jump(hash: string) {
     <VcsLogSplitter :key="root" :storage-key="`${layoutKey}.changes.splitter.proportion`">
       <template #first>
         <div class="vcslog-toolbar" role="toolbar" aria-label="日志过滤与显示">
-          <VcsLogFilters :query="query" :collapsed="collapsed" :can-collapse="canCollapse" @apply="applyLogFilter" @set-collapsed="collapsed = $event" />
+          <VcsLogFilters :query="query" :collapsed="collapsed" :can-collapse="canCollapse" @apply="applyLogFilter" @set-collapsed="setCollapsedAll" />
           <button class="icon-button" title="后退" aria-label="日志导航后退" :disabled="!canBack" @click="history('back')"><ArrowLeft :size="iconSize.control" /></button>
           <button class="icon-button" title="前进" aria-label="日志导航前进" :disabled="!canForward" @click="history('forward')"><ArrowRight :size="iconSize.control" /></button>
           <span class="count" :title="`已加载 ${commits.length} 条提交`">{{ commits.length }}{{ hasMore ? '+' : '' }}</span>
@@ -204,15 +245,15 @@ async function jump(hash: string) {
           <button class="icon-button" title="显示提交详情" aria-label="显示提交详情" :aria-pressed="showDetails" @click="toggleDetails"><PanelRight :size="iconSize.control" /></button>
           <!-- 上游 `Vcs.Log.PresentationSettings`（日志工具条右角、icon=GroupBy）——本仓放同一个位置。 -->
           <details class="filter presentation" @toggle="gearOpen = ($event.target as HTMLDetailsElement).open">
-            <summary :title="`${LOG_VIEW_OPTIONS_TITLE}（配置日志的表示）`" :aria-label="LOG_VIEW_OPTIONS_TITLE"><Settings2 :size="iconSize.control" /></summary>
+            <summary :title="LOG_VIEW_OPTIONS_TITLE" :aria-label="LOG_VIEW_OPTIONS_TITLE"><Settings2 :size="iconSize.control" /></summary>
             <form class="popup" @submit.prevent>
               <template v-for="row in presentationRows" :key="row.id">
                 <span v-if="row.group" class="group-title" role="presentation">{{ row.title }}</span>
-                <button v-for="child in row.children ?? []" :key="child.id" type="button" class="menu-button presentation-row" role="menuitemcheckbox" :aria-checked="child.checked" @click="pickPresentation(child)">
-                  <span class="menu-item-icon"><Check v-if="child.checked" :size="iconSize.menu" /></span><span>{{ child.title }}</span>
+                <button v-for="child in row.children ?? []" :key="child.id" type="button" class="menu-button presentation-row" role="menuitemcheckbox" :aria-checked="child.checked" :aria-disabled="child.disabled" :disabled="child.disabled" @click="pickPresentation(child)">
+                  <span class="menu-item-icon"><IdeaCheckedIcon v-if="child.checked" :size="iconSize.menu" /></span><span>{{ child.title }}</span>
                 </button>
-                <button v-if="!row.group" type="button" class="menu-button presentation-row" role="menuitemcheckbox" :aria-checked="row.checked" @click="pickPresentation(row)">
-                  <span class="menu-item-icon"><Check v-if="row.checked" :size="iconSize.menu" /></span><span>{{ row.title }}</span>
+                <button v-if="!row.group" type="button" class="menu-button presentation-row" role="menuitemcheckbox" :aria-checked="row.checked" :disabled="row.disabled" :aria-disabled="row.disabled" @click="pickPresentation(row)">
+                  <span class="menu-item-icon"><IdeaCheckedIcon v-if="row.checked" :size="iconSize.menu" /></span><span>{{ row.title }}</span>
                 </button>
               </template>
             </form>
@@ -224,9 +265,9 @@ async function jump(hash: string) {
         <p v-if="!isDesktop" class="note">浏览器预览没有 VCS 日志，请在桌面端使用。</p>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <p v-if="navigating" class="note" role="status">正在定位提交…</p>
-        <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden"
-          :compact-references="viewPrefs.compactReferences" :align-labels="viewPrefs.alignLabels" :show-long-edges="viewPrefs.showLongEdges" :collapsed="collapsed"
-          @select="select" @copy="copyHash" @more="more" @menu="openMenu" @ref-menu="openRefMenu">
+        <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :date-format="dateFormat" :prefer-commit-date="preferCommitDate" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden" :current-branch="currentBranch" :branch-track-infos="branchTrackInfos" :is-on-branch="isOnBranch"
+          :compact-references="viewPrefs.compactReferences" :align-labels="viewPrefs.alignLabels" :show-long-edges="viewPrefs.showLongEdges" :collapsed="collapsedSpans"
+          @select="select" @copy="copyRowText" @copy-revision="copyHash" @fold="foldFragment" @more="more" @menu="openMenu" @ref-menu="openRefMenu">
           <div v-if="loading" class="empty" role="status">加载中…</div>
           <!-- `vcs.log.no.commits.matching.status` + `vcs.log.reset.filters.status.action`
                （`VcsLogBundle.properties:151-152`）：有过滤却一条都没命中时给一个真的重置入口，
@@ -242,7 +283,7 @@ async function jump(hash: string) {
       <template #second>
         <VcsLogSplitter vertical :storage-key="`${layoutKey}.details.splitter.proportion`" :second-visible="showDetails">
           <template #first><VcsLogChanges :changes="changes" :selected="!!selectedCommit" :loading="changesLoading" :error="changesError" :from-parents="viewPrefs.showChangesFromParents" @select="previewChange = $event" /></template>
-          <template #second><VcsLogDetails :commit="selectedCommit" :details="details" :busy="busy" :loading="detailsLoading" :error="detailsError" @copy="copyHash" @cherry-pick="cherryPick" @navigate="jump" /></template>
+          <template #second><VcsLogDetails :commit="selectedCommit" :details="details" :date-format="dateFormat" :busy="busy" :loading="detailsLoading" :error="detailsError" @copy="copyHash" @cherry-pick="cherryPick" @navigate="jump" /></template>
         </VcsLogSplitter>
       </template>
     </VcsLogSplitter>
@@ -263,25 +304,27 @@ async function jump(hash: string) {
 </template>
 
 <style scoped>
-.vcslog-panel { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
+.vcslog-panel { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; background: var(--panel); }
 /* 提交行右键菜单：背景层铺满窗口（点外面关掉），菜单位置用鼠标坐标（position: fixed）。 */
 .log-menu-backdrop { position: absolute; inset: 0; z-index: 40; }
-.log-menu { position: absolute; min-width: 180px; padding: var(--space-1); display: flex; flex-direction: column; background: var(--popup); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow-3); }
+.log-menu { position: absolute; min-width: 180px; padding: var(--space-1); display: flex; flex-direction: column; background: var(--popup-background); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
 .log-menu .menu-button { text-align: left; white-space: nowrap; }
 .log-menu-separator { height: 1px; margin: var(--space-1) 0; background: var(--line); }
-.vcslog-toolbar { position: relative; display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 6px; border-bottom: 1px solid var(--line); }
-.count { color: var(--muted); font-size: 10px; }
-.note, .error { margin: 0; padding: 6px 10px; font-size: 11px; overflow-wrap: anywhere; }
+.vcslog-toolbar { position: relative; display: flex; flex: 0 0 var(--toolbar-btn-size); align-items: center; gap: var(--space-1); min-width: 0; padding: 0 var(--space-2); border-bottom: 1px solid var(--line); }
+.count { flex: 0 0 auto; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.note, .error { margin: 0; padding: var(--space-1) var(--space-2); font-size: 11px; overflow-wrap: anywhere; }
 .note { color: var(--muted); }
 .error { color: var(--error); border-bottom: 1px solid var(--line); }
-.empty { padding: 12px; color: var(--muted); font-size: 11px; }
-.load-more { display: block; margin: 8px auto; padding: 4px 12px; color: var(--text); background: var(--editor); border: 1px solid var(--line); font-size: 11px; }
+.empty { padding: var(--space-3); color: var(--muted); font-size: 11px; }
+.load-more { display: block; min-height: var(--ctrl-height-sm); margin: var(--space-2) auto; padding: 0 var(--space-3); color: var(--text); background: var(--editor); border: 1px solid var(--line); border-radius: var(--radius-xs); font-size: 11px; cursor: pointer; transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+.load-more:hover:not(:disabled) { background: var(--hover); border-color: var(--line-strong); }
 /* 日志窗口自己的「视图选项」齿轮（上游 `Vcs.Log.PresentationSettings` 在工具条右角）。
    弹层定位与过滤器的 `<details>` 同一套（右对齐、贴着工具条下沿），只是内容是一列勾选项。 */
 .presentation { position: relative; flex-shrink: 0; font-size: 11px; color: var(--muted); }
-.presentation summary { list-style: none; cursor: pointer; padding: 4px; display: flex; align-items: center; }
+.presentation summary { box-sizing: border-box; display: flex; align-items: center; justify-content: center; width: var(--toolbar-btn-size); height: var(--toolbar-btn-size); padding: 0; border-radius: var(--toolbar-btn-arc); color: var(--secondary); list-style: none; cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.presentation summary:hover, .presentation[open] summary { background: var(--hover); color: var(--bright); }
 .presentation summary::-webkit-details-marker { display: none; }
-.presentation .popup { position: absolute; top: 29px; right: 0; z-index: 5; width: max-content; min-width: 160px; display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
-.presentation .group-title { padding: 4px var(--space-2) 2px; color: var(--muted); font-size: 10px; }
+.presentation .popup { position: absolute; top: calc(var(--toolbar-btn-size) - 1px); right: 0; z-index: 5; width: max-content; min-width: 160px; display: flex; flex-direction: column; gap: 2px; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.presentation .group-title { padding: var(--space-1) var(--space-2); color: var(--muted); font-size: 10px; }
 .presentation-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; justify-content: flex-start; text-align: left; white-space: nowrap; }
 </style>

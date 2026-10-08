@@ -100,13 +100,16 @@ test('the empty-file message is the one IDEA shows', () => {
 // contract between the two (editorCommands.ts:58-59 makes the same point for the editing
 // commands). Reading the sources keeps a rename from leaving a menu row pointing nowhere.
 test('the editor binds F2 / Shift+F2 and the menu offers the same two actions', () => {
+  // F2/Shift+F2 挂在 lspExtensions()（与 goToError 的语言服务门同处，仍在 CodeEditor.vue）；
+  // 两个菜单动作名 2026-10-06 随动作表搬进 src/editorKeymap.ts。两处都钉，判据没有放松。
   const editor = readFileSync('src/components/CodeEditor.vue', 'utf8')
+  const keymap = readFileSync('src/editorKeymap.ts', 'utf8')
   const app = shellSource()
 
   assert.match(editor, /key: 'F2'/, 'F2 ($default.xml:658-660) is not bound')
   assert.match(editor, /key: 'Shift-F2'/, 'Shift+F2 ($default.xml:679-681) is not bound')
   for (const name of ["'error.next'", "'error.previous'"])
-    assert.ok(editor.includes(name), `editorActions is missing ${name}`)
+    assert.ok(keymap.includes(name), `editorActions is missing ${name}`)
 
   for (const [id, keys, action] of [['navigate.nextError', 'F2', 'error.next'], ['navigate.previousError', 'Shift F2', 'error.previous']]) {
     const row = app.split('\n').find(line => line.includes(`id: '${id}'`))

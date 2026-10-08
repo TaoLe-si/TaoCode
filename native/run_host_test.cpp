@@ -297,6 +297,64 @@ int main() {
         manager.stop(0);
     });
 
+    run("退出码通道：run.instances 报最后一段的 exitCode 与被停止的 aborted", [] {
+        const auto root = temp_root();
+        Collector collector;
+        taocode::run_host::Manager manager(collector.emit());
+        // 第一段：自己跑完（echo，退出码 0）。
+        const int instance = manager.start(start_params("退出码", "echo done"), root).at("instance").get<int>();
+        check(collector.wait_for("run.exit"), "要收到 run.exit");
+        for (int attempt = 0; attempt < 200; ++attempt) {
+            for (const auto& row : manager.instances())
+                if (row.value("id", 0) == instance && !row.value("running", true)) {
+                    check(row.at("exitCode").is_number() && row.at("exitCode").get<int>() == 0,
+                          "跑完的实例 exitCode 应当是 0，实际：" + row.dump());
+                    check(row.at("aborted") == false, "自己跑完的实例不是 aborted：" + row.dump());
+                    return;
+                }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        throw std::runtime_error("实例没有回到不在跑的状态");
+    });
+
+    run("退出码通道：被 stop 的实例 exitCode=-1 且 aborted=true", [] {
+        const auto root = temp_root();
+        Collector collector;
+        taocode::run_host::Manager manager(collector.emit());
+        const int instance = manager.start(start_params("被停止", "ping -n 20 127.0.0.1 > nul", true), root)
+                                 .at("instance").get<int>();
+        for (int attempt = 0; attempt < 300 && !manager.any_running(); ++attempt)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        check(manager.any_running(), "实例应该在跑");
+        // 在跑时 exitCode 报 null（还没结束）。
+        for (const auto& row : manager.instances())
+            if (row.value("id", 0) == instance)
+                check(row.at("exitCode").is_null(), "在跑的实例 exitCode 应当是 null：" + row.dump());
+        manager.stop(instance);
+        // stop 之后实例被摘出清单；换一个不摘的路径验证：同名重启停前一个（stop_instance announce）。
+        const auto root2 = temp_root();
+        Collector collector2;
+        taocode::run_host::Manager manager2(collector2.emit());
+        const int first = manager2.start(start_params("同名", "ping -n 20 127.0.0.1 > nul"), root2).at("instance").get<int>();
+        for (int attempt = 0; attempt < 300 && !manager2.any_running(); ++attempt)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        manager2.start(start_params("同名", "ping -n 20 127.0.0.1 > nul"), root2);  // 同名 + 不允许并行 ⇒ 停掉 first
+        bool seen = false;
+        for (int attempt = 0; attempt < 300 && !seen; ++attempt) {
+            for (const auto& row : manager2.instances())
+                if (row.value("id", 0) == first) {
+                    check(row.at("exitCode").is_number() && row.at("exitCode").get<int>() == -1,
+                          "被停止的实例 exitCode 应当是 -1，实际：" + row.dump());
+                    check(row.at("aborted") == true, "被停止的实例应当 aborted：" + row.dump());
+                    seen = true;
+                }
+            if (!seen) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        check(seen, "被停掉的前一个实例仍应留在清单里（IDEA 的 Run 工具窗口也保留已结束的标签）");
+        manager2.stop(0);
+        manager.stop(0);
+    });
+
     run("write_line 给不存在的实例返回 false（不抛）", [] {
         const auto root = temp_root();
         Collector collector;

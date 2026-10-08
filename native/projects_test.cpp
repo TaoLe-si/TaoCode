@@ -496,9 +496,9 @@ int main() {
                 {{"buildTools", {{"gradle", {{"unknown", 1}}}}}},
                 // 导出到 HTML（IDEA ExportToHTMLSettings）：范围只允许 0/1/2/4，其余字段各有类型。
                 {{"exportToHtml", Json::array()}}, {{"exportToHtml", "file"}},
-                // 运行配置的「允许并行运行多个实例」只能是布尔（IDEA RunConfigurationOptions.kt:54-56）。
+                // 「允许并行」与那两个「启动时打开/聚焦运行面板」都只能是布尔（RunConfigurationOptions.kt:54-56；RunnerAndConfigurationSettingsImpl.kt:61-62/:108-109，缺键由读侧按 :243-244 补默认）。
                 {{"runConfigs", Json::array({{{"name", "x"}, {"command", "y"}, {"allowRunningInParallel", "yes"}}})}},
-                {{"runConfigs", Json::array({{{"name", "x"}, {"command", "y"}, {"allowRunningInParallel", 1}}})}},
+                {{"runConfigs", Json::array({{{"name", "x"}, {"command", "y"}, {"allowRunningInParallel", 1}}})}}, {{"runConfigs", Json::array({{{"name", "x"}, {"command", "y"}, {"activateToolWindowBeforeRun", "yes"}}})}}, {{"runConfigs", Json::array({{{"name", "x"}, {"command", "y"}, {"focusToolWindowBeforeRun", 1}}})}},
                 {{"exportToHtml", {{"scope", 3}}}}, {{"exportToHtml", {{"scope", "1"}}}},
                 {{"exportToHtml", {{"scope", nullptr}}}}, {{"exportToHtml", {{"scope", 5}}}},
                 {{"exportToHtml", {{"includeSubdirectories", 1}}}},
@@ -671,7 +671,8 @@ int main() {
             const auto root_a = open_result(a).at("root").get<std::string>();
             const auto root_b = open_result(b).at("root").get<std::string>();
             store.opened(open_result(a));
-            const Json configs = Json::array({{{"name", utf8(u8"构建")}, {"command", "cmake --build build"}},
+            const Json configs = Json::array({{{"name", utf8(u8"构建")}, {"command", "cmake --build build"},
+                                               {"activateToolWindowBeforeRun", false}, {"focusToolWindowBeforeRun", true}},
                                               {{"name", "test"}, {"command", "ctest"}, {"type", "debug"}}});
             check(store.update_project_settings(root_a, {{"runConfigs", configs}}).at("runConfigs") == configs,                  "Run configurations must round-trip with their own text");
             check(store.project_settings(root_b).at("runConfigs").empty(),

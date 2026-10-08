@@ -17,7 +17,7 @@ import { RESIZE_CHARS, resizeDirectionEnabled, stretchDelta, type ResizeDirectio
 import { splitSizeOrDefault } from './toolWindowPaneState.ts'
 
 /** 面板尺寸表的键（与 `panelSizes` 同域）。 */
-export type Panel = 'explorer' | 'trace' | 'output'
+export type Panel = 'explorer' | 'rightDock' | 'trace' | 'output'
 
 export interface PanelResizeDeps {
   editorSettings: any
@@ -31,6 +31,11 @@ export interface PanelResizeDeps {
   bottomTab: any
   workspace: any
   zenMode: any
+  /** 右 dock 的可见性（左右独立后，两侧宽度互占要算上它）。 */
+  rightVisible?: { readonly value: boolean }
+  /** 焦点落在哪一侧的侧栏 dock（`dockOf` 只到 'side' 这一层，左右分栏后要再分一层；
+   *  缺省时退回 `activeAnchor` —— 与右 dock 独立之前的行为一致）。 */
+  focusedSideDock?: () => 'left' | 'right' | null
   /** 正在拖拽（模板据此禁用过渡动画）。 */
   resizing: any
   splitModel: any
@@ -69,7 +74,10 @@ function panelMax(panel: Panel) {
       : viewport.height - 300
     return Math.max(120, limit)
   }
-  const other = panel === 'explorer' ? (activity.value && viewport.width >= 1000 ? panelSizes.trace : 0) : (explorer.value ? panelSizes.explorer : 0)
+  // 另一侧的占位：拖左 dock 时右 dock 也占宽，反之亦然（两侧现在各自独立）。
+  const other = panel === 'explorer'
+    ? (activity.value && viewport.width >= 1000 ? panelSizes.trace : 0) + (deps.rightVisible?.value ? panelSizes.rightDock : 0)
+    : panel === 'rightDock' ? (explorer.value ? panelSizes.explorer : 0) : (explorer.value ? panelSizes.explorer : 0)
   return Math.min(520, viewport.width - other - 340)
 }
 function setPanelSize(panel: Panel, value: number) {
@@ -77,7 +85,7 @@ function setPanelSize(panel: Panel, value: number) {
   panelSizes[panel] = size
   // IDEA "Remember size for each tool window": with it on, dragging the dock edge
   // resizes the tool window you are looking at, not the shared stripe.
-  if (editorSettings.value.rememberSizeForEachToolWindow && panel !== 'trace') {
+  if (editorSettings.value.rememberSizeForEachToolWindow && panel !== 'trace' && panel !== 'rightDock') {
     const key = panel === 'output' ? `${bottomTab.value}:bottom` : `${leftView.value}:side`
     toolSizes[key] = size
     saveToolSizes()
@@ -103,11 +111,12 @@ watch(bottomTab, view => {
   const stored = toolSizes[`${view}:bottom`]
   if (typeof stored === 'number') panelSizes.output = clampPanelSize(stored, 100, panelMax('output'))
 })
-function resizeKey(event: KeyboardEvent, panel: Panel) {
+function resizeKey(event: KeyboardEvent, panel: Panel, side?: 'left' | 'right') {
   // A modified arrow belongs to the window-level shortcuts (Ctrl+Alt+Shift+arrows resize the active
   // tool window); without this the separator would also move while the chord fired.
   if (event.altKey || event.ctrlKey || event.metaKey) return
-  const right = panel === 'trace' || (panel === 'explorer' && activeAnchor.value === 'right')
+  // 方向同 startResize：由分隔条自己声明哪一侧（右 dock 独立后 activeAnchor 不再可靠）。
+  const right = panel === 'trace' || (panel === 'explorer' && (side ? side === 'right' : activeAnchor.value === 'right'))
   const previous = panel === 'output' ? 'ArrowDown' : right ? 'ArrowRight' : 'ArrowLeft'
   const next = panel === 'output' ? 'ArrowUp' : right ? 'ArrowLeft' : 'ArrowRight'
   if (event.key !== previous && event.key !== next) return
@@ -126,8 +135,12 @@ function resizeTarget(): { panel: Panel; anchor: 'left' | 'right' | 'bottom' } |
   const dock = activeToolWindowDock()
   if (!dock) return null
   if (dock === 'bottom') return bottom.value ? { panel: 'output', anchor: 'bottom' } : null
-  const anchor = activeAnchor.value
-  return explorer.value && (anchor === 'left' || anchor === 'right') ? { panel: 'explorer', anchor } : null
+  // 左右两条 dock 各有自己的一格宽度（panelSizes.explorer / rightDock）：焦点在哪一侧就调哪一侧。
+  // `activeAnchor` 只回答「左栏 leftView 的锚点」，右 dock 开着时它仍是 'left' ⇒ 不再当判据，
+  // 只在宿主没给 focusedSideDock 时兜底。
+  const side = deps.focusedSideDock ? deps.focusedSideDock() : (activeAnchor.value === 'right' ? 'right' : 'left')
+  if (side === 'right') return deps.rightVisible?.value ? { panel: 'rightDock', anchor: 'right' } : null
+  return explorer.value ? { panel: 'explorer', anchor: 'left' } : null
 }
 /** The active tool window when `direction` is one of the two the anchor enables, else nothing. */
 function resizeTargetFor(direction: ResizeDirection): { panel: Panel; anchor: 'left' | 'right' | 'bottom' } | null {
@@ -212,19 +225,23 @@ function startSplitResize(event: PointerEvent) {
   resizing.value = true
   resizeCleanup = stop
 }
-function startResize(event: PointerEvent, panel: Panel) {
+/**
+ * `side` 由**分隔条自己**声明它是哪一侧的（左/右 dock 现在各自独立，`activeAnchor` 只回答
+ * "当前激活视图的锚点"，右 dock 开着时它仍可能是 `'left'` ⇒ 方向会反）。
+ * 不给时退回旧的 `activeAnchor` 判断（键盘那条路仍走它）。
+ */
+function startResize(event: PointerEvent, panel: Panel, side?: 'left' | 'right') {
   if (event.button !== 0) return
   resizeCleanup?.()
   event.preventDefault()
   const target = event.currentTarget as HTMLElement
   const origin = panel === 'output' ? event.clientY : event.clientX
   const size = panelSizes[panel]
+  // 左 dock：向右拖变宽（+1）；右 dock / 活动条 / 底部：方向相反（-1）。
+  const sign = panel === 'output' ? -1 : (side ? (side === 'left' ? 1 : -1) : (activeAnchor.value !== 'right' ? 1 : -1))
   const move = (next: PointerEvent) => {
     if (next.pointerId !== event.pointerId) return
     const position = panel === 'output' ? next.clientY : next.clientX
-    // Only a left-docked side window follows the divider right; the right dock, the activity rail
-    // and the bottom dock are all the other way round.
-    const sign = panel === 'explorer' && activeAnchor.value !== 'right' ? 1 : -1
     setPanelSize(panel, size + (position - origin) * sign)
   }
   const stop = () => {
@@ -248,7 +265,7 @@ function startResize(event: PointerEvent, panel: Panel) {
 function onWindowResize() {
   viewport.width = window.innerWidth
   viewport.height = window.innerHeight
-  for (const panel of ['explorer', 'trace', 'output'] as const) setPanelSize(panel, panelSizes[panel])
+  for (const panel of ['explorer', 'rightDock', 'trace', 'output'] as const) setPanelSize(panel, panelSizes[panel])
   if (splitSize.value) setSplitSize(splitSize.value)
 }
 // IDEA's editor-layout menu: Unsplit / Unsplit All / Split Right / Split Down act on

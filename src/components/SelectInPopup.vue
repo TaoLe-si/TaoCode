@@ -19,13 +19,22 @@ const visible = computed(() => filterSelectIn(props.rows, filter.value))
 const mnemonics = computed(() => selectInMnemonics(props.rows))
 // 打开时选中第一条**可选**的目标（置灰的不能被默认选中）。
 const selected = ref(-1)
-function firstSelectable(rows: readonly SelectInRow[]) { const at = rows.findIndex(row => row.selectable); return at < 0 ? 0 : at }
-function sync() { selected.value = firstSelectable(visible.value); void nextTick(() => list.value?.focus()) }
+function firstSelectable(rows: readonly SelectInRow[]) { return rows.findIndex(row => row.selectable) }
+function scrollSelectedIntoView() {
+  const index = selected.value
+  if (!visible.value[index]?.selectable) return
+  list.value?.querySelectorAll<HTMLElement>('.select-in-row')[index]?.scrollIntoView({ block: 'nearest' })
+}
+function sync() {
+  selected.value = firstSelectable(visible.value)
+  void nextTick(() => { list.value?.focus(); scrollSelectedIntoView() })
+}
 sync()
 watch(visible, rows => {
   const current = rows[selected.value]
   if (!current || !current.selectable) selected.value = firstSelectable(rows)
 })
+watch([selected, visible], scrollSelectedIntoView, { flush: 'post' })
 
 function rowClass(row: SelectInRow) { return { 'is-selected': visible.value[selected.value]?.id === row.id, 'is-disabled': !row.selectable } }
 function hover(index: number) { if (visible.value[index]?.selectable) selected.value = index }
@@ -72,3 +81,10 @@ onUnmounted(() => window.removeEventListener('pointerdown', onPointerDown, true)
     <p v-if="!visible.length" class="select-in-empty">没有匹配的目标。</p>
   </div>
 </template>
+
+<style scoped>
+.select-in {
+  max-height: min(calc(var(--popup-row-h) * 30 + 2 * var(--popup-pad) + 2px), calc(100dvh - 2 * var(--space-2)));
+  overflow-y: auto;
+}
+</style>

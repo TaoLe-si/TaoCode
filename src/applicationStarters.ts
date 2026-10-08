@@ -13,6 +13,40 @@
 
 import { EnvironmentConfiguration, generateEnvironmentKeyStub } from './environmentKeys.ts'
 import type { EnvironmentKey } from './environmentKeys.ts'
+import { APPLICATION_SCOPE, EXTENSIONS, type ExtensionHandle, type RegisterExtensionOptions } from './extensionPoints.ts'
+
+/**
+ * EP id（逐字取自上游 `platform/ide-core/resources/intellij.platform.ide.core.xml:51` 的
+ * `qualifiedName="com.intellij.appStarter"`，`beanClass=ApplicationStarterEP` `dynamic="true"`）。
+ * 插件的 `<com.intellij.appStarter command="…" implementation="…"/>` 与这里的
+ * `registerApplicationStarter()` 同一层：命令名是注册 id。
+ */
+export const APPLICATION_STARTER_EP = 'com.intellij.appStarter'
+
+/** 声明 EP（幂等）。 */
+export function declareApplicationStarterExtensionPoint(): void {
+  EXTENSIONS.declareExtensionPoint({ id: APPLICATION_STARTER_EP, name: '应用启动命令', scope: APPLICATION_SCOPE, dynamic: true })
+}
+
+/** 插件贡献一个启动命令（等价于上游 plugin.xml 的 `<com.intellij.appStarter command=…/>`）。 */
+export function registerApplicationStarter(starter: ApplicationStarter, options: RegisterExtensionOptions = {}): ExtensionHandle {
+  return EXTENSIONS.registerExtension(APPLICATION_STARTER_EP, starter.command, starter, options)
+}
+
+/** 注销一个启动命令。 */
+export function unregisterApplicationStarter(command: string): boolean {
+  return EXTENSIONS.unregisterExtension(APPLICATION_STARTER_EP, command)
+}
+
+/** 当前 EP 上的全部启动命令（bundled + 第三方贡献）。 */
+export function applicationStartersFromExtensions(scope: string = APPLICATION_SCOPE): ApplicationStarter[] {
+  return EXTENSIONS.extensionsOf<ApplicationStarter>(APPLICATION_STARTER_EP, scope)
+}
+
+/** 按命令名从 EP 取启动器（`findStarter` 的 EP 一侧）。 */
+function applicationStarterFromExtensions(command: string): ApplicationStarter | null {
+  return applicationStartersFromExtensions().find(starter => starter.command === command) ?? null
+}
 
 export interface ApplicationStarter {
   /** 命令名（上游 EP id，如 `generateEnvironmentKeysFile`）。 */
@@ -34,13 +68,20 @@ export class ApplicationStarterRegistry {
     this.starters.set(starter.command, starter)
   }
 
-  /** `ApplicationStarter.findStarter`：按命令名找，找不到回 null。 */
+  /**
+   * `ApplicationStarter.findStarter`：按命令名找，找不到回 null。
+   * 先查显式表，再落到 EP（第三方按 `com.intellij.appStarter` 挂的启动命令由此被真实消费）。
+   */
   find(command: string): ApplicationStarter | null {
-    return this.starters.get(command) ?? null
+    return this.starters.get(command) ?? applicationStarterFromExtensions(command)
   }
 
+  /** 显式表 + EP 贡献合并（同命令名以显式注册的为准）。 */
   all(): ApplicationStarter[] {
-    return [...this.starters.values()].sort((a, b) => a.command.localeCompare(b.command))
+    const merged = new Map<string, ApplicationStarter>()
+    for (const starter of applicationStartersFromExtensions()) merged.set(starter.command, starter)
+    for (const starter of this.starters.values()) merged.set(starter.command, starter)
+    return [...merged.values()].sort((a, b) => a.command.localeCompare(b.command))
   }
 
   /** `--list-commands` 的输出（内部命令不列）。 */
@@ -121,3 +162,9 @@ applicationStarters.register(createEnvironmentKeyStubStarter({
   knownKeys: () => [],                       // 本仓没有 EnvironmentKeyProvider 贡献者（见 src/environmentKeys.ts）
   configuration: () => EnvironmentConfiguration.EMPTY,
 }))
+
+// bundled：内置启动命令按上游 plugin.xml 的 `<com.intellij.appStarter …/>` 形态登记在 EP 上，
+// 第三方按同一 EP id 挂的命令名即被 `applicationStarters.find()`/`listCommands()` 真实消费。
+declareApplicationStarterExtensionPoint()
+for (const starter of applicationStarters.all())
+  EXTENSIONS.registerExtension(APPLICATION_STARTER_EP, starter.command, starter, { source: 'bundled' })

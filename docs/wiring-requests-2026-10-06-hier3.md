@@ -232,3 +232,16 @@ provideUsageSymbols(null)                                                       
 `getType`/逐引用读写**给不出**，只能做「文件名档」的描述名（上游 `DescriptiveNameUtil`，类名）。
 将来 `documentHighlight` 带上 kind 时，`src/usageViewGrouping.ts`/`src/referenceContents.ts` 可以扩一档
 按 kind 的分组键 —— **现在没有消费链路，不预先造模块**。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1（层级行消费行模型）已接线**：`src/App.vue:2335` 已是 `v-for="({ node, depth, row, id }, index) in hierRows" :key="id"` 并渲染 `row.segments`（见 hierarchy 那份处理结果）。
+- **W-3（引用面板用法树行）已接线**（落点移到 `ToolWindowView.vue:222` + `toolViewContext.ts:202` 的 `referenceRows`；判据 `tests/usage-view-panel-rows.test.mjs` 22/22 绿）。App.vue 的 `:2319-2321` 现为 `<ToolWindowView view="references">`。
+- **R-2（符号源注册）** —— 模块侧入口 `provideUsageSymbols` 在 `src/referenceContents.ts`；宿主注册需在引用结果回来时按文件走 `documentSymbol`。本 lane 复核 `grep provideUsageSymbols src` 无宿主调用点，但请求原文说「不接也不报错」（树退回文件→行）⇒ 非阻塞。登记为「需引用域 owner 决定是否注册」。
+
+结论：W-1/W-3 已在真实链路；R-2 登记。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W-1/W-3 已在真实链路；R-2 登记。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

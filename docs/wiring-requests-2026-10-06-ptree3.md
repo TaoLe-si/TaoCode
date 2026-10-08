@@ -76,3 +76,14 @@ C1（嵌套传递规则/大小写/角色判定）、C2（批量展开覆盖嵌�
 `src/projectTree{Nesting,Model,State}.ts` 内部改，消费链是既有的：
 `FileTree.vue:50` → `projectTreeModel` → 齿轮/对话框/「递归展开」按钮（`ToolWindowView.vue:208`）。
 **没有**新增需要 `src/App.vue` 挂载的入口。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- 全部为判词订正（`docs/inventory/verdict-*.md`）与职责括注订正（`src/projectTreeState.ts` 注释），非本 lane 可改面。
+
+结论：零接线。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

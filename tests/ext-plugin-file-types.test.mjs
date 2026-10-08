@@ -1,8 +1,14 @@
 // 插件声明文件类型（`com.intellij.fileType` EP / `FileTypeBean`）在本仓的装载与回收。
 // 判据逐条对着 `platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeBean.java`：
 // 两种用法（:26-43）、重名是错误（:49-54）、声明方插件跟着走（:57）。
+// 最后一条「接线」对着 `platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeManagerImpl.java`
+// 的 EP 监听（:130 实现 `ExtensionPointListener<FileTypeBean>`、:280-291 `extensionAdded`、:294-300
+// `extensionRemoved`）：注册表跟着**插件集合**变，不跟着「设置页开着没开」变。
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   applyPluginFileTypes,
@@ -14,6 +20,10 @@ import {
 import { fileTypeManager } from '../src/fileTypeRegistry.ts'
 import { detectFileType } from '../src/fileTypeDetection.ts'
 import { overridableFileTypes } from '../src/fileTypeOverrides.ts'
+import { createProjectExtras } from '../src/projectExtras.ts'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const read = relative => readFileSync(join(root, relative), 'utf8')
 
 function cleanup() {
   resetPluginFileTypeContributions()
@@ -156,6 +166,45 @@ test('插件带进来的类型在「覆盖文件类型」列表里标出来源�
   } finally {
     fileTypeManager.unregister('Zeta')
     fileTypeManager.unregister('zeta')
+    resetPluginFileTypeContributions()
+  }
+})
+
+// 上游把 `<fileType>` 的注册挂在**插件集合**的变化上：`FileTypeManagerImpl.java:130` 自己实现
+// `ExtensionPointListener<FileTypeBean>`，`:280-291` 的 `extensionAdded` 当场建匹配器 + `fireFileTypesChanged`，
+// `:294-300` 的 `extensionRemoved` 当场收回 —— 整条链与「用户是否打开过 Settings › Plugins」无关。
+// 本仓以前只有插件页在自己的 `watch` 里灌注册表，于是重启后没进过插件页的那段时间里，插件声明的
+// 扩展名 / 文件名 / shebang 一律认不出来（列表本身在 `src/workspaceLifecycle.ts` 的 bootstrap 里就读到了）。
+// 这条判据同时钉「文本接线」与「真行为」：把宿主那一侧的 `watch` 删掉、或改成不调 `applyPluginFileTypes`，它必须红。
+test('接线：宿主侧列表一变就灌注册表 —— 插件页没打开过也照样贡献与收回', () => {
+  const extras = read('src/projectExtras.ts')
+  // 逐字钉调用点（不是「文件里出现过 applyPluginFileTypes 就行」：形状变了要说得出为什么变）。
+  assert.match(extras, /^import \{ applyPluginFileTypes \} from '\.\/fileTypePluginBeans\.ts'$/m,
+    'projectExtras 要自己 import 注册表写入口，不能靠插件页替它调')
+  assert.match(extras, /^ {2}watch\(pluginList, plugins => \{ applyPluginFileTypes\(plugins\) \}, \{ immediate: true, flush: 'sync' \}\)$/m,
+    '宿主那张 pluginList 必须被 watch 起来：immediate 管启动那一次，sync 管「写完列表当场生效」')
+  // 真跑一遍：只构造宿主那一半，不 import 任何组件、不打开插件页。
+  resetPluginFileTypeContributions()
+  const host = createProjectExtras({ notify: () => {}, isDesktop: false, workspace: () => null })
+  const plugin = { id: 'p10', name: 'P10', enabled: true, commands: [], templates: [], fileTypes: [{ name: 'P10type', extensions: 'p10' }] }
+  try {
+    assert.equal(host.pluginList.value.length, 0, '新构造的宿主列表是空的')
+    assert.equal(fileTypeManager.getFileTypeByFileName('a.p10'), null, '空列表不该认得这个扩展名')
+    host.pluginList.value = [plugin]
+    assert.equal(fileTypeManager.getFileTypeByFileName('a.p10')?.name, 'P10type', '列表一写进来就该认得（不等插件页）')
+    assert.deepEqual(pluginFileTypeContributions(), [{ pluginName: 'P10', typeName: 'P10type', kind: 'association' }],
+      '认领记录也当场写下（否则收回时无从下手）')
+    // 停用：上游 extensionRemoved 的那一档 —— 同一个 ref 再写一次就该收回。
+    host.pluginList.value = [{ ...plugin, enabled: false }]
+    assert.equal(fileTypeManager.getFileTypeByFileName('a.p10'), null, '停用要当场收回')
+    assert.deepEqual(pluginFileTypeContributions(), [])
+    // 依赖不满足（`broken`）也不贡献：与 `pluginIsLoadable` 同一条闸。
+    host.pluginList.value = [{ ...plugin, enabled: true, broken: '缺依赖' }]
+    assert.equal(pluginIsLoadable(host.pluginList.value[0]), false)
+    assert.equal(fileTypeManager.getFileTypeByFileName('a.p10'), null, '坏依赖的插件不贡献')
+  } finally {
+    host.pluginList.value = []
+    fileTypeManager.unregister('P10type')
     resetPluginFileTypeContributions()
   }
 })

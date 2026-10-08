@@ -83,24 +83,24 @@ function onKeydown(event: KeyboardEvent) {
         >
           <span class="paste-index">{{ clipboardRowPrefix(position, rows.length) }}</span>
           <span class="paste-text">{{ row.label }}</span>
-          <span class="paste-remove" role="button" :aria-label="`删除第 ${position + 1} 项`" title="删除这一项" @click.stop="remove(row.index)"><Trash2 :size="iconSize.menu" /></span>
-          <ArrowRight v-if="position === cursor" :size="iconSize.control" />
+          <span class="paste-remove" role="button" :aria-label="`删除第 ${position + 1} 项`" title="删除这一项" @click.stop="remove(row.index)"><Trash2 aria-hidden="true" :size="iconSize.menu" /></span>
+          <ArrowRight aria-hidden="true" v-if="position === cursor" :size="iconSize.control" />
         </button>
         <p v-if="!rows.length" class="palette-empty">剪贴板历史为空。</p>
       </div>
       <div class="paste-actions">
         <span class="small-muted">{{ entries.length }} 项（上限 100 项 / 约 1000 万字符）</span>
-        <button class="subtle-button" @click="emit('close')">取消</button>
         <button class="primary-button" :disabled="!rows.length" @click="rows[cursor] && pick(rows[cursor]!.index)">粘贴</button>
+        <button class="subtle-button" @click="emit('close')">取消</button>
       </div>
     </section>
   </div>
 </template>
 
 <style scoped>
-.paste-index { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: pre; flex-shrink: 0; }
+.paste-index { color: var(--muted); font-variant-numeric: tabular-nums; white-space: pre; flex-shrink: 0; }
 .paste-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
-.paste-remove { display: inline-flex; align-items: center; color: var(--text-dim); padding: 0 4px; transition: color var(--dur-1) var(--ease); }
+.paste-remove { display: inline-flex; align-items: center; color: var(--muted); padding: 0 var(--space-1); transition: color var(--dur-1) var(--ease); }
 .paste-remove:hover { color: var(--error); }
 .paste-actions { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line-strong); }
 .paste-actions .small-muted { flex: 1; }

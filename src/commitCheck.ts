@@ -22,13 +22,28 @@
 // `git commit --amend --no-edit` to keep the previous subject), so an empty message only
 // blocks a normal commit.
 
+import { commitScopeCovers } from './commitScope.ts'
+
 export type CommitBlockReason = 'no-changes' | 'no-message' | 'no-changes-no-message'
 
-/** 「这次提交包含的变更」计数要看的三种行（结构上就是 `GitChange` / `CommitScopeRow`）。 */
+/**
+ * 「这次提交包含的变更」计数要看的几种行（结构上就是 `GitChange` / `CommitScopeRow`）。
+ * `renameFrom` / `ignored` 是 2026-10-06 partialcommit 收尾补的两件：
+ *  · `renameFrom` —— 上游把一次重命名算作**一条**变更、**两朵**路径
+ *    （`GitCheckinEnvironment.kt:403-404` 的 toCommitAdded=afterPath / toCommitRemoved=beforePath），
+ *    范围里给的是旧路径那一半时，这一行同样算"被这次提交包含"。原来这里认不出它 ⇒
+ *    面板明明补全出了两朵 pathspec（`expandCommitSelection`）、`commitPathsToSubmit` 也不拒，
+ *    这一档却数出 0 ⇒ 提交按钮被「选择要提交的文件」按住，是一次假拒（判据见
+ *    `tests/commit-scope.test.mjs` 边界一/边界三）；
+ *  · `ignored` —— `CommonCheckinFilesAction.kt:75-78` 的 `isActionEnabled` 对 `FileStatus.IGNORED`
+ *    直接不启用，被忽略的行进不了这次提交 ⇒ 不能再把它算成"有内容"。
+ */
 export interface CommitIncludedRow {
   path: string
   staged: boolean
   untracked: boolean
+  renameFrom?: string
+  ignored?: boolean
 }
 
 export interface CommitCheckInput {
@@ -49,8 +64,12 @@ export interface CommitCheckInput {
 
 /**
  * 这次提交包含的变更行数（上游 `getIncludedChanges() + getIncludedUnversionedFiles()`）。
- * 选中目录（`src`）算它下面的每一行（git 的 pathspec 就是这个语义）；未跟踪的行同样计入 ——
- * 上游那一条 `isCommitEmpty()` 专门把 unversioned 也算进来，所以"只选了新文件"不是空提交。
+ * 覆盖判定用 `src/commitScope.ts` 的 `commitScopeCovers` —— 全仓**唯一**的一份
+ * （选中目录 `src` 算它下面的每一行、重命名的另一头也算、被忽略的行不算），
+ * 这里原来自己写了一份 `row.path === path || row.path.startsWith(path + '/')`，
+ * 少了后两件 ⇒ 与请求体那一层（`commitPathsToSubmit`）给出两个答案。
+ * 未跟踪的行同样计入 —— 上游那一条 `isCommitEmpty()` 专门把 unversioned 也算进来
+ * （`AbstractCommitWorkflowHandler.kt:82`），所以"只选了新文件"不是空提交。
  * `scope` 为空/未给 ⇒ 返回 `null`（= 不做这一档，调用方按整份暂存区判）。
  */
 export function commitIncludedCount(rows: readonly CommitIncludedRow[], scope?: readonly string[]): number | null {
@@ -58,7 +77,8 @@ export function commitIncludedCount(rows: readonly CommitIncludedRow[], scope?: 
   if (!selected.length) return null
   let count = 0
   for (const row of rows) {
-    if (selected.some(path => row.path === path || row.path.startsWith(`${path}/`))) count++
+    if (row.ignored) continue
+    if (selected.some(path => commitScopeCovers(path, row))) count++
   }
   return count
 }

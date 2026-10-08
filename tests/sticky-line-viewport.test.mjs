@@ -10,6 +10,9 @@
 //   · `.../StickyLinesModelImpl.java:112-117`（零宽作用域不收）、`:287-296`（比较器：起始升序、同起点宽的在前）；
 //   · `.../StickyLinesManager.kt:20-34`、`:86-99`（每个编辑器各算一份）；
 //   · `.../StickyLinesCollector.kt:36-51`（新编辑器第一次必跑）、`:77-79`（修订号 = PSI + 文档两段相加）。
+//
+// 后段（2026-10-06 `stickyprio`）钉的是**宿主唯一入口**那一半：`createStickyLines` 的 `views` 面板清单
+// 与 `stickyLinesByView` / `stickyLines` 两份出口（每栏各一份 + 顶边取优先级最前那块）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ref } from 'vue'
@@ -112,8 +115,8 @@ test('createStickyLines：有 view 走上游那一层，没有 view 保持退化
   const settings = ref({ showStickyLines: true, stickyLinesLimit: 2 })
   const caretLine = 45   // 1 基 ⇒ 0 基 44，三层都包含它
   const without = createStickyLines({ editorSettings: settings, outline, currentLine: () => caretLine })
-  assert.deepEqual(without.stickyLines.value.map(entry => entry.name), ['load', 'tiny'],
-    '没有面板度量 = 维持现状（上限内取最内两层）')
+  assert.deepEqual(without.stickyLines.value.map(entry => entry.name), ['Config', 'load'],
+    '没有面板度量 = 同样留最外两层（与有度量那一支同向；上游 `VisualStickyLines.kt:144-148` 排满 lineLimit 即 break，被裁的是最内的 tiny）')
   const withView = createStickyLines({
     editorSettings: settings, outline, currentLine: () => caretLine,
     view: () => ({ id: 'main', firstVisibleLine: 44 }),
@@ -230,3 +233,85 @@ test('stickyLinesPerView 的遍历序 = 优先级序（渲染层直接按 Map �
   assert.deepEqual([...perView.keys()], ['left', 'right', 'float'], '键序即显示序')
   assert.deepEqual(perView.get('left').map(entry => entry.name), ['outer', 'mid'], '排序不改每个视图自己算出的层')
 })
+
+// ——— 多分栏在**宿主唯一入口**上的那一档（2026-10-06 `stickyprio` 补的模块侧缺项）———
+//
+// 上面几条把判据建好了（`stickyLinesPerView` / `orderStickyViews` / `primaryStickyView`），
+// 但 `src/App.vue:544` 唯一能调的是 `createStickyLines`，而它原先只收**一块** `view`、只吐**一份**列表
+// ⇒ 「各栏一份」在出口处接不上：宿主得自己去重跑 provider 白名单 + 按本栏顶行取候选，
+// 而那两层一个在 `stickyLineProviders.ts`、一个在本文件，全不是 `App.vue` 的职责（且它是保留文件）。
+// 本批补 `views` / `currentLineOf` 两个入参与 `stickyLinesByView` 那份出口，`stickyLines` 改成
+// 「排在最前那块的那一份」；只给单块 `view`、或什么都不给的旧调用一律行为不变。
+//
+// 上游依据（本轮逐行开参考树自数核对）：`platform/platform-impl/src/com/intellij/openapi/editor/impl/
+// stickyLines/StickyLinesManager.kt:15-34`（每个 editor 一个 manager + 面板 + 自己的 visibleAreaListener）、
+// `:86-99`（`visibleAreaChanged` 只驱动自己那块）、`StickyLinesModelImpl.java:93-100`
+// （模型挂在**文档**的 MarkupModel 上 ⇒ 同文档两栏共享层、显示各算各的）。
+test('createStickyLines 的 views：两块面板按各自的顶行各算一份，键序 = 宿主档位序', () => {
+  const outline = ref([
+    { name: 'Config', kind: 5, startLine: 0, endLine: 100, startChar: 0, endChar: 0 },
+    { name: 'first', kind: 6, startLine: 10, endLine: 30, startChar: 0, endChar: 0 },
+    { name: 'second', kind: 6, startLine: 34, endLine: 60, startChar: 0, endChar: 0 },
+  ])
+  const settings = ref({ showStickyLines: true, stickyLinesLimit: 3 })
+  const { stickyLines, stickyLinesByView } = createStickyLines({
+    editorSettings: settings, outline, currentLine: () => 40,
+    views: () => [{ id: 'right', firstVisibleLine: 40, priority: 2 }, { id: 'left', firstVisibleLine: 20, priority: 1 }],
+  })
+  assert.deepEqual([...stickyLinesByView.value.keys()], ['left', 'right'], '键序按宿主给的档位，不是入参顺序')
+  assert.deepEqual(stickyLinesByView.value.get('left').map(entry => entry.name), ['Config', 'first'])
+  assert.deepEqual(stickyLinesByView.value.get('right').map(entry => entry.name), ['Config', 'second'],
+    '各栏按**自己的**顶行取候选：同一份文档两块面板给出不同的层（first 在右栏窗口上方就结束了，second 正压着右栏顶边）')
+  assert.deepEqual(stickyLines.value.map(entry => entry.name), ['Config', 'first'],
+    '顶边那一格显示排在最前那块（left / priority 1）的那一份')
+})
+
+test('没有面板度量时退化路径也各栏一份：currentLineOf 给谁的光标行就出谁的层', () => {
+  const outline = ref([
+    { name: 'Config', kind: 5, startLine: 0, endLine: 100, startChar: 0, endChar: 0 },
+    { name: 'first', kind: 6, startLine: 10, endLine: 30, startChar: 0, endChar: 0 },
+    { name: 'second', kind: 6, startLine: 34, endLine: 60, startChar: 0, endChar: 0 },
+  ])
+  const settings = ref({ showStickyLines: true, stickyLinesLimit: 3 })
+  const { stickyLines, stickyLinesByView } = createStickyLines({
+    editorSettings: settings, outline, currentLine: () => 40,
+    views: () => [{ id: 'left' }, { id: 'right' }],
+    currentLineOf: id => (id === 'left' ? 15 : 40),
+  })
+  assert.deepEqual(stickyLinesByView.value.get('left').map(entry => entry.name), ['Config', 'first'], '左栏光标在 first 里')
+  assert.deepEqual(stickyLinesByView.value.get('right').map(entry => entry.name), ['Config', 'second'],
+    '右栏光标在 second 里 —— 两栏不再共用一份按聚焦栏光标算出的层')
+  assert.deepEqual(stickyLines.value.map(entry => entry.name), ['Config', 'first'],
+    '宿主没给档位 ⇒ 保持入参先后，排在最前的是 left（模块不替宿主编谁在上）')
+})
+
+test('出口向后兼容：单块 view / 不给 view 的行为不变；闸门关掉时两份出口都空', () => {
+  const outline = ref([
+    { name: 'Config', kind: 5, startLine: 0, endLine: 100, startChar: 0, endChar: 0 },
+    { name: 'first', kind: 6, startLine: 10, endLine: 30, startChar: 0, endChar: 0 },
+    { name: 'second', kind: 6, startLine: 34, endLine: 60, startChar: 0, endChar: 0 },
+  ])
+  const settings = ref({ showStickyLines: true, stickyLinesLimit: 3 })
+  const single = createStickyLines({
+    editorSettings: settings, outline, currentLine: () => 40,
+    view: () => ({ id: 'main', firstVisibleLine: 20 }),
+  })
+  assert.deepEqual(single.stickyLines.value.map(entry => entry.name), ['Config', 'first'], '只给单块 view：还是那一份，没多裁')
+  assert.deepEqual([...single.stickyLinesByView.value.keys()], ['main'], '单块 view 等价于 views: () => [view]')
+  const none = createStickyLines({ editorSettings: settings, outline, currentLine: () => 40 })
+  assert.deepEqual(none.stickyLines.value.map(entry => entry.name), ['Config', 'second'], '不给面板身份：保持按光标行的退化路径')
+  assert.equal(none.stickyLinesByView.value.size, 0, '没有面板就没有那一份，不编一个 id 出来')
+  // 没有面板身份时**不该**去问每栏的光标（那条入参只在有面板清单时才有意义，否则就是个引用不到的 view.id）。
+  const noViewsButAsked = createStickyLines({
+    editorSettings: settings, outline, currentLine: () => 40,
+    currentLineOf: () => { throw new Error('没有面板身份时不该被问每栏光标') },
+  })
+  assert.deepEqual(noViewsButAsked.stickyLines.value.map(entry => entry.name), ['Config', 'second'],
+    '退化路径仍然是那条退化路径，不被新入参带偏')
+  settings.value = { showStickyLines: false, stickyLinesLimit: 3 }
+  assert.deepEqual(single.stickyLines.value, [], '全局开关关掉 ⇒ 顶边不画')
+  assert.equal(single.stickyLinesByView.value.size, 0, '同一道闸门也管住按面板取的那份（不许一边画一边不画）')
+  settings.value = { showStickyLines: true, stickyLinesLimit: 0 }
+  assert.equal(none.stickyLinesByView.value.size, 0, '上限 0 同样是空')
+})
+

@@ -106,7 +106,9 @@ test('变更树头部那对按钮 = 上游的 header 动作（全部展开 / 全
   assert.match(head, /aria-label="全部收起" @click="changesCollapsed = true"/, '收起 = 把分组里的行收起来')
   assert.match(head, /aria-label="全部展开" @click="changesCollapsed = false"/)
   assert.ok(head.includes(':disabled="busy || !hasGroups"'), '可见性/可用性照 isExpandAllVisible()（有分组才成立）')
-  assert.match(panel, /const hasGroups = computed\(\(\) => changes\.value\.length > 0\)/, '本仓的分组就是已暂存/更改两组')
+  // 变更列表一节（2026-10-06）把变更树按**当前列表**过滤，所以 `hasGroups` 读的是
+  // 过滤后的那一份（`listChanges`）；判的东西没变：本仓的分组仍是已暂存/更改两组。
+  assert.match(panel, /const hasGroups = computed\(\(\) => listChanges\.value\.length > 0\)/, '本仓的分组就是已暂存/更改两组（按当前变更列表过滤后）')
   // 折叠的是行，不是整块（组节点留着）——上游收起的是树的子节点
   assert.ok(!panel.includes('v-show="!changesCollapsed" class="sc-scroll"'), '整块滚动区不该被隐藏')
   // 第一百一十二批起这两段按「分组依据」分组渲染，行循环变成 `group.changes` ——

@@ -91,11 +91,11 @@ function restoreRegistryDefaults(): void {
   <div class="grt-block">
     <!-- 注册表键的说明/改动标注取自 src/registryKeys.ts；勾选值仍直接绑设置字段。 -->
     <label class="checkbox-row"><input v-model="general.autoShowProcessPopup" type="checkbox" aria-describedby="general-autoshow-hint" /><span>有进程开始时自动弹出进度面板</span><span v-if="changed('ide.windowSystem.autoShowProcessPopup')" class="field-hint" role="status">已改动</span></label>
-    <p id="general-autoshow-hint" class="field-hint restore-hint">{{ hint('ide.windowSystem.autoShowProcessPopup') }}对应 IDEA 的 ide.windowSystem.autoShowProcessPopup：Git、克隆或构建/运行开始时自动打开后台任务列表。</p>
+    <p id="general-autoshow-hint" class="field-hint restore-hint">{{ hint('ide.windowSystem.autoShowProcessPopup') }}</p>
     <!-- 注册表键 search.everywhere.fuzzy.files.enabled（SeFuzzyFileSearchProviderFactory.kt:28-31，默认
          false）同样没有设置页入口；默认不勾选时「随处搜索」的文件排序与移植前完全一致。 -->
     <label class="checkbox-row"><input v-model="general.fuzzyFileSearch" type="checkbox" aria-describedby="general-fuzzy-hint" /><span>随处搜索用模糊匹配排序文件</span><span v-if="changed('search.everywhere.fuzzy.files.enabled')" class="field-hint" role="status">已改动</span></label>
-    <p id="general-fuzzy-hint" class="field-hint restore-hint">{{ hint('search.everywhere.fuzzy.files.enabled') }}对应 IDEA 的 search.everywhere.fuzzy.files.enabled。</p>
+    <p id="general-fuzzy-hint" class="field-hint restore-hint">{{ hint('search.everywhere.fuzzy.files.enabled') }}</p>
   </div>
 
   <section class="grt-block" aria-labelledby="grt-inspector-title">
@@ -115,7 +115,6 @@ function restoreRegistryDefaults(): void {
 
   <section class="grt-block" aria-labelledby="grt-registry-title">
     <h3 id="grt-registry-title" class="grt-title">注册表键</h3>
-    <p class="grt-warning">修改这些值可能造成 TaoCode 行为异常。除非有人明确要求，否则不要修改。</p>
     <label class="grt-filter"><Search :size="iconSize.control" aria-hidden="true" />按键名过滤
       <input v-model="registryQuery" type="search" aria-label="按键名过滤注册表键" placeholder="驼峰或子序列，如 vs" spellcheck="false" />
     </label>
@@ -134,10 +133,8 @@ function restoreRegistryDefaults(): void {
       </div>
       <p v-if="!registryRows.length" class="field-hint">没有匹配「{{ registryQuery }}」的键。</p>
     </div>
-    <p class="field-hint">只有「来源 = 设置页」的两项在本仓真能改回去；其余键的读取点仍是各自模块里的常量，
-      所以这里不给编辑框（没有后端的控件不放）。</p>
     <p v-if="selectedDescription" class="grt-description" role="status">{{ selectedDescription }}</p>
-    <button type="button" class="subtle-button" :disabled="!anyRevertibleChange" title="把所有可回退的注册表键恢复为上游默认值" @click="restoreRegistryDefaults">恢复默认</button>
+    <button type="button" class="subtle-button" :disabled="!anyRevertibleChange" title="恢复默认" @click="restoreRegistryDefaults">恢复默认</button>
   </section>
 </template>
 

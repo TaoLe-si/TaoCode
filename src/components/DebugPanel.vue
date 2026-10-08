@@ -1,27 +1,38 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch, nextTick } from 'vue'
-import { PenLine, RefreshCw, Bug, ChevronDown, ChevronRight, Pause, Play, StepForward, StepBack, Rewind, Square, X, Crosshair, Copy, LocateFixed, SquarePen, ListTree, Eye } from 'lucide-vue-next'
+import { PenLine, RefreshCw, Bug, ChevronDown, ChevronRight, ChevronsUpDown, Pause, Play, StepForward, StepBack, Rewind, Square, X, Copy, LocateFixed, SquarePen, ListTree } from 'lucide-vue-next'
 import { BridgeError } from '../bridge'
 import {
   dapBreakpoints, dapCapability, dapConsole, dapEvaluate, dapExceptionInfo,
-  dapProgress, dapReverseContinue, dapScopes, dapStepBack,
-  dapDisconnect, dapRestart, dapRestartFrame, dapLoadBreakpoints, dapSetCurrentLocation, dapStart, dapState, dapStep, dapStackTrace, dapTerminate, dapThreads, dapThreadSignal,
-  dapVariables, dapSetVariable, dapSetExpression, dapCompletions, dapSelectThread,
-  type DapExceptionInfo as DapException, type DapFrame, type DapScope, type DapThread, type DapVariable,
+  dapReverseContinue, dapScopes, dapStepBack,
+  dapDisconnect, dapRestart, dapRestartFrame, dapLoadBreakpoints, dapSetCurrentLocation, dapState, dapStep, dapTerminate, dapThreads, dapThreadSignal,
+  dapSetVariable, dapSetExpression, dapCompletions, dapSelectThread,
+  type DapExceptionInfo as DapException, type DapEvaluateResult, type DapFrame, type DapScope, type DapThread, type DapVariable,
 } from '../bridge'
+// 分页取数（`stackTrace` 的 startFrame/levels、`variables` 的 start/count）走这一层封装：
+// 它把参数整形与能力位降级都收好了（见 src/dapRequests.ts）。
+import { dapStackTracePage, dapVariablesPage } from '../dapRequests'
+import { DEFAULT_STACK_PAGE, DEFAULT_VARIABLE_PAGE, evaluateResultReference, mergeVariablePage } from '../debugPaging'
+// 变量分页的视图侧状态（每个容器取回多少 / 还有多少）；见 src/debugVariablePaging.ts。
+import { forgetValuePages, nextValuePage, rememberValuePage, valueRemaining, type ValueContainer } from '../debugVariablePaging'
 import { exceptionBreakModeLabel, exceptionHeadline, exceptionValueExpression, flattenCauseChain, showsExceptionNode } from '../exceptionInfo'
 // 异常断点的共享状态（Debug 面板与「查看断点…」对话框同一份，见 src/exceptionBreakpoints.ts）。
-import { applyExceptionFilters, exceptionBreakpointGroup, parseExceptionFilters, sendExceptionBreakpoints, toggleExceptionBreakpoint } from '../exceptionBreakpoints'
+import { exceptionBreakpointGroup, toggleExceptionBreakpoint } from '../exceptionBreakpoints'
 import { iconSize } from '../uiIcons'
 import { completionSuggestions, completionTypeLabel, type DapCompletionItem } from '../debugCompletions'
 import { applyLoadedSourceSnapshot, applyModuleSnapshot, capabilityReason } from '../debugSources'; import { breakpointUpdater } from '../dbgBreakpointUpdate'
-import { DEFAULT_DEBUG_DATA_VIEW, collectReferenceRows, collectVarRows, visibleFrames, type DebugDataViewOptions, type VarRow } from '../debugDataView'
+import { DEFAULT_DEBUG_DATA_VIEW, collectEvaluateRows, collectVarRows, visibleFrames, type DebugDataViewOptions, type VarRow } from '../debugDataView'
+// 求值结果展开的句柄规则（`reference` 优先、退回 `variablesReference`）在 src/debugPaging.ts。
+// 「按类型分组」的派生与展开态持久化（上游 `XValueGroup`/`XValueGroupNodeImpl`）：规则在
+// src/debugFrameTree.ts，面板侧状态（开关 + 存档 + 全部展开/收起）在 src/debugGroupView.ts。
+import { createDebugGroupView } from '../debugGroupView'
 import { copyToClipboard } from '../clipboard'
 import { debugCopyNote, debugCopyText, type DebugCopyRow, type DebugCopyMode } from '../debugValueCopy'
 import { debugRowActions, debugRowTarget, type DebugRowActionTarget } from '../debugRowActions'
 import { pushEvaluateHistory } from '../debugEvaluateHistory'
-import { attachGuidance, attachSelectorError, loadAttachHistory, parseAttachSelector, pushAttachTarget, saveAttachHistory } from '../debugAttach'
-import { loadWatches, saveWatches, DEBUG_WATCHES_LIMIT } from '../debugWatches'
+import { DEBUG_WATCHES_LIMIT } from '../debugWatches'
+import { useDebugWatches } from '../debugWatchesStore'
+import DebugWatchesPane from './DebugWatchesPane.vue'
 import { inlineSourceScope, inlineValueEntries } from '../debugInlineValues'
 import { setDebugInlineValues } from '../editorDebugLine'
 import { useInlineWatches } from '../debugInlineWatchSync'
@@ -33,9 +44,14 @@ import DebugMemoryView from './DebugMemoryView.vue'
 import DebugSourceLists from './DebugSourceLists.vue'
 import DebugBreakpointsPane from './DebugBreakpointsPane.vue'
 import DebugConsolePane from './DebugConsolePane.vue'
+import DebugProgressPane from './DebugProgressPane.vue'
+import DebugStartPane from './DebugStartPane.vue'
 
 const props = defineProps<{ activePath: string; ready: boolean; root?: string; evaluateRequest?: { text: string; nonce: number } | null; program?: string; cwd?: string; adapterKind?: string; dataView?: DebugDataViewOptions | null }>()
 const emit = defineEmits<{ jump: [target: { path?: string; line: number }] }>()
+// 「按类型分组」开关：**声明在 dataView 之前** —— dataView 的 getter 会读它，而
+// `createDebugGroupView` 里的 watch 在 setup 期就会跑一次 getter（模块自己造 ref 会踩 TDZ）。
+const groupByType = ref(false)
 // 「设置 › 调试器」的各格（隐藏 null / 按名排序 / 行内值 / 库帧 / 移断点确认 / 自动取消静音 /
 // 求值对话框形态）经 props 进来（App 从 general settings 透传，见 src/toolViewContext.ts）；
 // 面板本地的两个视图开关（按类型分组 / 按数组显示）并进同一份 options，变量树一个入口消费。
@@ -46,21 +62,14 @@ const dataView = computed<DebugDataViewOptions>(() => ({
   arrayViews: arrayViews.value,
 }))
 
-// These three used to be a second, independent copy of the run configuration: the
-// Run tab and the Debug panel could disagree about what is being launched. They now
-// come from the current run configuration (App passes them down) and are read-only
-// here, with a pointer to where they are edited.
-const kind = computed(() => props.adapterKind?.trim() || 'cppvsdbg')
-const program = computed(() => props.program?.trim() ?? '')
-const cwd = computed(() => props.cwd?.trim() || '.')
-// 附加说明（本机 PID / 连接标识怎么解释 + 远程附加的真实前提）在 src/debugAttach.ts。
-const attachText = computed(() => attachGuidance(kind.value))
-const attachId = ref('')
-// 最近附加过的目标（上游 `AttachToProcessDialog` 的「最近使用」栏）：进程列表要宿主枚举通道
-// （本仓没有，见 dbg/attach 判词），最近填过的标识是纯前端事实，存 localStorage。
+// 会话的启动/附加（配置展示 + 两个按钮 + 附加目标），整块拆到 DebugStartPane.vue
+// （面板贴着机检上限）；它起来后 emit `refresh`，这里只重取调用栈。
+// The run configuration itself comes from App (read-only here) and is passed straight
+// through to the pane, so there is exactly one copy of "what is being launched".
 const storage = typeof localStorage === 'undefined' ? null : localStorage
-const attachHistory = ref<string[]>(loadAttachHistory(storage))
 const frames = ref<DapFrame[]>([])
+/** 适配器报的调用栈**总帧数**（不是本页条数）：`frames.length < framesTotal` = 还有没取的。 */
+const framesTotal = ref(0)
 const scopes = ref<DapScope[]>([])
 const values = reactive<Record<number, DapVariable[]>>({})   // variablesReference -> children
 const open = reactive<Record<string, boolean>>({})
@@ -69,6 +78,9 @@ const error = ref('')
 // 断点区（DebugBreakpointsPane）：停在断点后的三条规则（临时/依赖/自动取消静音）由它实现，
 // refreshStack 落定当前执行点后回调它的 applyStopRules。
 const breakpointsPane = ref<InstanceType<typeof DebugBreakpointsPane> | null>(null)
+// 会话启动/附加块的 ref：`restart` 在适配器不支持 `supportsRestartRequest` 时退化成
+// 「停止 + 重新启动」，那一步要复用 DebugStartPane 的 `start`（defineExpose）。
+const startPane = ref<InstanceType<typeof DebugStartPane> | null>(null)
 const threads = ref<DapThread[]>([])
 // IDEA's breakpoints dialog exception rows: the adapter's filter list plus the
 // checked subset. 两者都是**共享状态**（src/exceptionBreakpoints.ts）——「查看断点…」
@@ -128,10 +140,15 @@ const exceptionValue = computed(() => exceptionValueExpression(activeException.v
 // IDEA's Watches view: expressions re-evaluated against the current top frame on
 // every stop, kept for the whole session. 本轮补**跨会话持久化**：表达式文本按项目根
 // 存 localStorage（上游 WatchesManager 随项目状态保存），重启后还在，值启动时重算。
-interface Watch { text: string; value: string }
-const watches = ref<Watch[]>(loadWatches(storage, props.root ?? '').map(text => ({ text, value: '' })))
+// 状态与六个动作（加/删/上移/下移/全清/暂停）在 `src/debugWatchesStore.ts`。
 const newWatch = ref('')
-watch(watches, list => saveWatches(storage, props.root ?? '', list.map(watch => watch.text).slice(0, DEBUG_WATCHES_LIMIT)), { deep: true })
+const { watches, add: addWatchEntry, remove: removeWatch, move: moveWatch, removeAll: removeAllWatchEntries,
+        togglePause: toggleWatchPauseEntry, rename: renameWatchEntry, setValue: setWatchValue } = useDebugWatches({
+  storage,
+  root: () => props.root ?? '',
+  recompute: () => void refreshWatches(),
+  onClear: () => inlineWatches.clear(),
+})
 
 const stopped = computed(() => dapState.running && dapState.paused)
 const running = computed(() => dapState.running)
@@ -144,11 +161,7 @@ const inlineWatches = useInlineWatches({
     return stopped.value && frame && path ? { path, line: frame.line } : null
   },
   // 就地编辑行内监视的表达式 = 改这条监视本身（上游 EditInlineWatch → showInplaceEditor）。
-  renameWatch: (from, to) => {
-    if (watches.value.some(watch => watch.text === to)) return
-    watches.value = watches.value.map(watch => watch.text === from ? { text: to, value: '' } : watch)
-    void refreshWatches()
-  },
+  renameWatch: (from, to) => { renameWatchEntry(from, to) },
 })
 // Empty lists state *why* they are empty: a session that is running cannot answer
 // for the threads, and a session that is not paused has no variables to show.
@@ -168,43 +181,7 @@ const varsHint = computed(() => {
 const exitHint = computed(() => dapState.exitCode === null ? ''
   : dapState.exitCode === 0 ? '被调试程序已自行结束，退出码 0。'
     : `被调试程序已自行结束，退出码 ${dapState.exitCode}（非 0 表示异常结束）。`)
-// A percentage the adapter reports can be out of range; the bar is clamped instead
-// of overflowing its track. `null` means indeterminate and gets no fill at all.
-const progressWidth = (percentage: number | null) =>
-  percentage === null ? undefined : `${Math.min(100, Math.max(0, percentage))}%`
 
-function rememberFilters(capabilities: Record<string, unknown> | undefined) {
-  applyExceptionFilters(parseExceptionFilters(capabilities))
-}
-
-async function start() {
-  error.value = ''
-  if (!program.value.trim()) { error.value = '请填写要调试的程序路径。'; return }
-  try {
-    const result = await dapStart({ command: '', args: [], kind: kind.value.trim() || 'cppvsdbg', program: program.value.trim(), cwd: cwd.value.trim() || '.', stopOnEntry: false })
-    rememberFilters(result.capabilities)
-    await sendExceptionBreakpoints()
-    await refreshStack()
-  } catch (caught) { error.value = message(caught) }
-}
-// IDEA's Attach to Process: no program of our own, the adapter joins a running one
-// via its selector (processId for cppvsdbg/lldb-dap, pipeName for others).
-async function attach() {
-  error.value = ''
-  const selector = attachId.value.trim()
-  const problem = attachSelectorError(selector)
-  if (problem) { error.value = problem; return }
-  const parsed = parseAttachSelector(selector)!
-  try {
-    const configuration = parsed.kind === 'pid' ? { processId: parsed.processId } : { pipeName: parsed.pipeName }
-    const result = await dapStart({ command: '', args: [], kind: kind.value.trim() || 'cppvsdbg', program: '', cwd: cwd.value.trim() || '.', stopOnEntry: false, configuration: { request: 'attach', ...configuration } })
-    attachHistory.value = pushAttachTarget(attachHistory.value, selector)
-    saveAttachHistory(storage, attachHistory.value)
-    rememberFilters(result.capabilities)
-    await sendExceptionBreakpoints()
-    await refreshStack()
-  } catch (caught) { error.value = message(caught) }
-}
 async function step(action: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut') {
   error.value = ''; busy.value = true
   try { await breakpointUpdater.flush(); await dapStep(action); if (action !== 'pause') await refreshStack() }
@@ -263,7 +240,7 @@ async function restart() {
     try {
       await dapTerminate()
       frames.value = []; scopes.value = []; threads.value = []
-      await start()
+      await startPane.value?.start()
     } catch (fallback) { error.value = message(fallback) }
   } finally { busy.value = false }
 }
@@ -281,12 +258,15 @@ async function refreshThreads() {
 }
 async function refreshStack() {
   const generation = ++frameGeneration
-  if (!stopped.value) { frames.value = []; scopes.value = []; dapSetCurrentLocation(null); setDebugInlineValues(null); return }
+  if (!stopped.value) { frames.value = []; framesTotal.value = 0; scopes.value = []; dapSetCurrentLocation(null); setDebugInlineValues(null); return }
   try {
     void refreshThreads()
-    const result = await dapStackTrace()
+    // 分页：第一页只取 DEFAULT_STACK_PAGE 帧 —— 递归爆栈时上百帧会拖慢每次停机
+    // （`totalFrames` 是适配器报的总数，`frames.length < framesTotal` 时就还有下一页）。
+    const result = await dapStackTracePage(dapState.threadId, { startFrame: 0, levels: DEFAULT_STACK_PAGE })
     if (!currentFrame(generation)) return
     frames.value = result.frames
+    framesTotal.value = result.totalFrames
     selectedFrameIndex.value = 0
     const top = frames.value[0]
     if (top) dapSetCurrentLocation({ path: top.path ?? props.activePath, line: top.line }); else dapSetCurrentLocation(null)
@@ -294,7 +274,21 @@ async function refreshStack() {
     syncInlineValues()
     await breakpointsPane.value?.applyStopRules()
     if (currentFrame(generation)) { await refreshWatches(); await refreshException() }
-  } catch (caught) { if (currentFrame(generation)) { error.value = message(caught); frames.value = []; dapSetCurrentLocation(null) } }
+  } catch (caught) { if (currentFrame(generation)) { error.value = message(caught); frames.value = []; framesTotal.value = 0; dapSetCurrentLocation(null) } }
+}
+// 「加载更多帧」：续页从已取回条数接上（与变量分页同一口径，参数整形在 src/debugPaging.ts）。
+async function loadMoreFrames() {
+  if (frames.value.length >= framesTotal.value) return
+  const generation = frameGeneration
+  const startFrame = frames.value.length
+  try {
+    const result = await dapStackTracePage(dapState.threadId, { startFrame, levels: DEFAULT_STACK_PAGE })
+    if (!currentFrame(generation)) return
+    framesTotal.value = result.totalFrames
+    // 已加载的区间不覆盖：只追加比现有更长的那些帧（新一页的 id 与已有帧不会重复）。
+    const seen = new Set(frames.value.map(frame => frame.id))
+    frames.value = [...frames.value, ...result.frames.filter(frame => !seen.has(frame.id))]
+  } catch (caught) { if (currentFrame(generation)) error.value = message(caught) }
 }
 // Switching threads is the IDEA Threads dropdown's primary action; we just ask the
 // adapter for the chosen thread's frames and reuse the same stack UI.
@@ -304,9 +298,10 @@ async function selectThread(id: number) {
   const generation = ++frameGeneration
   dapSelectThread(id)
   try {
-    const result = await dapStackTrace(id)
+    const result = await dapStackTracePage(id, { startFrame: 0, levels: DEFAULT_STACK_PAGE })
     if (!currentFrame(generation)) return
     frames.value = result.frames
+    framesTotal.value = result.totalFrames
     selectedFrameIndex.value = 0
     const top = frames.value[0]
     if (top) dapSetCurrentLocation({ path: top.path ?? props.activePath, line: top.line }); else dapSetCurrentLocation(null)
@@ -318,13 +313,17 @@ async function selectThread(id: number) {
 async function refreshScopes(frameId?: number) {
   const generation = frameGeneration
   scopes.value = []
+  // 变量分页状态与新作用域同生命周期：清 children 的同时把"取到哪/还有多少"也清掉。
+  forgetValuePages()
   for (const key of Object.keys(values)) delete values[Number(key)]
   if (frameId === undefined) return
   try {
     const result = await dapScopes(frameId)
     if (!currentFrame(generation)) return
     scopes.value = result.scopes
-    for (const scope of scopes.value) { if (!currentFrame(generation)) return; if (!scope.expensive) await loadScope(scope.reference) }
+    // 作用域也带适配器声明的规模（native `dap_shaping.cpp:208-235`）；`DapScope` 的 TS 声明
+    // 还没有这两个可选字段，按 `src/debugDataView.ts:196` 的同一投影取一次。
+    for (const scope of scopes.value) { if (!currentFrame(generation)) return; if (!scope.expensive) await loadScope(scope.reference, scope as DapScope & { namedVariables?: number; indexedVariables?: number }) }
   } catch (caught) { if (currentFrame(generation)) error.value = message(caught) }
 }
 // DAP `exceptionInfo`：**只在** `stopped` 的 reason 是 exception 时才问。断点/单步/暂停
@@ -349,31 +348,59 @@ async function selectFrame(index: number, frameId: number) {
   if (!stopped.value || frames.value[index]?.id !== frameId) return
   const generation = ++frameGeneration
   selectedFrameIndex.value = index
-  completions.value = []; exprResult.value = ''; exprReference.value = 0
+  completions.value = []; exprResult.value = ''; exprRaw.value = null
   const frame = selectedFrame.value
   dapSetCurrentLocation(frame ? { path: frame.path ?? props.activePath, line: frame.line } : null)
   await refreshScopes(frameId)
   syncInlineValues()
   if (currentFrame(generation)) await refreshWatches()
 }
-async function loadScope(reference: number) {
+async function loadScope(reference: number, container?: ValueContainer) {
   const generation = frameGeneration
-  try { const result = await dapVariables(reference); if (currentFrame(generation)) values[reference] = result.variables }
+  try {
+    const result = await dapVariablesPage(reference, { start: 0, count: DEFAULT_VARIABLE_PAGE })
+    if (!currentFrame(generation)) return
+    values[reference] = result.variables
+    rememberValuePage(reference, container, result.variables.length)
+  }
   catch (caught) { if (currentFrame(generation)) { values[reference] = []; error.value = message(caught) } }
+}
+/**
+ * 「加载更多」：把下一页按 0 基下标并进已加载的孩子里（不覆盖已取回的区间，见
+ * `mergeVariablePage`）。规模只在第一次 `loadScope` 时记过，所以这里只需要 reference。
+ */
+async function loadMore(reference: number) {
+  const page = nextValuePage(reference)
+  if (!page) return
+  const generation = frameGeneration
+  try {
+    const result = await dapVariablesPage(reference, page)
+    if (!currentFrame(generation)) return
+    values[reference] = mergeVariablePage(values[reference], page, result.variables)
+    rememberValuePage(reference, undefined, values[reference].length)
+  } catch (caught) { if (currentFrame(generation)) error.value = message(caught) }
 }
 // Variables are a tree of arbitrary depth: a scope holds variables, and any variable
 // with a `variablesReference` opens another level. 摊平与「数据视图」选项（隐藏 null /
 // 按名排序 / 按类型分组 / 按数组显示，XDebuggerDataViewSettings 一族）都在
 // src/debugDataView.ts，可单测。
-const groupByType = ref(false)
 const varRows = computed<VarRow[]>(() => collectVarRows(scopes.value, values, open, dataView.value))
+// 分组开关 + 组展开态存档 + 全部展开/收起（状态自持，见 src/debugGroupView.ts）。
+const { allExpanded: groupsAllExpanded, toggleAll: toggleAllGroups } = createDebugGroupView({
+  storage, root: () => props.root ?? '', rows: () => varRows.value, open, groupByType,
+})
 // A row is toggled by its path, not its reference: the same reference can appear at
 // several places and each of them must remember its own state.
 function toggleRow(row: VarRow) {
   if (!row.expandable) return
   open[row.key] = !open[row.key]
-  if (open[row.key] && values[row.reference] === undefined) void loadScope(row.reference)
+  if (open[row.key] && values[row.reference] === undefined) void loadScope(row.reference, row)
 }
+/** 这一行的容器还有没有没取回的子项（适配器报过规模才算；没有就不画"加载更多"）。 */
+function moreOf(row: VarRow): number {
+  return row.expandable && row.expanded ? valueRemaining(row.reference) : 0
+}
+function loadMoreOf(row: VarRow) { return loadMore(row.reference) }
 // IDEA 的 XValue.setValue（变量树里改值）与 Watches 的「Set Value…」：DAP 规范分别是
 // `setVariable`（容器 reference + 变量名 + 新值）与 `setExpression`（表达式 + 新值 + 可选 frameId）。
 // 两者返回的是同一条变量的新值，但父节点可能因此变化，所以成功后重读容器 / 重算监视。
@@ -410,10 +437,10 @@ function message(caught: unknown) { return caught instanceof Error ? caught.mess
 
 watch(() => dapState.paused, paused => {
   // 继续运行后异常节点就该消失（IDEA 的异常只在停在异常上时显示）；行内值同理。
-  if (!paused) { ++frameGeneration; activeException.value = null; scopes.value = []; frames.value = []; setDebugInlineValues(null); inlineWatches.clear() }
+  if (!paused) { ++frameGeneration; activeException.value = null; scopes.value = []; frames.value = []; framesTotal.value = 0; forgetValuePages(); setDebugInlineValues(null); inlineWatches.clear() }
   else void refreshStack()
 }, { immediate: true })
-watch(() => dapState.running, live => { if (!live) { frames.value = []; scopes.value = []; threads.value = []; activeException.value = null; selectedFrameIndex.value = 0; setDebugInlineValues(null); inlineWatches.clear() } })
+watch(() => dapState.running, live => { if (!live) { frames.value = []; framesTotal.value = 0; scopes.value = []; threads.value = []; activeException.value = null; selectedFrameIndex.value = 0; forgetValuePages(); setDebugInlineValues(null); inlineWatches.clear() } })
 // A `thread` event means the adapter's list changed; the panel only ever shows the
 // adapter's answer, so it refetches instead of guessing at the delta.
 watch(() => dapThreadSignal.version, () => void refreshThreads())
@@ -424,26 +451,17 @@ async function refreshWatches() {
   const generation = frameGeneration
   for (const watch of watches.value) {
     if (!currentFrame(generation)) return
+    // 暂停的监视不重算，保留上次的值（上游 `XPauseWatchAction` 的 isPaused 语义）。
+    if (watch.paused === true) continue
     try {
       const result = await dapEvaluate(watch.text, 'watch', frame)
-      if (currentFrame(generation)) watch.value = `${result.result}${result.type ? ` : ${result.type}` : ''}`
-    } catch (caught) { if (currentFrame(generation)) watch.value = message(caught) }
+      if (currentFrame(generation)) setWatchValue(watch.text, `${result.result}${result.type ? ` : ${result.type}` : ''}`)
+    } catch (caught) { if (currentFrame(generation)) setWatchValue(watch.text, message(caught)) }
   }
   inlineWatches.sync()   // 行内监视的文本就是这一轮算出的值（同一次停住里推进）
 }
-function addWatch() {
-  const text = newWatch.value.trim()
-  addWatchText(text)
-  if (text) newWatch.value = ''
-}
 /** 加监视的具体动作（输入框与行动作弹层的 `XAddToWatchesTreeAction` 共用）。 */
-function addWatchText(text: string) {
-  const trimmed = text.trim()
-  if (!trimmed || watches.value.some(watch => watch.text === trimmed)) return
-  watches.value.push({ text: trimmed, value: '' })
-  void refreshWatches()
-}
-function removeWatch(text: string) { watches.value = watches.value.filter(watch => watch.text !== text) }
+function addWatchText(text: string) { addWatchEntry(text) }
 
 // 在控制台中求值（上游 `EvaluateInConsoleFromTreeAction`）：DAP `evaluate` 的 `repl` 上下文，
 // 结果写进调试控制台 —— 与适配器自己的 repl 输出同一块面板（`dapConsole`）。
@@ -500,13 +518,12 @@ watch(() => dapState.paused, paused => { if (!paused) completions.value = [] })
 onBeforeUnmount(() => { if (completionTimer !== undefined) clearTimeout(completionTimer); setDebugInlineValues(null); inlineWatches.clear() })
 const exprResult = ref('')
 // An adapter answers `evaluate` with a `variablesReference` when the value is a
-// structure: keep it (and its children) so the result can be browsed like a watch.
-const exprReference = ref(0)
+// structure: keep the whole reply so the result can be browsed like a watch.
+// 展开树的根句柄由 `collectEvaluateRows` 自己从回参里取（`reference` 优先、退回
+// `variablesReference`，规则在 src/debugPaging.ts）—— 面板不再自己存一个 reference。
+const exprRaw = ref<DapEvaluateResult | null>(null)
 const exprOpen = ref(true)
-const exprRows = computed<VarRow[]>(() => {
-  if (!exprReference.value) return []
-  return collectReferenceRows(exprReference.value, values, open, dataView.value)
-})
+const exprRows = computed<VarRow[]>(() => collectEvaluateRows(exprRaw.value, values, open, dataView.value))
 // 展开异常对象：把适配器给的 `evaluateName` 塞进求值框再走一遍求值通道
 // （IDEA 里等价于在变量树里展开那个异常节点）。
 async function inspectException() {
@@ -517,18 +534,19 @@ async function inspectException() {
 async function runEvaluate() {
   const generation = frameGeneration
   const text = expr.value.trim()
-  if (!text) { exprResult.value = ''; exprReference.value = 0; return }
-  if (!stopped.value) { exprResult.value = '需要先停在断点上才能求值。'; exprReference.value = 0; return }
+  if (!text) { exprResult.value = ''; exprRaw.value = null; return }
+  if (!stopped.value) { exprResult.value = '需要先停在断点上才能求值。'; exprRaw.value = null; return }
   try {
     const result = await dapEvaluate(text, 'watch', selectedFrame.value?.id ?? 0)
     if (!currentFrame(generation) || expr.value.trim() !== text) return
     exprResult.value = `${text} = ${result.result}${result.type ? ` : ${result.type}` : ''}`
-    exprReference.value = result.variablesReference ?? 0
+    exprRaw.value = result
     exprOpen.value = true
     exprHistory.value = pushEvaluateHistory(exprHistory.value, text)
     // Dereference immediately so the tree has something to expand into.
-    if (exprReference.value > 0 && values[exprReference.value] === undefined) await loadScope(exprReference.value)
-  } catch (caught) { if (currentFrame(generation)) { exprResult.value = message(caught); exprReference.value = 0 } }
+    const reference = evaluateResultReference(result)
+    if (reference > 0 && values[reference] === undefined) await loadScope(reference, exprRaw.value ?? undefined)
+  } catch (caught) { if (currentFrame(generation)) { exprResult.value = message(caught); exprRaw.value = null } }
 }
 function toggleExprRow(row: VarRow) { toggleRow(row) }
 // 多行求值对话框（上游 `XExpressionDialog` / `XDebuggerMultilineEditor`，口径见
@@ -581,23 +599,8 @@ watch(() => props.evaluateRequest?.nonce, () => {
   <div class="debug-panel">
     <div class="panel-heading"><span><Bug :size="iconSize.control" />调试</span></div>
 
-    <div class="debug-config">
-      <p class="debug-field"><span>kind</span><strong>{{ kind }}</strong></p>
-      <p class="debug-field"><span>program</span><strong>{{ program || '（未填写）' }}</strong></p>
-      <p class="debug-field"><span>cwd</span><strong>{{ cwd }}</strong></p>
-      <p class="debug-hint">这些值来自「运行」面板的当前配置，改配置即生效（避免两处各存一份）。</p>
-      <div class="debug-config-buttons">
-        <button class="debug-btn primary" :disabled="!ready || busy || running" title="启动调试会话（command 取自 TaoCode.dap.json 对应 kind）" @click="start"><Bug :size="iconSize.menu" />启动</button>
-        <!-- IDEA's Attach to Process: the same handshake with the `attach` request. -->
-        <button class="debug-btn" :disabled="!ready || busy || running" title="附加到正在运行的进程（进程 PID 或管道名）" @click="attach"><Crosshair :size="iconSize.menu" />附加</button>
-      </div>
-      <label class="debug-field"><span>附加到</span><input v-model="attachId" list="debug-attach-history" class="debug-input" aria-label="要附加的进程 PID 或管道名" placeholder="PID（如 4242）或 pipeName" spellcheck="false" @keydown.enter.prevent="attach" /></label>
-      <datalist id="debug-attach-history">
-        <option v-for="entry in attachHistory" :key="`attach:${entry}`" :value="entry">最近附加</option>
-      </datalist>
-      <p v-if="attachHistory.length" class="debug-hint">最近附加过：{{ attachHistory.slice(0, 3).join('、') }}</p>
-      <p class="debug-hint">{{ attachText }}</p>
-    </div>
+    <!-- 会话启动/附加：整块拆到 DebugStartPane.vue（面板贴着机检上限）。起来后重取调用栈。 -->
+    <DebugStartPane ref="startPane" :adapter-kind="props.adapterKind" :program="props.program" :cwd="props.cwd" :ready="ready" :running="running" @refresh="refreshStack" />
 
     <div v-if="exceptionGroup" class="debug-exceptions">
       <button class="debug-collapse" :aria-expanded="exceptionsOpen" @click="exceptionsOpen = !exceptionsOpen">
@@ -648,8 +651,9 @@ watch(() => props.evaluateRequest?.nonce, () => {
     </div>
     <p v-if="exprResult" class="debug-eval-result">{{ exprResult }}</p>
     <div v-if="exprOpen && exprRows.length" class="debug-vars" role="tree" aria-label="求值结果的成员">
+      <div v-for="row in exprRows" :key="row.key" class="debug-row-wrap">
       <button
-        v-for="row in exprRows" :key="row.key" class="debug-row" role="treeitem" :class="row.state === 'value' ? undefined : 'debug-row-muted'"
+        class="debug-row" role="treeitem" :class="row.state === 'value' ? undefined : 'debug-row-muted'"
         :style="{ paddingLeft: `${12 + row.depth * 14}px` }" :aria-level="row.depth + 1"
         :aria-expanded="row.expandable ? row.expanded : undefined" @click="toggleExprRow(row)"
       >
@@ -658,6 +662,8 @@ watch(() => props.evaluateRequest?.nonce, () => {
         <span class="debug-value">{{ row.value }}</span>
         <span class="debug-type">{{ row.type }}</span>
       </button>
+      <button v-if="moreOf(row)" class="debug-mini debug-more" :title="`加载更多（还有 ${moreOf(row)} 项）`" :aria-label="`加载更多 ${row.name} 的子项`" @click.stop="loadMoreOf(row)">更多 +{{ moreOf(row) }}</button>
+      </div>
     </div>
     <span v-if="dapState.reason" class="debug-reason">已停止：{{ dapState.reason }} · 线程 {{ dapState.threadId }}</span>
     <span v-else-if="running" class="debug-reason">运行中</span>
@@ -668,27 +674,8 @@ watch(() => props.evaluateRequest?.nonce, () => {
       程序已退出 · 退出码 {{ dapState.exitCode }}
     </span>
 
-    <template v-if="dapProgress.length">
-      <div class="debug-section-title">进度 <span>· {{ dapProgress.length }}</span></div>
-      <div class="debug-progress" role="group" aria-label="适配器进度">
-        <div v-for="entry in dapProgress" :key="entry.id" class="debug-progress-row">
-          <div class="debug-progress-head">
-            <!-- A start can carry a title, a message or neither; the row must never
-                 be empty, so the fallback says what it is. -->
-            <span class="debug-progress-title">{{ entry.title || entry.message || '正在处理' }}</span>
-            <span class="debug-progress-pct">{{ entry.percentage === null ? '进行中' : `${Math.round(entry.percentage)}%` }}</span>
-          </div>
-          <div
-            class="debug-progress-track" :class="{ indeterminate: entry.percentage === null }" role="progressbar"
-            :aria-label="entry.title || entry.message || '适配器进度'" :aria-valuemin="0" :aria-valuemax="100"
-            :aria-valuenow="entry.percentage === null ? undefined : Math.round(entry.percentage)"
-          >
-            <div v-if="entry.percentage !== null" class="debug-progress-fill" :style="{ width: progressWidth(entry.percentage) }"></div>
-          </div>
-          <span v-if="entry.title && entry.message" class="debug-progress-msg">{{ entry.message }}</span>
-        </div>
-      </div>
-    </template>
+    <!-- 适配器的 `progress` 事件：整块拆到 DebugProgressPane.vue（面板贴着机检上限）。 -->
+    <DebugProgressPane />
 
     <DebugBreakpointsPane ref="breakpointsPane" :active-path="activePath" :root="props.root" :confirm-removal="dataView.confirmBreakpointRemoval === true" :unmute-on-stop="dataView.unmuteOnStop === true" />
 
@@ -713,33 +700,27 @@ watch(() => props.evaluateRequest?.nonce, () => {
         <button class="icon-button debug-set" :disabled="busy" title="丢弃帧：回到这一帧重新执行" aria-label="丢弃帧" @click="dropFrame(frame)"><RefreshCw :size="iconSize.dense" /></button>
       </div>
       <div v-if="!visibleFrames(frames, dataView.showLibraryFrames === true, selectedFrameIndex).length" class="debug-empty">{{ frameHint }}</div>
+      <!-- 调用栈分页：适配器报的总帧数比已取回的多 ⇒ 还有下一页（递归爆栈时栈很深，第一页较小）。 -->
+      <button v-if="frames.length < framesTotal" class="debug-btn debug-more" :disabled="busy" @click="loadMoreFrames">
+        加载更多帧（还有 {{ framesTotal - frames.length }} 帧）
+      </button>
     </div>
 
     <div class="debug-section-title">
       监视（Watches）
       <span class="debug-watch-note">跨会话保存 · {{ watches.length }}/{{ DEBUG_WATCHES_LIMIT }}</span>
     </div>
-    <div class="debug-watches">
-      <div v-for="watch in watches" :key="watch.text" class="debug-row">
-        <button class="chip-x" title="移除监视" :aria-label="`移除监视 ${watch.text}`" @click="removeWatch(watch.text)"><X :size="iconSize.chip" /></button>
-        <span class="debug-name">{{ watch.text }}</span>
-        <!-- IDEA Watches 的「Set Value…」：DAP `setExpression`（表达式 + 新值）。 -->
-        <template v-if="editing?.kind === 'watch' && editing.key === watch.text">
-          <input ref="editInput" v-model="editing.draft" class="debug-input debug-edit-input" :aria-label="`设置 ${watch.text} 的值`" spellcheck="false" @keydown.enter.prevent="commitEdit('watch', watch.text, { expression: watch.text, frameId: selectedFrame?.id ?? 0 })" @keydown.esc.prevent="cancelEdit" />
-          <button class="debug-mini" :disabled="setBusy" @click="commitEdit('watch', watch.text, { expression: watch.text, frameId: selectedFrame?.id ?? 0 })">设置</button>
-        </template>
-        <template v-else>
-          <span class="debug-value">{{ watch.value || '—' }}</span>
-          <!-- 行内监视（上游 InlineWatch）：画进编辑器当前帧那一行的行尾；再点一次撤掉。 -->
-          <button class="icon-button debug-set" :disabled="!dapState.paused || !selectedFrame" :class="{ 'inline-on': inlineWatches.isShown(watch.text) }" :title="inlineWatches.isShown(watch.text) ? `从编辑器第 ${selectedFrame?.line} 行撤下行内监视` : `在编辑器第 ${selectedFrame?.line ?? 0} 行画行内监视`" :aria-label="`行内显示 ${watch.text}`" @click.stop="inlineWatches.toggle(watch.text)"><Eye :size="iconSize.dense" /></button>
-          <button class="icon-button debug-set" :disabled="!dapState.paused" :title="`设置 ${watch.text} 的值`" :aria-label="`设置 ${watch.text} 的值`" @click="beginEdit('watch', watch.text, watch.value)"><PenLine :size="iconSize.dense" /></button>
-          <button class="icon-button debug-set" :title="`复制 ${watch.text}`" :aria-label="`复制 ${watch.text}`" @click.stop="openCopy({ row: { name: watch.text, value: watch.value }, expression: watch.text, reference: 0, isValue: true, value: watch.value, arrayView: false, canArray: false }, $event)"><Copy :size="iconSize.dense" /></button>
-        </template>
-      </div>
-      <div class="debug-watch-add">
-        <input v-model="newWatch" list="debug-completions" class="debug-input" aria-label="新监视表达式" placeholder="监视表达式，回车添加" spellcheck="false" @keydown.enter.prevent="addWatch" />
-      </div>
-    </div>
+    <DebugWatchesPane
+      :watches="watches" :limit="DEBUG_WATCHES_LIMIT" :busy="setBusy" :paused="Boolean(dapState.paused)"
+      :frame-line="selectedFrame?.line ?? null" :inline-shown="inlineWatches.isShown"
+      :editing="editing?.kind === 'watch' ? { key: editing.key, draft: editing.draft } : null"
+      :new-watch="newWatch" @remove="removeWatch" @move="$event => moveWatch($event.text, $event.direction)" @remove-all="removeAllWatchEntries"
+      @toggle-pause="toggleWatchPauseEntry" @toggle-inline="inlineWatches.toggle"
+      @begin-edit="beginEdit('watch', $event.text, $event.value)" @edit-draft="editing && (editing.draft = $event)"
+      @commit-edit="commitEdit('watch', $event, { expression: $event, frameId: selectedFrame?.id ?? 0 })"
+      @cancel-edit="cancelEdit" @add="addWatchText($event)" @update:new-watch="newWatch = $event"
+      @copy="$event => openCopy({ row: { name: $event.text, value: $event.value }, expression: $event.text, reference: 0, isValue: true, value: $event.value, arrayView: false, canArray: false }, $event.event)"
+    />
 
     <!-- DAP `exceptionInfo` → IDEA 的 `JavaStackFrame.createExceptionNodes`
          （java/debugger/impl/src/com/intellij/debugger/engine/JavaStackFrame.java:319-331）：
@@ -764,8 +745,10 @@ watch(() => props.evaluateRequest?.nonce, () => {
 
     <div class="debug-section-title">
       变量
-      <!-- 按类型分组（上游 `XValueGroup`/`XValueGroupNodeImpl` 的等价物，见 src/debugDataView.ts）。 -->
+      <!-- 按类型分组（上游 `XValueGroup`/`XValueGroupNodeImpl` 的等价物，见 src/debugFrameTree.ts）。 -->
       <button class="chip-x debug-view-toggle" :class="{ active: groupByType }" :title="groupByType ? '取消按类型分组' : '按类型分组（同一层里类型相同的变量聚成组）'" :aria-pressed="groupByType" aria-label="按类型分组" @click="groupByType = !groupByType"><ListTree :size="iconSize.chip" /></button>
+      <!-- 组节点的展开/收起（上游组节点的展开态；只在分组开着时出现 —— 没有组时那两个动作没有对象）。 -->
+      <button v-if="groupByType" class="chip-x debug-view-toggle" :class="{ active: groupsAllExpanded }" :title="groupsAllExpanded ? '收起全部类型组' : '展开全部类型组'" :aria-pressed="groupsAllExpanded" aria-label="展开全部类型组" @click="toggleAllGroups"><ChevronsUpDown :size="iconSize.chip" /></button>
     </div>
     <div class="debug-vars" role="tree" aria-label="变量">
       <div v-for="row in varRows" :key="row.key" class="debug-row-wrap">
@@ -788,6 +771,8 @@ watch(() => props.evaluateRequest?.nonce, () => {
           </button>
           <button v-if="row.state === 'value' && row.depth > 0 && !row.group" class="icon-button debug-set" :disabled="!dapState.paused" :title="`设置 ${row.name} 的值`" :aria-label="`设置 ${row.name} 的值`" @click="beginEdit('var', row.key, row.value)"><PenLine :size="iconSize.dense" /></button>
           <button class="icon-button debug-set" :title="`${row.name} 的动作（复制/监视/控制台/按数组显示）`" :aria-label="`${row.name} 的动作`" @click.stop="openCopy(rowMenuTarget(row), $event)"><Copy :size="iconSize.dense" /></button>
+          <!-- 变量分页：适配器报过容器规模且还没取完 ⇒ 追加下一页（规则在 src/debugPaging.ts）。 -->
+          <button v-if="moreOf(row)" class="debug-mini debug-more" :title="`加载更多（还有 ${moreOf(row)} 项）`" :aria-label="`加载更多 ${row.name} 的子项`" @click.stop="loadMoreOf(row)">更多 +{{ moreOf(row) }}</button>
         </template>
       </div>
       <div v-if="!varRows.length" class="debug-empty">{{ varsHint }}</div>
@@ -797,8 +782,9 @@ watch(() => props.evaluateRequest?.nonce, () => {
          事件（module / loadedSource）只推增量、按需重取整份清单。 -->
     <DebugSourceLists />
 
-    <!-- 调试控制台 + 上游的「暂停输出」开关：拆到 DebugConsolePane.vue（面板贴着机检上限）。 -->
-    <DebugConsolePane />
+    <!-- 调试控制台 + 上游的「暂停输出」开关：拆到 DebugConsolePane.vue（面板贴着机检上限）。
+         控制台里"带位置的输出行"的跳转按钮经它 emit 上来，走面板同一条 jump 通道。 -->
+    <DebugConsolePane @jump="target => emit('jump', target)" />
 
     <!-- 行/变量的动作弹层（上游树右键菜单那一组动作）与求值对话框（多行 + 历史）。 -->
     <DebugRowMenu v-if="copyMenu" :x="copyMenu.x" :y="copyMenu.y" :items="rowActions(copyMenu.target)" @pick="pickRowAction" @close="copyMenu = null" />
@@ -814,86 +800,77 @@ watch(() => props.evaluateRequest?.nonce, () => {
 </template>
 
 <style scoped>
-.debug-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; font-size: 12px; color: var(--text); }
-.debug-config { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
-.debug-config-buttons { display: flex; gap: var(--space-1); }
-.debug-exceptions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); }
-.debug-exceptions-title { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
-.debug-exception { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text); }
-.debug-watches { border-top: 1px solid var(--line); padding: var(--space-1) 0; }
-.debug-watch-add { padding: 2px var(--space-3); }
-.debug-field { display: flex; align-items: center; gap: var(--space-1); min-width: 0; font-size: 11px; color: var(--muted); }
-.debug-field > span { flex-shrink: 0; width: 48px; }
-.debug-input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px/1.4 var(--font-mono); }
-.debug-input-narrow { flex: 0 0 60px; }
-.debug-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-.debug-toolbar { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
-.debug-btn { display: inline-flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); color: var(--text); font-size: 11px; }
-.debug-btn:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
-.debug-btn:disabled { color: var(--muted); opacity: .5; }
-.debug-btn.primary { border-color: var(--accent); color: var(--accent); }
-.debug-error { margin: 0; padding: var(--space-1) var(--space-3); color: var(--error); font-size: 11px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
-.debug-reason { align-self: flex-start; margin: var(--space-2) var(--space-3) 0; padding: 2px var(--space-2); border-radius: var(--radius-pill); background: var(--selected); font-size: 11px; }
-.debug-section-title { margin: var(--space-3) var(--space-3) var(--space-1); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-size: 10px; }
+.debug-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; background: var(--panel); color: var(--text); font-size: 12px; }
+.debug-panel > .panel-heading { background: var(--panel); border-bottom-color: var(--line-strong); }
+.debug-exceptions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line-strong); background: var(--rail); }
+.debug-exceptions-title { color: var(--secondary); font-size: 11px; font-weight: 600; }
+.debug-exceptions .debug-exception { display: inline-flex; align-items: center; gap: var(--space-1); margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text); font-size: 12px; }
+.debug-exceptions .debug-exception input { accent-color: var(--accent); }
+.debug-panel > .debug-exception { margin: var(--space-2) var(--space-3) 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-left: 2px solid var(--warning); border-radius: 0; background: var(--warning-bg); }
+.debug-exception-head { display: flex; align-items: center; gap: var(--space-1); margin-bottom: var(--space-2); }
+.debug-exception-title { font-size: 12px; font-weight: 600; }
+.debug-exception-cause { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1); font-size: 12px; }
+.debug-exception-trace { flex-basis: 100%; margin: 0 0 var(--space-1); color: var(--muted); font: 10px/1.6 var(--font-mono); white-space: pre-wrap; }
+.debug-toolbar { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line-strong); background: var(--rail); }
+.debug-panel .debug-btn, .debug-panel :deep(.debug-btn) { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--panel); color: var(--secondary); font-size: 12px; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.debug-panel .debug-btn:hover:not(:disabled), .debug-panel :deep(.debug-btn:hover:not(:disabled)) { background: var(--hover); color: var(--bright); }
+.debug-panel .debug-btn:disabled, .debug-panel :deep(.debug-btn:disabled) { color: var(--muted); opacity: .5; }
+.debug-panel .debug-btn.primary, .debug-panel :deep(.debug-btn.primary) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.debug-panel .debug-input, .debug-panel :deep(.debug-input) { min-width: 0; min-height: var(--ctrl-height-sm); padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--text); font: 12px/1.5 var(--font-mono); }
+.debug-panel .debug-input:focus-visible, .debug-panel :deep(.debug-input:focus-visible) { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
+.debug-error, .debug-panel :deep(.debug-error) { margin: 0; padding: var(--space-2) var(--space-3); border-left: 2px solid var(--error); background: var(--error-bg); color: var(--error); font-size: 12px; overflow-wrap: anywhere; }
+.debug-evaluate { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-bottom-color: var(--line-strong); background: var(--panel); }
+.debug-eval-result { background: var(--editor); color: var(--text); }
+.debug-reason { align-self: stretch; margin: 0; padding: var(--space-1) var(--space-3); border-left: 2px solid var(--accent); border-bottom: 1px solid var(--line); border-radius: 0; background: var(--panel); color: var(--secondary); font-size: 11px; }
+.debug-exit { align-self: flex-start; margin: var(--space-1) var(--space-3) 0; padding: var(--space-1) var(--space-2); border-left: 2px solid var(--line-strong); border-radius: 0; background: var(--panel); color: var(--secondary); font-size: 11px; }
+.debug-exit.telemetry { color: var(--muted); }
+.debug-exit.stderr { border-left-color: var(--error); background: var(--error-bg); color: var(--error); }
+.debug-section-title, .debug-panel :deep(.debug-section-title) { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) var(--space-3) var(--space-1); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: normal; }
+.debug-watch-note, .debug-panel :deep(.debug-watch-note) { margin-left: var(--space-1); color: var(--muted); font: 10px var(--font-mono); text-transform: none; letter-spacing: 0; }
 .chip-x { display: inline-flex; border: 0; background: transparent; color: var(--muted); padding: 1px; border-radius: var(--radius-xs); }
 .chip-x:hover { color: var(--error); background: var(--hover); }
-.debug-stack, .debug-vars { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-/* 变量/监视行：行本身是按钮，改值按钮排在行右侧（不能在按钮里套按钮） */
-.debug-row-wrap, .debug-frame-wrap { display: flex; align-items: center; gap: 2px; }
-.debug-frame-wrap > .debug-frame { flex: 1; min-width: 0; }
+.debug-panel .debug-section-title .chip-x:hover { color: var(--accent); }
+.debug-stack, .debug-vars, .debug-panel :deep(.debug-list), .debug-panel :deep(.debug-console) { min-width: 0; border-top: 0; border-bottom: 1px solid var(--line-strong); background: var(--editor); }
+.debug-panel :deep(.debug-config), .debug-panel :deep(.debug-progress) { background: var(--panel); border-bottom-color: var(--line-strong); }
+.debug-panel :deep(.debug-progress) { padding: var(--space-2) var(--space-3); }
+.debug-panel :deep(.debug-progress-title) { color: var(--text); font-size: 12px; font-weight: 600; }
+.debug-panel :deep(.debug-progress-pct) { color: var(--accent); font-variant-numeric: tabular-nums; }
+.debug-panel :deep(.debug-watches) { border-top: 0; border-bottom: 1px solid var(--line-strong); background: var(--editor); }
+.debug-panel :deep(.debug-watches > .debug-row) { min-height: var(--ctrl-height-sm); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); }
+.debug-panel :deep(.debug-watches .debug-name) { color: var(--secondary); font-size: 12px; }
+.debug-panel :deep(.debug-watches .debug-value) { color: var(--text); }
+.debug-panel :deep(.debug-watches .debug-watch-add) { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); }
+.debug-row-wrap, .debug-frame-wrap { display: flex; align-items: center; gap: var(--space-1); border-bottom: 1px solid var(--line); }
+.debug-frame-wrap > .debug-frame, .debug-row-wrap > .debug-row { flex: 1; min-width: 0; }
 .debug-frame-wrap:hover .debug-set { opacity: 1; }
-.debug-row-wrap > .debug-row { flex: 1; min-width: 0; }
-.debug-row-wrap .debug-set, .debug-row .debug-set { opacity: 0; transition: opacity var(--dur-1) var(--ease); }
-.debug-row-wrap:hover .debug-set, .debug-row:hover .debug-set { opacity: 1; }
-/* 行内监视已挂在当前帧那一行：常亮并染成强调色（不吃 hover 才出现的规则）。 */
-.debug-row .inline-on { opacity: 1; color: var(--accent); }
+.debug-row-wrap .debug-set { opacity: 0; transition: opacity var(--dur-1) var(--ease); }
+.debug-row-wrap:hover .debug-set, .debug-row-wrap:focus-within .debug-set, .debug-row:hover .debug-set { opacity: 1; }
+.debug-row .inline-on { opacity: 1; color: var(--accent); background: var(--accent-soft); }
 .debug-row-editing { gap: var(--space-1); padding-right: var(--space-1); }
-.debug-edit-input { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; }
-.debug-mini { padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--text); font-size: 11px; }
-.debug-frame { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); width: 100%; padding: 2px var(--space-3); border: 0; background: transparent; color: var(--text); text-align: left; font: 11px var(--font-mono); }
+.debug-edit-input { flex: 1; min-width: 0; }
+.debug-mini { min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--panel); color: var(--secondary); font-size: 11px; }
+.debug-more { flex-shrink: 0; }
+.debug-frame { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); width: 100%; min-height: var(--ctrl-height-sm); padding: var(--space-1) var(--space-3); border: 0; background: transparent; color: var(--text); text-align: left; font: 12px/1.5 var(--font-mono); }
 .debug-frame:hover { background: var(--hover); }
-.debug-frame.active { background: var(--selected); }
-.debug-frame-loc { color: var(--muted); flex-shrink: 0; }
-.debug-row { display: flex; align-items: baseline; gap: var(--space-1); width: 100%; padding: 1px var(--space-3); border: 0; background: transparent; color: var(--text); text-align: left; font: 11px/1.6 var(--font-mono); cursor: default; }
+.debug-frame.active { background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); color: var(--bright); }
+.debug-frame-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.debug-frame-loc { flex-shrink: 0; color: var(--muted); font: 10px var(--font-mono); }
+.debug-row { display: flex; align-items: baseline; gap: var(--space-1); width: 100%; min-height: var(--ctrl-height-sm); padding-top: var(--space-1); padding-right: var(--space-3); padding-bottom: var(--space-1); border: 0; background: transparent; color: var(--text); text-align: left; font: 12px/1.5 var(--font-mono); cursor: default; }
 .debug-row:hover { background: var(--hover); }
-.debug-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.debug-row:focus-visible, .debug-collapse:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .debug-row[aria-expanded] { cursor: pointer; }
-.debug-row-muted { color: var(--muted); }
-.debug-row-muted .debug-name { color: var(--muted); }
+.debug-row-muted, .debug-row-muted .debug-name { color: var(--muted); }
 .debug-expander { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0; color: var(--muted); }
-.debug-name { color: var(--syntax-keyword); flex-shrink: 0; }
-.debug-value { color: var(--syntax-string); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.debug-type { margin-left: auto; color: var(--muted); flex-shrink: 0; }
-.debug-empty { padding: var(--space-1) var(--space-3); color: var(--muted); font-size: 11px; }
-/* 警告色/警告底/面板底用真令牌（--warning/--warning-bg/--elevated）：以前的 `--warn` 一族不在
-   tokens.css 里，退化成字面量、换主题不跟随。 */
-.debug-exception { margin: var(--space-2) var(--space-3) 0; padding: var(--space-2); border: 1px solid var(--line); border-left: 3px solid var(--warning); border-radius: var(--radius-sm); background: var(--warning-bg); }
-.debug-exception-head { display: flex; align-items: center; gap: var(--space-1); margin-bottom: var(--space-1); }
-.debug-exception-title { font-weight: 600; font-size: 11px; }
-.debug-exception-cause { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1); font-size: 11px; }
-.debug-exception-trace { flex-basis: 100%; margin: 0 0 var(--space-1); color: var(--muted); font-size: 10px; white-space: pre-wrap; }
-.debug-exit { align-self: flex-start; margin: var(--space-1) var(--space-3) 0; padding: 2px var(--space-2); border-radius: var(--radius-pill); background: var(--selected); font-size: 11px; }
-.debug-exit.telemetry { color: var(--muted); }
-.debug-exit.stderr { color: var(--error); background: var(--error-bg); }
-.debug-progress { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: var(--space-1) var(--space-3); display: flex; flex-direction: column; gap: var(--space-1); }
-.debug-progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); font-size: 11px; }
-.debug-progress-title { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.debug-progress-pct { color: var(--muted); flex-shrink: 0; font: 11px var(--font-mono); }
-.debug-progress-msg { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
-.debug-progress-track { position: relative; height: 4px; border-radius: var(--radius-pill); background: var(--rail); overflow: hidden; }
-.debug-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-pill); }
-/* Indeterminate: the adapter has not said how far along it is, so the bar slides instead of showing a fabricated 0% or 100%. */
-.debug-progress-track.indeterminate::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: var(--radius-pill); background: var(--accent); animation: debug-progress-slide var(--dur-spin) var(--ease) infinite; }
-@keyframes debug-progress-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
-@media (prefers-reduced-motion: reduce) { .debug-progress-track.indeterminate::after { animation: none; width: 100%; opacity: .5; } }
-.debug-collapse { display: flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; text-transform: inherit; letter-spacing: inherit; }
+.debug-name { flex-shrink: 0; color: var(--syntax-keyword); }
+.debug-value { flex: 1; min-width: 0; overflow: hidden; color: var(--syntax-string); text-overflow: ellipsis; white-space: nowrap; }
+.debug-type { flex-shrink: 0; margin-left: auto; color: var(--muted); font-size: 10px; }
+.debug-empty { padding: var(--space-2) var(--space-3); border-left: 2px solid var(--line); color: var(--muted); font-size: 11px; }
+.debug-collapse { display: flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: transparent; color: var(--secondary); font: inherit; text-align: left; }
 .debug-collapse:hover { color: var(--bright); }
-.debug-collapse:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.debug-collapse .debug-expander { width: 10px; }
-.debug-section-title .chip-x:hover { color: var(--bright); }
-/* 「按类型分组」的组行：名字是类型，值一列显示条数。 */
-.debug-row-group .debug-name { color: var(--muted); font-style: italic; } .debug-view-toggle.active { color: var(--accent); }
-.debug-watch-note { margin-left: var(--space-1); color: var(--muted); font-size: 10px; text-transform: none; letter-spacing: 0; }
-.debug-hint { margin: 0; color: var(--muted); font-size: 11px; }
-.debug-copy-note { margin: 0; padding: var(--space-1) var(--space-3); color: var(--muted); font-size: 11px; }
+.debug-collapse .debug-expander { width: var(--space-3); }
+.debug-row-group { background: var(--panel); }
+.debug-row-group .debug-name { color: var(--secondary); font-style: normal; font-weight: 600; }
+.debug-row-group .debug-value { color: var(--muted); font-size: 10px; }
+.debug-view-toggle.active { background: var(--accent-soft); color: var(--accent); }
+.debug-copy-note { margin: 0; padding: var(--space-1) var(--space-3); border-left: 2px solid var(--accent); background: var(--panel); color: var(--secondary); font-size: 11px; }
 </style>

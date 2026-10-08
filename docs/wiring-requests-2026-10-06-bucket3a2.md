@@ -47,3 +47,7 @@
 
 - `App.vue:2400` 的 `@follow`/`@back`/`@forward`/`@open-external` 与三个 `can-*` 全部已实接（判据 `tests/doc-host.test.mjs:106`、`:155`、`:169`），不需要再接线。
 - `KeepTabAction`（`platform/lang-impl/src/com/intellij/lang/documentation/ide/actions/KeepTabAction.kt:12-21`，注册 `intellij.platform.lang.impl.actions.xml:60-61`）与 `DocRenderer` 一族（`platform/lang-impl/src/com/intellij/codeInsight/documentation/render/`，实测 31 个文件）**不在这里求接线**：本仓快速文档是弹层、没有文档工具窗的 `Content` 页签，也没有可定位的内联区间（区间要等 **R5** 的 native `hover.range` 透传）。按"无消费链路不渲染"处理，未加按钮 ⇒ 不是假控件，但也不假装做了。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+见 `docs/wiring-requests-2026-10-06-bucket3a.md` 的「处理结果」：**W1 已接线**（`src/style.css:1361` 起的 5 条规则已在）；**W2 未接** —— 目标 `src/components/CodeEditor.vue`（禁改清单），需 CodeEditor owner（与 3a R1 同批）。

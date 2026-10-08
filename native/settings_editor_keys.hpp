@@ -74,14 +74,25 @@ inline bool validate_editor_added_key(const std::string& key, const Json& value)
     }
     // Code Vision 的两个组集合（CodeVisionSettings.kt:45 `disabledCodeVisionProviderIds` 与 :50
     // `enabledCodeVisionProviderIds`）：**只装与出厂相反的那一半**，空数组是正常默认态。
-    // 条目必须是本仓已知的组 id（两组，src/codeLensSettings.ts:48-50）；上限 8 只是挡住无限追加。
+    // 条目必须是本仓**真会渲染出条目**的那一组 —— 四组与前端 `src/codeLensSettings.ts` 的
+    // `CODE_VISION_GROUP_IDS` 逐条对齐（`src/previewSettings.ts` 与设置页用的就是那一份）。
+    // 三个本地组的 id 直接取上游的组键（不是本仓起的名字）：
+    // `platform/lang-impl/src/com/intellij/codeInsight/codeVision/settings/PlatformCodeVisionIds.kt:5-7`
+    // = `USAGES("references")` / `INHERITORS("inheritors")` / `PROBLEMS("problems")`（渲染侧那三个
+    // provider 的 id 见 `src/codeVisionProviders.ts`，组闸按 id 收口）；
+    // 第四个 `LspCodeVisionProvider` 是服务端 lens 那一组（`platform/lsp-impl/src/impl/features/codeLens/
+    // LspCodeVisionProvider.kt:20`）。上限 8 只是挡住无限追加。
+    // 为什么这里少列一组就是一条真缺陷：运行时表由右键「隐藏这一组」直接写（`handleCodeVisionExtraAction`
+    // 不查白名单），写进去的那一组在**读盘**这一侧会被 `validate_editor_patch` 判 INVALID_SETTINGS
+    // （`project_settings_state.cpp` 的 prune→validate→补默认那一条链），于是"隐藏用法计数"之后
+    // 整个项目的编辑器设置都存不下去/读不回来。
     if (key == "codeVisionDisabledGroups" || key == "codeVisionEnabledGroups") {
         if (!value.is_array() || value.size() > 8)
             fail("INVALID_SETTINGS", key + " must be an array of at most 8 Code Vision group ids.");
         for (const auto& entry : value) {
             if (!entry.is_string()) fail("INVALID_SETTINGS", key + " 的条目必须是组 id 字符串。");
             const auto id = entry.get<std::string>();
-            if (id != "LspCodeVisionProvider" && id != "problems")
+            if (id != "LspCodeVisionProvider" && id != "problems" && id != "references" && id != "inheritors")
                 fail("INVALID_SETTINGS", "Unknown Code Vision group: " + id);
         }
         return true;

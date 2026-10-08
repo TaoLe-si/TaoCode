@@ -3,6 +3,7 @@
 // IDEA 里同一份 ToolWindow content 可以停靠在任意边（left/right/bottom），TaoCode 之前把"左侧视图"
 // 写死在左侧栏、底部只认固定 tab 集合。抽成宿主后，左侧栏与底部停靠共用同一批组件
 // （桃 2026-09-27：模块化 + 对照 IDEA 的任意停靠）。
+import AgentPanel from './AgentPanel.vue'
 import SearchPanel from './SearchPanel.vue'
 import TodoPanel from './TodoPanel.vue'
 import OutlinePanel from './OutlinePanel.vue'
@@ -16,9 +17,14 @@ import EventLogPanel from './EventLogPanel.vue'
 import FileTree from './FileTree.vue'
 import ProjectViewSortSettings from './ProjectViewSortSettings.vue'
 import type { getProjectTreeState } from '../projectTreeState'
-import type { UsageTreeRow } from '../usageViewGrouping'
-import { Check, ChevronsDownUp, ChevronsUpDown, Crosshair, Settings2 } from 'lucide-vue-next'
+import type { UsageTreeModelRow } from '../usageViewTreeModel'
+import { createProjectViewPaneHost } from '../projectViewPanes.ts'
+import { ChevronsDownUp, ChevronsUpDown, Crosshair, Settings2 } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
+import { referencesNavigateOnSingleClick } from '../referenceContents.ts'
+import type { DateTimeFormatSettings } from '../dateTimeFormat.ts'
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 
 export interface ToolWindowViewContext {
   root: string
@@ -34,6 +40,8 @@ export interface ToolWindowViewContext {
   isDesktop: boolean
   // 复杂内部类型先用 any，随后续批次收紧。
   outline: any
+  /** 结构视图「继承成员」的父类型取数（`src/outlineSupertypes.ts` 的三跳；缺省 = 不渲染那个开关）。 */
+  outlineSupertypes?: any
   // 复杂内部类型先用 any，随后续批次收紧。
   sortedBookmarks: any
   historyEpoch: number
@@ -129,6 +137,7 @@ export interface ToolWindowViewContext {
   scopes?: any
   /** 调试器数据视图（XDebuggerDataViewSettings：隐藏 null / 按名排序）→ DebugPanel 的变量树。 */
   debugView?: any
+  dateTimeFormat: DateTimeFormatSettings
   /** 单隐式模块名（工作区目录名）：作用域里的 `file[模块名]:…` 用它。 */
   moduleName?: string
   /** 「与某分支比较」的目标（分支弹窗 → 比较）。 */
@@ -159,7 +168,7 @@ export interface ToolWindowViewContext {
   // 数据由 `src/toolViewContext.ts` 从 `referenceContents` 递进来 —— 与本仓其它窗口内容同一个口径。
   // `references` 因此**不在** `TOOL_WINDOW_REGISTRY` 里（那一张是"窗口"注册表，这一条是"内容"）。
   /** 选中那条内容的行（`referenceRows`：摊平 + 折叠态 + 过滤串都算好了）。 */
-  referenceRows?: UsageTreeRow[]
+  referenceRows?: UsageTreeModelRow[]
   /** 选中那条内容的引用条数（区分「没有用法」与「过滤串一条不剩」两种空态）。 */
   referenceCount?: number
   /** 面板的过滤串（`referencesSpeedSearch`）。 */
@@ -170,10 +179,39 @@ export interface ToolWindowViewContext {
   onReferenceCollapseAll?: () => void
   onReferenceExpandAll?: () => void
   onReferenceSpeedSearch?: (value: string) => void
+  // --- Agent 对话窗口（本仓自己的窗口，注册见 `TOOL_WINDOW_REGISTRY` 的 `agent` 行）-----------
+  // 装配层由宿主构造（读/写/跳转/差异四项 IDE 能力都从宿主注入），面板只渲染与派发。
+  agentHost?: import('../agentHost.ts').AgentHost | null
+  /** 当前项目名（Agent 没有"项目分区"，自动读当前项目 —— 名字显示在窗口标题栏）。 */
+  agentProjectName?: string
+  agentProjectRoot?: string
+  /** 面板齿轮的落点：打开 设置 → Agent（`onAgentOpenSettings`）。 */
+  onAgentOpenSettings?: (section?: 'modelProvider') => void
+  /** 面板的一句话通知（写失败 / 撤回被拒这类要如实说出去）。 */
+  onAgentNotify?: (message: string, error?: boolean) => void
+}
+
+function referencesNavigateOnSingleClickEnabled(): boolean {
+  return referencesNavigateOnSingleClick.value
 }
 
 import { ref } from 'vue'
 const gearOpen = ref(false)
+
+// 项目视图的**窗格选择**（`com.intellij.projectViewPane`，宿主 `src/projectViewPanes.ts`）：
+// 上游 `ProjectViewImpl.getPanes()` 收集 EP 里的窗格、`changeView(id)` 切一个。本仓此前
+// `PROJECT_VIEW_PANE_EP` 声明了但没有任何 bundled 贡献、也没有"切到哪个窗格"的状态
+// （EP 是死的）；`createProjectViewPaneHost` 补上那一层 —— 齿轮下拉里渲染 `choices`
+// （项目 / 包 / 范围三支 bundled，第三方按同一 id 挂的窗格也在同一张表里），点一行 `select(id)`。
+// 三个窗格目前渲染的是**同一张树**（差别在折叠口径，包/范围树尚未接），所以选择的效果是
+// 「选中项 + 跨会话持久化」，不假造第二种树形状（见 `src/projectViewPanes.ts` 文件头的如实差异）。
+const PROJECT_VIEW_PANE_KEY = 'taocode.projectViewPane'
+function readStoredPane(): string | null {
+  try { return localStorage.getItem(PROJECT_VIEW_PANE_KEY) } catch { return null }
+}
+function storePane(id: string): void {
+  try { localStorage.setItem(PROJECT_VIEW_PANE_KEY, id) } catch { /* 隐私模式写不进去：本会话内仍然记住 */ }
+}
 
 const props = defineProps<{
   /** leftView 或 bottomTab 的值：同一批 id 决定渲染哪个视图。 */
@@ -188,16 +226,29 @@ const props = defineProps<{
   active: boolean
   sideBySide?: boolean
 }>()
+
+/**
+ * 窗格选择宿主（上游 `ProjectViewImpl.getPanes()` + `changeView(id)`，见 `src/projectViewPanes.ts`）。
+ * `root` 惰性读 `ctx.root`（换工作区时可用窗格表重建），选择跨会话持久化在 localStorage。
+ */
+const paneHost = createProjectViewPaneHost({ root: () => props.ctx.root, load: readStoredPane, persist: storePane })
+/** 齿轮下拉里那一组窗格行（不可用时为空表，整节不渲染）。 */
+const paneChoices = paneHost.choices
+const activePaneId = paneHost.activeId
+function selectPane(id: string): void {
+  paneHost.select(id)
+  gearOpen.value = false
+}
 </script>
 
 <template>
   <SearchPanel v-if="view === 'search'" :ref="(instance: any) => ctx.bindSearchPanel(instance)" :root="ctx.root" :active="active" :scopes="(ctx.scopes ?? []) as any" :module-name="ctx.moduleName ?? ''" @open="(payload: any) => ctx.onSearchOpen(payload)" @replaced="ctx.onSearchReplaced as any" />
   <TodoPanel v-else-if="view === 'todo'" :root="ctx.root" :active="active" :patterns="ctx.todoPatterns as any" :source="ctx.todoSource" :scopes="(ctx.scopes ?? []) as any" :module-name="ctx.moduleName ?? ''" @open="(payload: any) => ctx.onSearchOpen(payload)" />
-  <OutlinePanel v-else-if="view === 'outline'" :path="ctx.activeTabPath" :symbols="ctx.outline" :available="ctx.lspReady" :source="ctx.todoSource" @jump="({ line, character }: { line: number; character: number }) => ctx.onReveal({ path: ctx.activePath, line, column: (character ?? 0) + 1 })" />
+  <OutlinePanel v-else-if="view === 'outline'" :path="ctx.activeTabPath" :symbols="ctx.outline" :available="ctx.lspReady" :source="ctx.todoSource" :supertypes="ctx.outlineSupertypes" @jump="({ line, character, path }: { line: number; character: number; path?: string }) => ctx.onReveal({ path: path ?? ctx.activePath, line, column: (character ?? 0) + 1 })" />
   <BookmarksPanel v-else-if="view === 'bookmarks'" :entries="ctx.sortedBookmarks as any" :active-path="ctx.activePath" :settings="(ctx.bookmarksView ?? {}) as any" :lists="(ctx.bookmarkLists ?? []) as any" @jump="(entry: { path: string; line?: number }) => entry.line === undefined ? ctx.onBookmarkOpen?.(entry.path) : ctx.onReveal({ path: entry.path, line: entry.line - 1 })" @remove="ctx.onBookmarkRemove" @assign="ctx.onBookmarkAssign" @update-settings="(patch: any) => ctx.onUpdateBookmarksView?.(patch)" @bookmark-tabs="ctx.onBookmarkTabs?.()" @edit="(entry: any) => ctx.onBookmarkEdit?.(entry)" @sort-group="(path: string) => ctx.onBookmarkSortGroup?.(path)" />
   <DebugPanel v-else-if="view === 'debug'" :active-path="ctx.activePath" :ready="ctx.isDesktop && Boolean(ctx.workspace)" :root="ctx.root" :evaluate-request="ctx.evaluateRequest" :program="ctx.runConfigProgram" :cwd="ctx.runConfigCwd" :adapter-kind="ctx.runConfigDebugAdapter" :data-view="ctx.debugView" @jump="target => ctx.onReveal({ path: target.path ?? ctx.activePath, line: Math.max(0, target.line - 1) })" />
   <SourceControl v-else-if="view === 'git'" :root="ctx.root" :active="active" :analyzing="Boolean(ctx.activeTabPath) && Boolean(ctx.activeConfigured) && !ctx.activeLspRunning" :todo-patterns="ctx.todoPatterns as any" :commit-settings="ctx.commitSettings" :diff-context-lines="ctx.diffContextLines" :compare-with="ctx.gitCompareWith ?? ''" :dirty-paths="ctx.dirtyPaths" :save-path="ctx.savePath" :show-tool-window="ctx.showToolWindow" @notify="ctx.notifyFromPanel" />
-  <VcsLog v-else-if="view === 'vcslog'" :root="ctx.root" :active="active" :show-tag-names="ctx.vcsLogShowTagNames" :show-root-names="ctx.vcsLogShowRootNames" @set-tag-names="ctx.onSetVcsLogTagNames?.($event)" />
+  <VcsLog v-else-if="view === 'vcslog'" :root="ctx.root" :active="active" :date-format="ctx.dateTimeFormat" :show-tag-names="ctx.vcsLogShowTagNames" :show-root-names="ctx.vcsLogShowRootNames" @set-tag-names="ctx.onSetVcsLogTagNames?.($event)" />
   <GradlePanel v-else-if="view === 'gradle'"
     :detection="ctx.gradleDetection" :detection-error="ctx.gradleDetectionError" :result="ctx.gradleResult"
     :message="ctx.gradleMessage" :task-groups="ctx.gradleTaskGroups"
@@ -217,7 +268,8 @@ const props = defineProps<{
   <EventLogPanel v-else-if="view === 'notifications'" :entries="(ctx.noticeLog ?? []) as any" :root="ctx.root" @clear="ctx.onClearNotices" @expire="ctx.onExpireNotice?.($event)" @run="ctx.onRunNoticeAction?.($event)" />
   <!-- 引用（Find 窗口的那条用法视图 Content）：面板只画行，条目存储/折叠态/过滤串都在
        `src/referenceContents.ts`，由 `src/toolViewContext.ts` 递进 ctx（见上面那组字段的上游依据）。 -->
-  <ReferencePanel v-else-if="view === 'references'" :rows="ctx.referenceRows ?? []" :count="ctx.referenceCount ?? 0" :query="ctx.referenceQuery ?? ''" :searching="ctx.referenceSearching === true" @open="target => ctx.onReveal(target)" @toggle-group="(key: string) => ctx.onReferenceToggleGroup?.(key)" @collapse-all="ctx.onReferenceCollapseAll?.()" @expand-all="ctx.onReferenceExpandAll?.()" @speed-search="(value: string) => ctx.onReferenceSpeedSearch?.(value)" />
+  <AgentPanel v-else-if="view === 'agent'" :host="ctx.agentHost ?? null" :project-name="ctx.agentProjectName ?? ''" :project-root="ctx.agentProjectRoot ?? ''" @open-settings="section => ctx.onAgentOpenSettings?.(section)" @notify="(message: string, error?: boolean) => ctx.onAgentNotify?.(message, error)" />
+  <ReferencePanel v-else-if="view === 'references'" :rows="ctx.referenceRows ?? []" :count="ctx.referenceCount ?? 0" :query="ctx.referenceQuery ?? ''" :searching="ctx.referenceSearching === true" :navigate-on-single-click="referencesNavigateOnSingleClickEnabled()" @open="target => ctx.onReveal(target)" @toggle-group="(key: string) => ctx.onReferenceToggleGroup?.(key)" @collapse-all="ctx.onReferenceCollapseAll?.()" @expand-all="ctx.onReferenceExpandAll?.()" @speed-search="(value: string) => ctx.onReferenceSpeedSearch?.(value)" />
   <template v-else>
     <!-- ProjectViewToolbar is a tool-window TITLE action group.
          原来这里用 Teleport 把动作行搬进 dock 的标题栏（`#project-title-actions-left`），
@@ -229,7 +281,7 @@ const props = defineProps<{
          兄弟节点（底部工具窗口条）一起带崩。
          现在就地渲染：名称在工具窗口标题栏，动作行在内容区顶部 —— 正是 IDEA 的
          Project 工具窗口（ToolWindowHeader 给标题，ProjectView 的 toolbar 在树上方）。 -->
-    <div v-if="ctx.workspace" class="workspace-heading" :title="ctx.workspace.root" @keydown.f5.prevent="ctx.onRefreshTree()">
+    <div v-if="ctx.workspace" class="workspace-heading" :title="ctx.isDesktop ? ctx.workspace.root : undefined" @keydown.f5.prevent="ctx.onRefreshTree()">
       <div class="heading-actions">
         <!-- PlatformActions.xml:1178-1184 order. Registry defaults replace
              ExpandAll with ExpandRecursively; hidden bulk action stays callable. -->
@@ -244,20 +296,29 @@ const props = defineProps<{
              这一组是**项目视图自己的**齿轮项（`ProjectViewImpl.java:1169` 的 additionalGearActions），
              顺序照源码：Behavior 组在最前，然后才是排序与外观。 -->
         <div class="menu-section-label" role="presentation">行为</div>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.autoscrollToSource" @click="ctx.projectTreeState.update({ autoscrollToSource: !ctx.projectTreeState.state.autoscrollToSource })"><span class="menu-item-icon"><Check v-if="ctx.projectTreeState.state.autoscrollToSource" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">单击打开文件</span></button>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.autoscrollFromSource" @click="ctx.projectTreeState.update({ autoscrollFromSource: !ctx.projectTreeState.state.autoscrollFromSource })"><span class="menu-item-icon"><Check v-if="ctx.projectTreeState.state.autoscrollFromSource" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">始终选择打开的文件</span></button>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.openInPreviewTab" @click="ctx.projectTreeState.update({ openInPreviewTab: !ctx.projectTreeState.state.openInPreviewTab })"><span class="menu-item-icon"><Check v-if="ctx.projectTreeState.state.openInPreviewTab" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">用预览标签打开</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.autoscrollToSource" @click="ctx.projectTreeState.update({ autoscrollToSource: !ctx.projectTreeState.state.autoscrollToSource })"><span class="menu-item-icon"><IdeaCheckedIcon v-if="ctx.projectTreeState.state.autoscrollToSource" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">单击打开文件</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.autoscrollFromSource" @click="ctx.projectTreeState.update({ autoscrollFromSource: !ctx.projectTreeState.state.autoscrollFromSource })"><span class="menu-item-icon"><IdeaCheckedIcon v-if="ctx.projectTreeState.state.autoscrollFromSource" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">始终选择打开的文件</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.openInPreviewTab" @click="ctx.projectTreeState.update({ openInPreviewTab: !ctx.projectTreeState.state.openInPreviewTab })"><span class="menu-item-icon"><IdeaCheckedIcon v-if="ctx.projectTreeState.state.openInPreviewTab" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">用预览标签打开</span></button>
         <div class="menu-rule" role="separator" />
         <ProjectViewSortSettings :settings="ctx.projectTreeState.state" :persistence-error="ctx.projectTreeState.status.persistenceError" @update="ctx.projectTreeState.update" />
         <div class="menu-rule" role="separator" />
         <div class="menu-section-label" role="presentation">树外观</div>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.compactIndents" @click="ctx.onToggleCompactIndents()"><span class="menu-item-icon"><Check v-if="ctx.compactIndents" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">紧凑缩进</span></button>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.expandWithSingleClick" @click="ctx.onToggleExpandWithSingleClick()"><span class="menu-item-icon"><Check v-if="ctx.expandWithSingleClick" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">单击展开目录</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.compactIndents" @click="ctx.onToggleCompactIndents()"><span class="menu-item-icon"><IdeaCheckedIcon v-if="ctx.compactIndents" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">紧凑缩进</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.expandWithSingleClick" @click="ctx.onToggleExpandWithSingleClick()"><span class="menu-item-icon"><IdeaCheckedIcon v-if="ctx.expandWithSingleClick" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">单击展开目录</span></button>
+        <!-- 项目视图窗格（`com.intellij.projectViewPane`）：上游项目工具窗口的内容是一组可切换的
+             窗格（`AbstractProjectViewPane` 家族），这里列出 EP 里**当前工作区可用**的那几支
+             （bundled：项目 / 包 / 范围；第三方按同一 id 挂的窗格也在同一张表里），点一行切换。
+             可用窗格为空（没有工作区）时整节不渲染 —— 不留空标题。 -->
+        <template v-if="paneChoices.length">
+          <div class="menu-rule" role="separator" />
+          <div class="menu-section-label" role="presentation">项目视图窗格</div>
+          <button v-for="pane in paneChoices" :key="pane.id" class="menu-item" role="menuitemradio" :aria-checked="activePaneId === pane.id" @click="selectPane(pane.id)"><span class="menu-item-icon"><IdeaCheckedIcon v-if="activePaneId === pane.id" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ pane.title }}</span></button>
+        </template>
       </div>
       <div v-if="gearOpen" class="view-gear-backdrop" @click="gearOpen = false" />
     </div>
     <div class="tree-scroll" @keydown.f5.prevent="ctx.onRefreshTree()">
-      <FileTree v-if="ctx.workspace" :ref="(instance: any) => ctx.bindFileTree(instance)" :key="ctx.root" :entries="ctx.treeEntries" :active="ctx.activePath" :synthetic="ctx.syntheticNodes" :indent-guides="ctx.indentGuides" :compact-indents="ctx.compactIndents" :expand-with-single-click="ctx.expandWithSingleClick" :workspace-key="ctx.root" :project-name="ctx.workspace.name" :file-color="ctx.projectViewFileColor" :sort-settings="ctx.projectTreeState.state" @context="ctx.onTreeContext" @rename="ctx.onTreeRename" @open="(path: string, preview: boolean) => ctx.onTreeOpen(path, preview)" @error="ctx.onTreeError" />
+      <FileTree v-if="ctx.workspace" :ref="(instance: any) => ctx.bindFileTree(instance)" :key="ctx.root" :entries="ctx.treeEntries" :active="ctx.activePath" :synthetic="ctx.syntheticNodes" :indent-guides="ctx.indentGuides" :compact-indents="ctx.compactIndents" :expand-with-single-click="ctx.expandWithSingleClick" :workspace-key="ctx.root" :project-name="ctx.workspace.name" :root-path-title="ctx.isDesktop ? ctx.workspace.root : undefined" :file-color="ctx.projectViewFileColor" :sort-settings="ctx.projectTreeState.state" @context="ctx.onTreeContext" @rename="ctx.onTreeRename" @open="(path: string, preview: boolean) => ctx.onTreeOpen(path, preview)" @error="ctx.onTreeError" />
       <div v-else class="explorer-empty"><p>尚未打开工作区</p></div>
     </div>
   </template>

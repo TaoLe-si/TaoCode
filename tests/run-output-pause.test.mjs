@@ -55,9 +55,14 @@ test('暂停时切换实例不改视图；恢复后对齐当前实例', () => {
 test('接线：RunConsole 的暂停/继续按钮走 runInstances 的同一状态', () => {
   const console = read('src/components/RunConsole.vue')
   assert.match(console, /setRunOutputPaused\(!runOutputPaused\)/)
-  assert.match(console, /runOutputPaused \? '继续输出' : '暂停输出'/)
+  // 按钮的按下态/文案走 `runOutputPausedState()` —— EP `com.intellij.execution.consolePauseStateProvider`
+  // 的 bundled 贡献就是 `runOutputPaused`（见 tests/execution-run-extension-points.test.mjs）：
+  // 无插件时该表达式恒等于 `runOutputPaused`，行为与接线前一致。
+  assert.match(console, /const consolePaused = computed\(\(\) => runOutputPausedState\(\)\)/)
+  assert.match(console, /consolePaused \? '继续输出' : '暂停输出'/)
   assert.match(console, /输出已暂停：视图冻结/)
   const instances = read('src/runInstances.ts')
   assert.match(instances, /export const runOutputPaused = ref\(false\)/)
   assert.match(instances, /if \(runOutputPaused\.value\) return/)
+  assert.match(instances, /export function runOutputPausedState\(\)/)
 })

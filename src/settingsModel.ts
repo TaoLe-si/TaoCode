@@ -10,20 +10,26 @@ import type { TemplateSettings } from './templates'
 import type { LineNumeration } from './editorLineNumbers.ts'
 import { DEFAULT_BUILD_TOOLS, type BuildToolsSettings } from './gradle.ts'
 import type { TrustedPathEntry } from './trustedProjects.ts'
+import { DEFAULT_DATE_TIME_FORMAT_SETTINGS, type SystemDateTimeFormats } from './dateTimeFormat.ts'
 
 // IDEA's Run Configuration: a program with arguments, a working directory, an
 // environment block and an optional "before launch" task chain. `type` picks the
 // runner (shell through cmd.exe vs a direct executable).
 export interface RunConfig {
   name: string
-  // ⚠️ 这里**故意不加** `'jar'`：上游的 JAR 配置类型（`JarApplicationConfigurationType.java:19-22`，
-  // 本仓的规范名 `src/jarRun.ts:50` 的 `JAR_APPLICATION_TYPE_ID = 'JarApplication'`）要落地，三张表得一起加 ——
-  //   · 本联合（`RunConfig['type']`）；
-  //   · `RUN_CONFIG_EDITORS`（`src/runConfigEditors.ts:90`）—— 它是 `Record<NonNullable<RunConfig['type']>, …>`，
-  //     只改联合会让这张表少一个键、直接编译不过（2026-10-05 实测：`runConfigEditors.ts:90` TS2741）；
-  //   · `RUN_CONFIG_TYPES`（`src/runConfigTree.ts:16`）—— 否则左树不出类型节点。
-  // 表补齐后表单才会按 `JAR_FORM_FIELDS`（`jarRun.ts:103`）渲染。
-  type?: 'shell' | 'application' | 'debug' | 'compound'
+  // JAR 配置类型（上游 `java/execution/impl/src/com/intellij/execution/jar/JarApplicationConfigurationType.java:19-23`
+  // 的 `super("JarApplication", ExecutionBundle.message("jar.application.configuration.name"), …)`；
+  // 文案 `platform/execution/resources/messages/ExecutionBundle.properties:55` = "JAR Application"；
+  // 表单四格 `java/execution/impl/src/com/intellij/execution/jar/JarApplicationConfigurable.java:47-49/73/81`）。
+  // 本仓的规范名/标签/字段/入口判据/执行参数都在 `src/jarRun.ts`（`:50-63`、`:103-111`、`:291-343`）。
+  // ⚠️ 加类型只动**一份**清单：`src/runConfigurationSchema.ts:30` 的 `RUN_CONFIG_TYPE_FAMILY_IDS`（家族），
+  //   并给两张按家族穷尽的表补键 —— `src/runConfigTree.ts:22` 的 `RUN_CONFIG_TYPE_FAMILY_LABELS`、
+  //   `src/runConfigEditors.ts:112` 的 `RUN_CONFIG_TYPE_FAMILY_EDITORS`（少键直接 TS2741）。
+  //   UI 与落盘读的是**投影后的** `RUN_CONFIG_TYPE_IDS`（= 家族 − `RUN_CONFIG_TYPE_IDS_HOST_PENDING`），
+  //   所以联合、宿主白名单（`native/settings_schema.cpp:1011-1012`）与该 pending 必须**同一次**动，
+  //   否则就是「建得出、存不下去」那个老形状。判据 `tests/run-config-types.test.mjs`
+  //   （四份清单同步 / 第五处同源 / 家族=已接+pending / gate 与宿主两处同步）。
+  type?: 'shell' | 'application' | 'debug' | 'compound' | 'jar'
   configurations?: string[]
   command: string
   program?: string
@@ -47,6 +53,43 @@ export interface RunConfig {
    * 关闭时再启动同一配置会**先停掉上一个实例**；打开则两个并存（宿主 native/run_host.cpp 的规则）。
    */
   allowRunningInParallel?: boolean
+  /**
+   * 「启动时打开运行/调试工具窗口」= 上游 `isActivateToolWindowBeforeRun`。
+   * 判词表里那条 `Runner.FocusOnStartup` 的**用户可见半边**（另一半见 `focusToolWindowBeforeRun`）。
+   *
+   * 为什么这两个开关**挂在这条记录上**而不是全局设置（2026-10-06 execui 判决，逐行打开过上游）：
+   *   · 声明 `platform/execution/src/com/intellij/execution/RunnerAndConfigurationSettings.java:235`
+   *     （setActivate）/ `:242`（isActivate）/ `:249`（setFocus）/ `:256`（isFocus）——
+   *     四个方法都在**每条配置**的接口上，不在任何 application/project 级设置类上；
+   *   · 存的地方只有一处：`platform/execution-impl/src/com/intellij/execution/impl/RunnerAndConfigurationSettingsImpl.kt`
+   *     的属性名 `:61-62`、字段 `:108-109`、setter `:212-222`、读档 `:243-244`、写档 `:317-321`
+   *     （**只在非默认时落盘**）；
+   *   · 界面上两套 UI 写的都是**同一个对象**：老面板
+   *     `platform/execution-impl/src/com/intellij/execution/impl/BeforeRunStepsPanel.java:170-171`（建勾）、
+   *     `:214-217`（`reset` 读）、`:238-243`（`need…` 取值），落回记录在
+   *     `platform/execution-impl/src/com/intellij/execution/impl/ConfigurationSettingsEditorWrapper.java:143-144`
+   *     （`settingsToApply.set…BeforeRun(...)`）；新 UI 的两个 tag
+   *     `platform/execution-impl/src/com/intellij/execution/ui/BeforeRunFragment.java:28-42`
+   *     的 getter/setter  lambda 也是 `settings.isActivateToolWindowBeforeRun()` /
+   *     `settings.setActivateToolWindowBeforeRun(value)` ⇒ **没有第二处存放**。
+   *   · 唯一的「兜底链」不是第二个源，而是**模板继承**：同文件 `:455-461`
+   *     `importRunnerAndConfigurationSettings(template)` 把模板记录上的同三个字段拷进新配置
+   *     （`isEditBeforeRun` / activate / focus）⇒ 本仓由 `src/runConfigTemplates.ts` 承接那一步。
+   * 默认 `true`（`:108`）；缺键的补法照同文件 `:243`（缺 `activate` 属性按 **true**：`value == null || value.toBoolean()`）。
+   */
+  activateToolWindowBeforeRun?: boolean
+  /**
+   * 「启动时把焦点移到运行/调试工具窗口」= 上游 `isFocusToolWindowBeforeRun`
+   * （声明 `RunnerAndConfigurationSettings.java:249`/`:256`，存
+   * `RunnerAndConfigurationSettingsImpl.kt:109`/`:218-222`/`:244`/`:320-321`）。
+   * 默认 **false**（`:109`；注意接口 javadoc `:254` 写的是「it's default value」说 true，
+   * **实现那行才是准的** ⇒ 本仓按 `:109` 取 false）。
+   * 消费链：`ExecutionManagerImpl.kt:291-292` 合成 descriptor 的两个 flag，
+   * `RunContentManagerImpl.kt:439-441`（`isActivateToolWindowWhenAdded` 为假就整个 return）、
+   * `:450-457`（`focus = isAutoFocusContent`，但整个 IDE 没有焦点所有者时强制补真）、`:458`。
+   * 判定本体在 `src/runStartupFocus.ts`，读的就是本字段与上一条。
+   */
+  focusToolWindowBeforeRun?: boolean
 }
 export interface RunStartParams { command?: string; program?: string; args?: string[]; cwd?: string; env?: string[]; shell?: boolean; label?: string; beforeLaunch?: Array<{ name: string; command: string }>; /** 配置的 `allowRunningInParallel`：false 时宿主会先停掉同名实例（IDEA ExecutionManagerImpl.kt:613-619）。 */ allowParallel?: boolean }
 // IDEA's TODO index is driven by a list of "pattern -> description" entries, stored
@@ -99,9 +142,13 @@ export const defaultExportToHtmlSettings: ExportToHtmlSettings = {
 }
 // 命名书签列表（上游 `ManagerState.groups` 里的**非默认**那一部分；默认列表就是历史字段 `bookmarks`）。
 export interface BookmarkListSetting { name: string; isDefault: boolean; bookmarks: Bookmark[] }
-export interface ProjectSettings { /** 折叠状态（IDEA 的 workspace 文件那一段；键是项目内相对路径）。 */ foldingState?: Record<string, FoldSnapshot[]>; excludedDirs: string[]; runConfigs: RunConfig[]; bookmarks: Bookmark[]; bookmarkLists?: BookmarkListSetting[]; bookmarksView?: BookmarksViewState; todoPatterns: TodoPattern[]; templates: TemplateSettings; java: JavaProjectSettings; fileAssociations: Record<string, string>; /** VCS Log 的 UI 开关（IDEA VcsLogApplicationSettings 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。 */ vcsLog?: { showTagNames: boolean; showRootNames: boolean }; /** 命名作用域（IDEA project.scopes）。 */ scopes?: NamedScopeSetting[]; /** 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：作用域名 + 颜色名，数组顺序即优先级。 */ fileColors?: FileColorSetting[]; localFileColors: FileColorSetting[]; /** 构建工具（IDEA `build.tools` 组：外部系统自动重载 + Gradle 项目设置），**项目级**。 */ buildTools?: BuildToolsSettings; exportToHtml?: ExportToHtmlSettings }
+export interface ProjectSettings { /** 折叠状态（IDEA 的 workspace 文件那一段；键是项目内相对路径）。 */ foldingState?: Record<string, FoldSnapshot[]>; excludedDirs: string[]; runConfigs: RunConfig[]; bookmarks: Bookmark[]; bookmarkLists?: BookmarkListSetting[]; bookmarksView?: BookmarksViewState; todoPatterns: TodoPattern[]; templates: TemplateSettings; java: JavaProjectSettings; fileAssociations: Record<string, string>; /** IDEA `FormatOnSaveOptions`，Project Service / WORKSPACE_FILE。缺省保留旧全局存档迁移信号。 */ formatOnSave?: boolean; /** VCS Log 的 UI 开关（IDEA VcsLogApplicationSettings 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。 */ vcsLog?: { showTagNames: boolean; showRootNames: boolean }; /** 命名作用域（IDEA project.scopes）。 */ scopes?: NamedScopeSetting[]; /** 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：作用域名 + 颜色名，数组顺序即优先级。 */ fileColors?: FileColorSetting[]; localFileColors: FileColorSetting[]; /** 构建工具（IDEA `build.tools` 组：外部系统自动重载 + Gradle 项目设置），**项目级**。 */ buildTools?: BuildToolsSettings; exportToHtml?: ExportToHtmlSettings }
 export interface ProjectForm { parent: string; name: string; template: 'empty' | 'cpp' | 'java' | 'spring-boot' | 'maven' | 'gradle' | 'kotlin' | 'python' | 'node' | 'vue' | 'react'; source: string }
-export interface AppState { recentProjects: RecentProject[]; settings: EditorSettings; general?: GeneralSettingsState; lastProject: string | null; gitAvailable: boolean; defaultParent: string }
+export interface AppState {
+  recentProjects: RecentProject[]; settings: EditorSettings; general?: GeneralSettingsState; lastProject: string | null; gitAvailable: boolean; defaultParent: string
+  /** Transient OS date/time patterns returned by `app.state`; never persisted as a user preference. */
+  systemDateTimeFormats?: SystemDateTimeFormats | null
+}
 // Source: platform/ide-core/src/com/intellij/ide/GeneralSettings.kt:227-266
 // (GeneralSettingsState) — the application-level PersistentStateComponent stored
 // in ide.general.xml that GeneralSettingsConfigurable.kt binds its panel to.
@@ -110,6 +157,7 @@ export interface AppState { recentProjects: RecentProject[]; settings: EditorSet
 export type ProcessCloseConfirmation = 'ASK' | 'TERMINATE' | 'DISCONNECT'
 export interface GeneralSettingsState {
   defaultProjectDirectory: string
+  embeddedBrowserAllowInsecureCertificates: boolean
   reopenLastProject: boolean
   deleteToBin: boolean
   autoSyncFiles: boolean
@@ -123,6 +171,11 @@ export interface GeneralSettingsState {
   processCloseConfirmation: ProcessCloseConfirmation
   inactiveTimeout: number                // SAVE_FILES_AFTER_IDLE_SEC = UINumericRange(15, 1, 300)
   supportScreenReaders: boolean          // GeneralSettingsState.supportScreenReaders (kt:265), getter :179-186
+  // DateTimeFormatManager's application-level state, stored with TaoCode's global settings.
+  overrideSystemDateFormat: boolean
+  dateFormatPattern: string
+  use24HourTime: boolean
+  prettyFormattingAllowed: boolean
   /**
    * AudioCuesConfigurable（`ide.audiocues`，注册行 intellij.platform.ide.impl.xml:971-976
    * `groupId="appearance" groupWeight="140" id="ide.audiocues"`）的 mode 档。
@@ -145,6 +198,8 @@ export interface GeneralSettingsState {
   fuzzyFileSearch: boolean
   // ConsoleConfigurable（`Console`）：控制台行折叠规则 —— 要折叠的行 + 不折叠的例外（各为字符串列表）。
   foldConsoleLines: string[]; foldExceptions: string[]
+  // StackTraceFoldingSettings：栈帧折叠开关与阈值（上游默认 true / 8）。
+  foldJavaStackTrace: boolean; foldJavaStackTraceGreaterThan: number
   // ToolConfigurable（`preferences.externalTools`）：应用级的外部命令收藏（名称 + 命令）。
   externalTools: Array<{ name: string; command: string }>
   // XDebuggerDataViewSettings（调试器的数据视图，IDEA 存 xdebugger.xml）：本仓把它随 general
@@ -181,6 +236,7 @@ export interface GeneralSettingsState {
 // processCloseConfirmation 'ASK'.
 export const defaultGeneralSettings: GeneralSettingsState = {
   defaultProjectDirectory: '',
+  embeddedBrowserAllowInsecureCertificates: false,
   reopenLastProject: true,
   deleteToBin: true,
   autoSyncFiles: true,
@@ -194,6 +250,7 @@ export const defaultGeneralSettings: GeneralSettingsState = {
   processCloseConfirmation: 'ASK',
   inactiveTimeout: 15,
   supportScreenReaders: false,
+  ...DEFAULT_DATE_TIME_FORMAT_SETTINGS,
   // 音频提示（无障碍）：mode 三档（audio.cues.mode.auto/on/off，AudioCuesSettings.kt:75-79），
   // 本仓默认 off（上游默认 AUTO —— 差异见 GeneralSettingsState.audioCuesMode 的注释）；
   // 逐 cue 停用表默认空 = 六个 cue 全开（同上游 disabledCues 的空 Set 默认）。
@@ -203,6 +260,8 @@ export const defaultGeneralSettings: GeneralSettingsState = {
   fuzzyFileSearch: false,
   foldConsoleLines: [],
   foldExceptions: [],
+  foldJavaStackTrace: true,
+  foldJavaStackTraceGreaterThan: 8,
   externalTools: [],
   // XDebuggerDataViewSettings 的两格：默认都不开（IDEA 的默认值也是显示 null、不排序）。
   debuggerHideNullValues: false,

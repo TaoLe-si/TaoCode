@@ -77,6 +77,17 @@ test('默认档照抄上游：showDebuggerOnBreakpoint=true、hideDebuggerOnProc
   })
 })
 
+test('适配器报 preserveFocusHint ⇒ 不抢焦点（DAP `stopped.preserveFocusHint`，与"用户单步"同一条结果）', () => {
+  const host = recordingHost()
+  const result = applyDebuggerPause(host, { reason: 'breakpoint', hasTopFrameSource: true, preserveFocusHint: true })
+  assert.deepEqual(result, { attracted: false, showedFrames: false }, '适配器明说别抢焦点 ⇒ 一条宿主动作都不做')
+  assert.deepEqual(host.calls, [])
+  // 没报这一位时行为不变（回归：默认档照旧带前面）。
+  const plain = recordingHost()
+  assert.deepEqual(applyDebuggerPause(plain, { reason: 'breakpoint', hasTopFrameSource: true }), { attracted: true, showedFrames: false })
+  assert.deepEqual(plain.calls, ['toFront'])
+})
+
 test('进程结束：只有开了「隐藏调试器」才收掉这一页（:320-325）', () => {
   const hides = recordingHost()
   assert.equal(applyDebuggerTermination(hides, true), true)

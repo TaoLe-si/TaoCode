@@ -272,3 +272,17 @@ export function createUnwrapCommand(indentWidth: number, choose?: (items: Unwrap
   本片复核：`src/bridge.ts:176` 的 `LspRequestKind` 里没有任何带该入参的通道）。
 - 按列对齐（`AlignmentInColumnsHelper` 一族）、`FormattingModel`/`Block`/`Spacing` 本地重排引擎、
   `changeSignature` 的调用者层级选择器（`createCallerChooser`）：都要 PSI，本仓按 `[-]` 处理。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1（安全删除三选一，树侧）** —— 目标 `src/treeActions.ts`（本 lane 可改面）+ `src/App.vue`。复核 `src/treeActions.ts:14/:140` 仍只调 `safeDeleteNotice`，未接 `safeDeletePromptFromFiles` 三选一。登记为待办（本 lane 未落：需 `warnBeforeDelete` 的 files 形状与 treeActions 归属确认）。
+- **W2（Unwrap 多候选 chooser）** —— 目标 `src/components/CodeEditor.vue`（禁改）+ `src/editorCommands.ts`。需 CodeEditor owner。
+- **W3（代码风格设置面）** —— 目标 `src/components/SettingsDialog.vue`（本 lane）+ 设置树（非本 lane）。需设置树 owner 先登记页键。
+- **W4** —— `src/actionsOnSave.ts`（本 lane 可改面），登记。
+
+结论：W1/W3/W4 登记待办；W2 转 CodeEditor owner。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W1/W3/W4 登记待办；W2 转 CodeEditor owner。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

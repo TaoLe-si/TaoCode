@@ -54,3 +54,14 @@
   其中 **F4 需要主代理先给 Method 名**（`file.info`？入参 `{path}`、回 `{bytes, modifiedAt, readOnly, encodingHint}`）
   才能动 `src/bridge.ts` 的 `Method` 联合与 `native/main.cpp` 的 switch；名与挂点定了，
   `native/workspace.cpp`（我面）那一半 20 行以内就能补上。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **N1 已接线**：`src/App.vue:1914-1920` 的 `addRunConfiguration` 已收第三参 `env?: string[]`，`env` 存列表、缺键不补，写入 `RunConfig.env`。判据 `tests/gradle-host.test.mjs` **pass 15 / fail 0**、`tests/ext-task-settings.test.mjs` / `tests/run-configurations.test.mjs` 全绿。
+
+App.vue 行数：2695 → 2701（+6：一行回调扩成 6 行块）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

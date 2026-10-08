@@ -26,10 +26,21 @@
 //     `…description=Paste from recent clipboards`（`plugins/terminal/resources/messages/TerminalBundle.properties:22-23`）。
 //   · 右键菜单组 `plugins/terminal/frontend/resources/intellij.terminal.frontend.xml:225-230`
 //     —— `Terminal.OutputContextMenu` = CopyBlock / CopySelectedText / Paste / PasteFromHistory。
-//   · 鼠标两条 `platform/execution-impl/src/com/intellij/terminal/JBTerminalSystemSettingsProviderBase.java`
-//     —— `:302-304` 的 `pasteOnMiddleMouseClick()` 无条件 `return true`（中键粘剪贴板），
-//     `:297-299` 的 `copyOnSelect()` = `SystemInfo.isLinux`（只有 Linux 选中即复制）。
-//     这两条是 settings provider 的**覆写值**、不是设置页旋钮，所以本仓当固定行为接，不新增设置键。
+//   · 鼠标两条有**基类那一档**与**真身那一档**，本仓旧注释只引了基类、漏了真身（留痕订正）：
+//     基类 `platform/execution-impl/src/com/intellij/terminal/JBTerminalSystemSettingsProviderBase.java`
+//     `:297-299` `copyOnSelect()` = `SystemInfo.isLinux`、`:302-304` `pasteOnMiddleMouseClick()` = 无条件 `true`。
+//     但 JBTerminalPanel 实际 new 的是**子类** `plugins/terminal/src/org/jetbrains/plugins/terminal/JBTerminalSystemSettingsProvider.java`：
+//     `:74-81` `copyOnSelect()` = `(isSystemSelectionSupported() || getCopyOnSelection()) && Registry.is("editor.caret.update.primary.selection")`、
+//     `:84-86` `pasteOnMiddleMouseClick()` = `getPasteOnMiddleMouseButton()`、`:64-66` `audibleBell()` = `getAudibleBell()`。
+//     ⇒ 这两条**是设置页旋钮、不是固定行为**（`plugins/terminal/src/org/jetbrains/plugins/terminal/TerminalOptionsProvider.kt`
+//     的缺省 `:77` `myCopyOnSelection = false`、`:78` `myPasteOnMiddleMouseButton = true`）。
+//     `isSystemSelectionSupported()` 只在 Linux（X11 PRIMARY 选择）为真 —— 基类 `return false`
+//     （`platform/editor-ui-api/src/com/intellij/openapi/ide/CopyPasteManager.java:83`），Linux 实现覆写成 true。
+//     ⇒ 用户可见档位差 = 勾了「选中即复制」在 Windows/macOS 也要复制、取消「中键粘贴」就不粘。
+//     本仓把两档做成 `terminalCopyOnSelect(linux, copyOnSelection)` / `terminalPasteOnMiddleClick(enabled)` 的**真参数**，
+//     缺省档（copyOnSelection=false、pasteOnMiddleMouseButton=true）下行为与改造前逐字相同 ⇒ 见面板 `settings?.copyOnSelection ?? false`、
+//     `settings?.pasteOnMiddleMouseClick ?? true`；持久化键与设置页那两格走接线请求（保留文件，六处成对）。
+//     `Registry.is("editor.caret.update.primary.selection")` 是 IDE 全局高级项、不是终端旋钮，本仓不建模（见交付报告 §6）。
 //
 // 本仓落点：`src/components/TerminalPanel.vue` 的窗格右键菜单 + `attachCustomKeyEventHandler`
 // 拦上游那四组键；候选清单来自 `src/clipboard.ts` 的 `readClipboardHistory()`
@@ -178,12 +189,14 @@ export function terminalHistoryEntries(entries: readonly TerminalHistoryEntry[],
 }
 
 /**
- * 中键粘贴（`JBTerminalSystemSettingsProviderBase.java:302-304` 的 `pasteOnMiddleMouseClick()`）：
- * 上游这个覆写**没有条件**，直接 `return true` —— 三平台上都成立，所以它不是设置项而是固定行为。
- * 本仓面板把它做成中键按下即粘系统剪贴板（并在捕获阶段拦掉事件，避免 xterm 自己再粘一次变成双份）。
+ * 中键粘贴这一档**当下开不开**。真身子类 `JBTerminalSystemSettingsProvider.java:84-86` =
+ * `getPasteOnMiddleMouseButton()`（**不是**基类那句无条件 `return true`）—— 它是设置页
+ * 「Paste from clipboard on middle mouse button click」旋钮，缺省 **true**（`TerminalOptionsProvider.kt:78`）。
+ * 取消勾选时中键不再粘贴。面板把中键按下做成即粘系统剪贴板（并在捕获阶段拦掉事件，
+ * 避免 xterm 自己再粘一次变成双份）—— 但只在旋钮开着时才吃这个事件。
  */
-export function terminalPasteOnMiddleClick(): boolean {
-  return true
+export function terminalPasteOnMiddleClick(enabled: boolean): boolean {
+  return enabled
 }
 
 /** 鼠标事件是不是中键（DOM 的 `MouseEvent.button` 里中键固定是 1）。 */
@@ -192,12 +205,17 @@ export function terminalIsMiddleButton(event: { button?: number }): boolean {
 }
 
 /**
- * 选中即复制（同文件 `:297-299` 的 `copyOnSelect()`）：上游写的是 `return SystemInfo.isLinux`
- * —— **只有 Linux** 选中就进剪贴板（X 的 PRIMARY 选择那条惯例），Windows 与 macOS 都不做。
- * 所以这里收一个明确的 linux 旗标，不猜平台。
+ * 选中即复制这一档（真身子类 `JBTerminalSystemSettingsProvider.java:74-81`：
+ * `(isSystemSelectionSupported() || getCopyOnSelection()) && …`）。
+ * `isSystemSelectionSupported()` 只在 Linux（X11 PRIMARY，`CopyPasteManager.java:83`）为真；
+ * `getCopyOnSelection()` 是设置页「Copy to clipboard on selection」旋钮，缺省 **false**
+ * （`TerminalOptionsProvider.kt:77`）。⇒ 门 = `linux || copyOnSelection`：
+ * Linux 天生选中即复制；Windows/macOS 只有勾了旋钮才复制。
+ * （旧注释写「上游就是 SystemInfo.isLinux、Windows/macOS 不复制」是**基类那一档**，本批按真身订正。）
+ * 收两个明确旗标、不猜平台；`Registry.is("editor.caret.update.primary.selection")` 那半句是 IDE 全局高级项，本仓不建模。
  */
-export function terminalCopyOnSelect(linux: boolean): boolean {
-  return linux
+export function terminalCopyOnSelect(linux: boolean, copyOnSelection: boolean): boolean {
+  return linux || copyOnSelection
 }
 
 /**

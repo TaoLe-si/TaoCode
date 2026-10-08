@@ -7,8 +7,9 @@ import { gradleSync, request, type Entry, type ProjectSettings, type Workspace }
 import { errorMessage } from './errors.ts'
 import {
   DEFAULT_BUILD_TOOLS, EMPTY_GRADLE_SYNC, GRADLE_BUILD_FILE_SUFFIXES, GRADLE_DEPENDENCIES_TASK, GRADLE_WRAPPER_PROPERTIES,
-  canLinkGradleProject, dependenciesByProject, gradleCommand, gradleConfigFile, gradleDirectoryTask,
-  gradleEnvironment, gradleFailure, gradleProjectDirectory, detectGradle, isGradleBuildScript,
+  GRADLE_JVM_OPEN_SETTINGS_ACTION, GRADLE_CONFIGURABLE_ID,
+  canLinkGradleDirectory, canLinkGradleProject, dependenciesByProject, gradleCommand, gradleConfigFile, gradleDirectoryTask,
+  gradleEnvironment, gradleFailure, gradleJavaHomeIssue, gradleLinkDirectory, gradleProjectDirectory, detectGradle, isGradleBuildScript,
   gradleTaskProjectDisplayName, gradleTaskShortName,
   parseGradleDependencies, parseGradleProjects, parseGradleTasks, shouldAutoReload, tasksByGroup,
   type AutoReloadType, type BuildToolsGradleSettings, type BuildToolsSettings, type GradleDependencyScope,
@@ -34,20 +35,21 @@ import { setConfiguredSourceRoots } from './projectFileIndex.ts'
 // 本仓没有 Module 对象图，所以这条链落在**用户可见的标识**上 —— 控制台标签与运行配置名。
 import { chooseModuleName, moduleNameCandidates, moduleNamePathParts } from './externalSystemNameGenerator.ts'
 import { createAutoImportNotifier } from './autoImportNotifications.ts'
-import { backgroundTaskQueue } from './backgroundTasks.ts'
+import { backgroundTaskQueue, type ProgressIndicatorModel } from './backgroundTasks.ts'
 // 自动导入 API 层（上游 external-system-api 的 `autoimport`/`autolink`，见 esa/autoimport 判词）：
 // tracker 按 (系统 id, 工程绝对路径) 登记 `ExternalSystemProjectAware`，构建脚本改动经它决定
 // 「自动重载 / 出通知」，重载开始/结束驱动 `ExternalSystemProjectListener`；未链接工程的
 // 链接/解除经 `ExternalSystemUnlinkedProjectAware` 登记表暴露（本仓没有插件 EP 宿主，
 // 登记项由这里直接构造）。
 import {
-  createAutoReloadWindow, createExternalSystemProjectTracker, createUnlinkedProjectRegistry,
-  normalizeProjectPath, projectIdOf,
+  createAutoReloadWindow, createExternalSystemProjectTracker, createUnlinkedProjectRegistry, normalizeProjectPath,
+  projectIdOf, unlinkedProjectNotice, UNLINKED_PROJECT_DISPLAY_ID,
   type AutoImportModificationType, type ExternalRefreshStatus,
 } from './externalSystemAutoImport.ts'
 // 「自动链接未链接工程」的项目级开关（上游 `ExternalSystemUnlinkedProjectSettings.isEnabledAutoLink`，
 // 默认 true、项目级持久，见 `src/externalSystemAutoLink.ts` 的坐标）—— 替掉下面的常量门控。
-import { isAutoLinkEnabled } from './externalSystemAutoLink.ts'
+// 「跳过这张通知」的记账在同一个文件（上游 `UnlinkedProjectNotificationAware.kt:33-50` 的 `disabledNotifications`）。
+import { isAutoLinkEnabled, isUnlinkedNoticeSkipped, skipUnlinkedNotice } from './externalSystemAutoLink.ts'
 // 设置文件**内容 CRC** 比对（上游 `AutoImportProjectSettingsFilesTracker` 的 oldCRC/新 CRC）：
 // 「保存了但内容没变」不算改动，坐标与取数口径见 `src/externalSystemSettingsCrc.ts`。
 import { calculateSettingsFilesCrc } from './externalSystemSettingsCrc.ts'
@@ -127,7 +129,9 @@ export function gradleViewContext(
 type JobKind = 'sync' | 'dependencies' | 'task'
 interface Job { directory: string; root: string; epoch: number; kind: JobKind; done: () => void; cancelled?: boolean;
   /** kind='task' 用：命令串与要叠的环境变量（任务编辑对话框写下的 VM 选项/env 只有这条通道带得动）。 */
-  commandOverride?: string; environment?: string[] }
+  commandOverride?: string; environment?: string[];
+  /** 走后台队列的那条重载才带得到它：每个链接目录开新进程**之前**过一次协作检查点（见 `execute` 开头）。 */
+  progress?: ProgressIndicatorModel }
 interface ActiveJob { job: Job; command: string; startedAt: number; cancelled: boolean; discard: boolean; accepted: boolean }
 
 export function createGradleHost(deps: GradleHostDeps) {
@@ -204,7 +208,16 @@ export function createGradleHost(deps: GradleHostDeps) {
       void backgroundTaskQueue.run({
         title: '同步 Gradle 项目更改',
         onCancel: () => { void cancel() },
-        run: async () => { await sync() },
+        // 协作检查点（`docs/wiring-requests-2026-10-06-status2.md` 的 W3）：队列挂起（省电模式，
+        // `src/notifications.ts:298`）时不进下一个阶段 —— 上游那句等价物是 `freezeIfNeeded` 里的 `myLock.wait()`
+        // （platform/platform-impl/src/com/intellij/openapi/progress/impl/ProgressSuspender.java:154-181），
+        // 取消那一路是 `ProgressIndicator.checkCanceled()`。Gradle 子进程内部没有可让路的节拍 ⇒
+        // 让路只发生在"不为下一个链接目录开新进程"这一层（`execute(job)` 开头同一个检查点）。
+        run: async indicator => {
+          await indicator.awaitResumed()
+          indicator.checkCanceled()
+          await sync(undefined, indicator)
+        },
       })
     },
   })
@@ -398,8 +411,11 @@ export function createGradleHost(deps: GradleHostDeps) {
   }
 
   async function linkProject(path: string): Promise<void> {
-    if (!canLinkGradleProject(path, linkedProjects.value)) return
-    const directory = gradleProjectDirectory(path)
+    // 上游 `ImportProjectFromScriptAction.kt:17-23` 的可见性判**文件名**，而 `:28`+`:34-36` 传出去的是
+    // **目录**（`getDefaultPath`：文件取父目录、目录照它）；本仓的未链接工程登记表回调进来的同样是目录
+    // （`linkAndLoadProject(externalProjectPath)`）。之前这里只认构建脚本路径 ⇒ 递一个目录进来会静默不链。
+    const directory = gradleLinkDirectory(path)
+    if (!canLinkGradleDirectory(directory, linkedProjects.value)) return
     deps.notify(directory ? `正在链接 Gradle 项目：${directory}` : '正在链接 Gradle 项目：项目根目录')
     if (!await persistLinked([...linkedProjects.value, directory])) return
     updateModels()
@@ -412,11 +428,18 @@ export function createGradleHost(deps: GradleHostDeps) {
     if (await persistLinked(linkedProjects.value.filter(dir => dir !== directory))) updateModels()
   }
 
-  function notifyFailure(directory: string, label: string, error: string): void {
+  /**
+   * 执行失败的通知（上游 `ExternalSystemUtil.handleException` 那一族给用户看的那一条）。
+   * `issueActions` 是**按失败种类**换掉的最后一条动作：默认给「构建工具设置」（`build.tools` 那页），
+   * JDK 解析失败时换成「打开 Gradle 设置」—— Gradle JVM 的下拉在那一页，上游那句
+   * `jdkConfigurationException`（`LocalGradleExecutionAware.kt:193-198`）拼的也正是
+   * `GradleBundle.properties:85` 的 `Open Gradle Settings`。
+   */
+  function notifyFailure(directory: string, label: string, error: string, issueActions?: { label: string; run: () => void }[]): void {
     deps.notify(`${directory || '根项目'} · ${label}失败：${error}`, true, undefined, undefined, undefined, [
       { label: '重新同步', run: () => { void sync(directory) } },
       { label: '打开构建脚本', run: () => openConfig(directory) },
-      { label: '构建工具设置', run: () => { void deps.openSettings('build.tools') } },
+      ...(issueActions?.length ? issueActions : [{ label: '构建工具设置', run: () => { void deps.openSettings('build.tools') } }]),
     ])
   }
 
@@ -426,6 +449,13 @@ export function createGradleHost(deps: GradleHostDeps) {
   }
 
   async function execute(job: Job): Promise<void> {
+    // 协作检查点（挂起 = 上游 `ProgressSuspender.java:154-181` 的 `freezeIfNeeded`，取消 = `checkCanceled()`）：
+    // 队列被挂起时**这一个目录的 Gradle 进程不启动**；子进程内部没有节拍可让，所以让路在"开下一阶段之前"。
+    // 只有走后台队列的那条重载带得到 `job.progress`，面板直接点的同步不带 ⇒ 行为与这段之前一字不差。
+    if (job.progress) {
+      await job.progress.awaitResumed()
+      if (job.progress.cancelled) return // 取消：这个目录与排在它后面的都不再启动（模型一个字都不写）
+    }
     const model = modelFor(job.directory)
     const info = await detectDirectory(job.directory)
     if (job.cancelled || !model || modelFor(job.directory) !== model || !current(job.root, job.epoch)) return
@@ -517,7 +547,11 @@ export function createGradleHost(deps: GradleHostDeps) {
           }))
         }
       }
-      if (error && !owner.cancelled && !gradleSync.cancelled) notifyFailure(job.directory, job.kind === 'sync' ? 'Gradle 同步' : job.kind === 'dependencies' ? '依赖加载' : '任务运行', error)
+      // JDK 解析失败（包装器在 Gradle 起步之前就死了）单独认一次：`gradleFailure` 已经把那句话换成
+      // 上游那句可操作的文案，这里再补一条把用户送到 Gradle JVM 下拉所在页的动作。
+      const jvmIssue = gradleJavaHomeIssue(output)
+      if (error && !owner.cancelled && !gradleSync.cancelled) notifyFailure(job.directory, job.kind === 'sync' ? 'Gradle 同步' : job.kind === 'dependencies' ? '依赖加载' : '任务运行', error,
+        jvmIssue ? [{ label: GRADLE_JVM_OPEN_SETTINGS_ACTION, run: () => { void deps.openSettings(GRADLE_CONFIGURABLE_ID) } }] : undefined)
       deps.notifyProgress(gradleFinishedNoticeOf(error, Math.max(0, Math.round((gradleSync.at - owner.startedAt) / 1000)),
         job.kind === 'dependencies' ? '依赖加载' : job.kind === 'task' ? '任务运行' : undefined))
     } catch (error) {
@@ -553,7 +587,7 @@ export function createGradleHost(deps: GradleHostDeps) {
     }
   }
 
-  async function enqueue(kind: JobKind, directory?: string): Promise<void> {
+  async function enqueue(kind: JobKind, directory?: string, progress?: ProgressIndicatorModel): Promise<void> {
     if (!deps.isDesktop) { deps.notify('浏览器预览不能运行 Gradle 同步，请在桌面端使用。', true); return }
     const root = deps.workspace.value?.root
     if (!root) { deps.notify('请先打开一个项目。', true); return }
@@ -567,20 +601,24 @@ export function createGradleHost(deps: GradleHostDeps) {
       if (kind === 'dependencies' && modelFor(dir)?.dependenciesLoaded) return false
       return !queue.some(job => job.directory === dir && job.kind === kind && job.epoch === epoch)
         && !(active?.job.directory === dir && active.job.kind === kind && active.job.epoch === epoch)
-    }).map(dir => new Promise<void>(done => { queue.push({ directory: dir, root, epoch, kind, done }) }))
+    }).map(dir => new Promise<void>(done => { queue.push({ directory: dir, root, epoch, kind, done, progress }) }))
     busy.value = queue.length > 0 || pumping
     void pump()
     await Promise.all(jobs)
   }
 
-  async function sync(directory?: string): Promise<void> {
+  /**
+   * `directory` 不给 = 全部链接目录依次同步（多个 job ⇒ 多个协作检查点）。
+   * `progress` 只有走后台任务队列的那条「同步更改」会传，见 `execute(job)` 开头。
+   */
+  async function sync(directory?: string, progress?: ProgressIndicatorModel): Promise<void> {
     // 重载已排上 ⇒ 撤下待同步通知（`AutoImportProjectTracker.kt:224-228` 的 notificationExpire 分支）。
     // `.id`：通知表按系统 id 字符串记账（`autoImportNotifications.ts`），`GRADLE_SYSTEM` 是模型身份对象。
     autoImport.expire(GRADLE_SYSTEM.id)
     // 显式刷新把合并窗里待着的延迟重载吃掉（上游 `PriorityEatUpdate` 的 priority 0 语义，
     // `AutoImportProjectTracker.kt:137-142,171-196`）：这次真的会跑，不用再排一次。
     autoReloadWindow.eatPending(directory)
-    await enqueue('sync', directory)
+    await enqueue('sync', directory, progress)
   }
   async function refreshProject(directory = projectDirectory.value): Promise<void> { await sync(directory) }
   async function loadDependencies(directory?: string): Promise<void> { await enqueue('dependencies', directory) }
@@ -819,6 +857,7 @@ export function createGradleHost(deps: GradleHostDeps) {
     void (async () => {
       const info = await detect()
       if (!current(root, generation)) return
+      const store = typeof localStorage === 'undefined' ? null : localStorage
       // Opening a project is an explicit scheduleProjectRefresh, independent of autoReloadType.NONE.
       // GradleWarmupConfigurator.kt:118-128 only auto-links the root; nested builds require Link Project.
       if (info?.isGradle && !linkedProjects.value.length) {
@@ -826,12 +865,23 @@ export function createGradleHost(deps: GradleHostDeps) {
         // （上游 `UnlinkedProjectSettings.kt:9-23`，默认 true、**项目级持久**；唯一消费者是
         // `UnlinkedProjectStartupActivity.kt:51-54` 门控 `loadProjectIfSingleUnlinkedProjectFound`）。
         // 存储面在 `src/externalSystemAutoLink.ts`（上游没有设置页，所以本仓也不画控件）。
-        const autoLink = isAutoLinkEnabled(typeof localStorage === 'undefined' ? null : localStorage, root)
-        if (!autoLink) return
-        if (!unlinkedProjects.shouldShowUnlinkedNotification(GRADLE_SYSTEM.id, autoLink)) return
-        if (!await persistLinked([''])) return
-        updateModels()
-        trackLinkedProjects()
+        const autoLink = isAutoLinkEnabled(store, root)
+        // roots4 补的那一寸：没自动链接时上游**不是静默跳过**。`UnlinkedProjectStartupActivity.kt:141-197`
+        // 那条扫描器接着会经 `updateNotification`（`:172-181`）挂一条「找到 Gradle 的构建脚本」的 UPN 通知
+        // （`isEnabledAutoLink` 只门控**自动链接**，不门控通知；`UnlinkedProjectNotificationAware.kt:42-50`
+        // 收敛的条件是「用户跳过过」与「这条已经弹过」）。之前这里 `if (!autoLink) return` 直接把用户
+        // 剩下的那条路（点「加载 Gradle 工程」）也一起关掉了。
+        if (autoLink && unlinkedProjects.shouldShowUnlinkedNotification(GRADLE_SYSTEM.id, true)) {
+          if (!await persistLinked([''])) return
+          updateModels()
+          trackLinkedProjects()
+        } else if (!isUnlinkedNoticeSkipped(store, root)) {
+          const notice = unlinkedProjectNotice(GRADLE_SYSTEM.readableName, deps.workspace.value?.name ?? '')
+          deps.notify(notice.title, false, undefined, [notice.helpText], UNLINKED_PROJECT_DISPLAY_ID, [
+            { label: notice.linkAction, run: () => { void linkProject('') } },
+            { label: notice.skipAction, run: () => { skipUnlinkedNotice(store, root) } },
+          ])
+        }
       }
       if (linkedProjects.value.length && deps.isDesktop) await sync()
     })()

@@ -23,7 +23,11 @@ test('项目视图上 Ctrl+Z / Ctrl+Shift+Z 接的是命令栈，不是编辑器
   assert.match(tree, /function undoRedoFileOperation\(kind: 'undo' \| 'redo'\) \{/)
   // `selection` 是从 createProjectTreeModel 解构出来的 reactive Set（`src/projectTreeModel.ts:26`），不是 ref ⇒ 没有 `.value`。
   assert.match(tree, /const scope = \[\.\.\.selection\]/)
-  assert.match(tree, /void processor\[kind\]\(scope\)\.then\(result => \{/)
+  // 撤销/重做经 `com.intellij.undoProvider` 那条链走（`src/undoProviderHost.ts` 的 `runFileUndoRedo`：
+  // `UndoManagerImpl.onCommandStarted/onCommandFinished`（`:278-290`）通知全部撤销提供者，
+  // 出厂 `FileUndoProvider` 与第三方同 id 挂的那几支同路径），里面才是 `processor[kind](scope)`。
+  assert.match(tree, /import \{ runFileUndoRedo \} from '\.\.\/undoProviderHost\.ts'/)
+  assert.match(tree, /void runFileUndoRedo\(processor, props\.workspaceKey \?\? '', kind, scope\)\.then\(result => \{/)
   assert.match(tree, /if \(!result\.ok && result\.report\) emit\('error', reportText\(result\.report\)\)/)
   // 键位：Ctrl+Shift+Z = 重做，Ctrl+Z = 撤销（$default.xml:232-235 / :685-688）。
   assert.match(tree, /if \(event\.key === 'Z' && event\.ctrlKey && !event\.altKey && !event\.metaKey\) \{/)

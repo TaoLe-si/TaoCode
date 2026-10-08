@@ -19,3 +19,10 @@
 
 - 本轮新增的 `commitAndPushLabel` / `commitButtonLabel` / `checksProgress` / `checksProgressShown` 全部走 `SourceControl.vue` 已有的 props 与既有的 `createCommitChecks` 依赖，**没有新 prop、没有新挂载点**。
 - 书签族本轮零改动：剩余两条（`BookmarkBundle.messagePointer`、`BookmarksListener`）判词里就是"没有消费者 ⇒ 不造空壳"，接线也接不出用户可见的行为。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（`git.commit` 可选 `paths`）跳过** —— 目标 `native/main.cpp`（禁改）+ `native/git.cpp`（vcs 半区）。需 native/vcs owner 同批处理。
+- **R2（编辑器修订计数 → reset 判据）已接线（形状升级）**：请求要的 `editorEpoch` 全局计数**已被更正确的实现取代** —— `src/documentRevisions.ts` 的每篇文档修订号账本，生产侧 `src/App.vue:74` / `src/diskSync.ts:15` / `src/editorFileOps.ts:20` 的 `bumpDocumentRevision` 已接，消费侧 `src/sourceControlCommitChecks.ts:150` 的 `commitChecksFingerprint(changes.value, dirtyPaths(), documentRevisions())` 已吃第三个参数。`editorEpoch` 被显式删除并留痕（`src/commitChecksResult.ts:148-163`、`src/sourceControlCommitChecks.ts:72/:149`）。整条链已通，**无需再接**。
+
+结论：零待接（R2 由更优形状闭环），未改任何文件。

@@ -303,3 +303,16 @@
    （`grep -rn "textDocumentContent\|dynamicFiles" native/ src/` 只命中 `native/lsp.cpp:162` 那一行注释）
    ⇒ 声明与实发一致，**不算缺陷**，接上就是假控件。上一轮文件头写的「五条 refresh」因此**没有少做**，
    只是当时没把第六条显式判成 `[-]`（本轮在报告里补了那一行）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1a（`src/progressNotices.ts` 按 displayId 归组）** —— 本 lane 可改面，登记为待办。
+- **R1b（`src/notificationGroups.ts` 补前缀行）** —— 本 lane 可改面，登记为待办（与 gradlehostfix R1 同族）。
+- 其余目标 `src/bridge.ts` / `App.vue` / 别人面 —— 分别转 owner / 本 lane。
+
+结论：零接线（R1a/R1b 登记）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（R1a/R1b 登记）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

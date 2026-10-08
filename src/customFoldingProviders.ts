@@ -27,15 +27,16 @@
 // `getPlaceholderText` 复用「取标记之后的说明，取不到就是 `...`」这条**能从两个真 provider 核到**的规则，
 // 不另外编一条。
 
-/** 一个 provider 认哪些标记、折起来显示什么、在 Surround 列表里叫什么。 */
-export interface CustomFoldingProviderInfo {
+import { CUSTOM_FOLDING_PROVIDER_EP, EXTENSIONS } from './extensionPoints.ts'
+
+/** 一个 provider 认哪些标记、折起来显示什么、在 Surround 列表里叫什么。 */export interface CustomFoldingProviderInfo {
   /** 上游 EP 实现类的简名；`region` 那一族是空串（社区树里没有实现类）。 */
   readonly id: string
   /** 上游 `getDescription()`：Surround With 列表里那一行的标题。 */
   readonly description: string
   /**
    * 上游 `getStartString()`：`?` 是说明文字的占位符，生成时换成 `Description`
-   * （`CustomFoldingSurroundDescriptor.java:51` 的 `DEFAULT_DESC_TEXT`、`:262-271` 的替换与选中）。
+   * （`CustomFoldingSurroundDescriptor.java:47` 的 `DEFAULT_DESC_TEXT`、`:300-304` 的替换与选中）。
    */
   readonly startString: string
   /** 上游 `getEndString()`。 */
@@ -96,6 +97,70 @@ export const CUSTOM_FOLDING_PROVIDERS: readonly CustomFoldingProviderInfo[] = [
   },
 ]
 
+// ── provider 的**注册表**（上游 `CustomFoldingProvider.getAllProviders()` / EP 的等价物） ─────
+// 上游那张表由扩展点 `com.intellij.customFoldingProvider` 填（`CustomFoldingProvider.java:18` 的
+// `EP_NAME`；声明在 `platform/core-api/resources/intellij.platform.core.xml:40`）：插件在 plugin.xml 里
+// `<com.intellij.customFoldingProvider implementation="…"/>` 一条，宿主启动时全收。
+// 本仓没有插件 XML 解析器，但有扩展点宿主（`src/extensionPoints.ts` 的 `EXTENSIONS`）——
+// 所以这里补一个注册表：bundled 三条在模块加载时挂成 **bundled 贡献**，第三方按同一个 EP id 挂进来的
+// provider 由 `adoptFromExtensions()` 收编，**消费方（`markerKindOf` / `customFoldingSurround.ts`）
+// 一律从注册表取**（`customFoldingProviders()`），不再直接读常量表。
+//
+// 贡献键：有实现类简名的用它，没有实现类的（`//<region>` 那一族，见文件头）用展示名 —— 两者都唯一，
+// 且 `registerExtension` 不接受空 id。
+export function customFoldingProviderKey(provider: CustomFoldingProviderInfo): string {
+  return provider.id || provider.description
+}
+
+export class CustomFoldingProviderRegistry {
+  private readonly table = new Map<string, CustomFoldingProviderInfo>()
+
+  /** 注册一个 provider（同键覆盖）；有 EP 宿主时同时挂进 EP（第三方按 id 挂进来即走这条）。 */
+  register(provider: CustomFoldingProviderInfo, options: { source?: 'bundled' | 'user' } = {}): void {
+    const key = customFoldingProviderKey(provider)
+    if (!key || !(provider.start instanceof RegExp) || !(provider.end instanceof RegExp))
+      throw new Error('自定义折叠 provider 必须有 id 或 description，且 start/end 是正则。')
+    this.table.set(key, provider)
+    if (EXTENSIONS.hasExtensionPoint(CUSTOM_FOLDING_PROVIDER_EP))
+      EXTENSIONS.registerExtension(CUSTOM_FOLDING_PROVIDER_EP, key, provider, { source: options.source ?? 'user' })
+  }
+
+  unregister(key: string): boolean {
+    const removed = this.table.delete(key)
+    if (removed) EXTENSIONS.unregisterExtension(CUSTOM_FOLDING_PROVIDER_EP, key)
+    return removed
+  }
+
+  /** 从扩展点宿主收编 provider（上游启动时把 plugin.xml 里的那两条全注册进来）。返回收编条数。 */
+  adoptFromExtensions(): number {
+    let adopted = 0
+    for (const provider of EXTENSIONS.extensionsOf<CustomFoldingProviderInfo>(CUSTOM_FOLDING_PROVIDER_EP)) {
+      const key = provider ? customFoldingProviderKey(provider) : ''
+      if (!key || !(provider.start instanceof RegExp) || !(provider.end instanceof RegExp)) continue
+      this.table.set(key, provider)
+      adopted += 1
+    }
+    return adopted
+  }
+
+  all(): CustomFoldingProviderInfo[] { return [...this.table.values()] }
+
+  find(key: string): CustomFoldingProviderInfo | null { return this.table.get(key) ?? null }
+
+  get size(): number { return this.table.size }
+}
+
+/** 进程内唯一的注册表（随本仓发货的三条 bundled + 收编的第三方）。 */
+export const CUSTOM_FOLDING_PROVIDER_REGISTRY = new CustomFoldingProviderRegistry()
+
+/** 消费方统一入口：当前全部 provider（bundled 在前，收编的第三方在注册序上跟在其后）。 */
+export function customFoldingProviders(): readonly CustomFoldingProviderInfo[] {
+  return CUSTOM_FOLDING_PROVIDER_REGISTRY.all()
+}
+
+// bundled 三条：上游 plugin.xml 的 `:1466-1467` 两条 + 本仓按语义补的 `//<region>` 一族（见文件头）。
+for (const provider of CUSTOM_FOLDING_PROVIDERS) CUSTOM_FOLDING_PROVIDER_REGISTRY.register(provider, { source: 'bundled' })
+
 // 去掉注释前缀后的 region 标记正文；不是注释行时返回 null。
 // 上游判的是整个注释 token（`CustomFoldingBuilder.java:211-213` 只放 `PsiComment` 进来），
 // 本仓按行取，所以先剥前缀。块注释要**还原成上游那种带 `/*`…`*/` 的整段文本** ——
@@ -111,10 +176,11 @@ export function commentMarkerBody(line: string): string | null {
   return block ? text : null
 }
 
-/** 这一行正文是哪个 provider 的哪种标记（`CustomFoldingBuilder.java:164-187` 的那两次询问）。 */
+/** 这一行正文是哪个 provider 的哪种标记（`CustomFoldingBuilder.java:164-187` 的那两次询问）。
+ *  遍历的是**注册表**的当前集合（bundled + 收编的第三方），不是常量表 —— EP 化后的消费点。 */
 export function markerKindOf(body: string | null): { provider: CustomFoldingProviderInfo; kind: 'start' | 'end' } | null {
   if (!body) return null
-  for (const provider of CUSTOM_FOLDING_PROVIDERS) {
+  for (const provider of customFoldingProviders()) {
     if (provider.start.test(body)) return { provider, kind: 'start' }
     if (provider.end.test(body)) return { provider, kind: 'end' }
   }
@@ -188,7 +254,7 @@ export function placeholderOf(body: string | null, elementText?: string): string
   return (attribute ? attribute[1]!.trim() : tail) || '...'
 }
 
-// 这个区域是否**默认折起**（`CustomFoldingProvider.java:112-114` 的 `isCollapsedByDefault(text)`，
+// 这个区域是否**默认折起**（`CustomFoldingProvider.java:81-83` 的 `isCollapsedByDefault(text)`，
 // 由 `CustomFoldingBuilder.java:138-142` 在区间落地时逐条问）。
 // 基类那一半就是设置项 `COLLAPSE_CUSTOM_FOLDING_REGIONS`（本仓的 `collapseCustomRegions`，
 // 已经走 `src/editorFoldingSettings.ts` 的 kind 映射）；这里只补 **NetBeans 多认的那一条**：

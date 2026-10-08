@@ -214,6 +214,16 @@ int main() {
                   && payload.at("range").at("start").at("character") == 6
                   && payload.at("range").at("end").at("character") == 11,
               "hover range not passed through");
+        // 数组形态的 `MarkupContent`（`MarkedString[]`）：`{language, value}` 那一段必须裹成
+        // 围栏代码块（上游 `TextRangeAndMarkupContent.fromHover`，
+        // platform/lsp-impl/src/impl/features/documentation/TextRangeAndMarkupContent.kt:32-38），
+        // 两段之间用空行连（`:28` 的 `joinToString("\n\n")`）。只取 value 会把 `java` 丢掉。
+        done = false;
+        session.request("hover", kDoc, 3, 6, reply);
+        check(wait_for(done), "marked-string hover never replied");
+        check(failure.is_null() && payload.at("available") == true, "marked-string hover failed");
+        check(payload.at("contents") == "```java\nint counter;\n```\n\nthe counter field",
+              "marked-string hover lost its language fence: " + describe(payload.at("contents")));
         done = false;
         session.request("definition", kDoc, 1, 0, reply);
         check(wait_for(done), "definition never replied");
@@ -227,6 +237,23 @@ int main() {
         // Line 2 is "}" so there is no identifier being typed: the whole canned
         // dictionary comes back.
         check(payload.at("items").size() == 7, "all seven items, got " + std::to_string(payload.at("items").size()));
+        // 列表级缺省（`CompletionList.itemDefaults`）：第 0 行回的是条目不带 textEdit/insertTextFormat/data
+        // 的列表 —— 整形层必须按 `LspCompletionUtil.kt:47-63` 的 `applyItemDefaults` 逐项回填：
+        // `insertTextFormat`/`data` 直接取列表级，`textEdit` 由 `editRange` + label 合成。
+        done = false;
+        session.request("completion", kDoc, 0, 0, reply);
+        check(wait_for(done), "defaults completion never replied");
+        check(failure.is_null(), "defaults completion failed: " + describe(failure));
+        check(payload.at("items").size() == 7, "defaults list should still carry seven items");
+        const auto& first = payload.at("items")[0].at("raw");
+        check(first.at("insertTextFormat") == 2, "itemDefaults.insertTextFormat was not applied");
+        check(first.contains("data") && first.at("data").at("marker") == "prefix:@0:0",
+              "itemDefaults.data was not applied");
+        check(first.contains("textEdit") && first.at("textEdit").at("range").at("start").at("line") == 0
+                  && first.at("textEdit").at("range").at("end").at("character") == 11,
+              "itemDefaults.editRange was not turned into a textEdit");
+        check(first.at("textEdit").at("newText") == first.at("label"),
+              "the synthesised textEdit must use textEditText or fall back to label");
     });
 
     // 「转到声明」有多个目标时，客户端要开选择弹层（IDEA 的 Choose Declaration）—— 前提是

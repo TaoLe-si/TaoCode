@@ -187,7 +187,7 @@ watch(scope, cancel)
       </select>
       <span class="ft-dir" :title="scopeDir">{{ scopeDir }}</span>
       <input v-model="query" class="ft-search" aria-label="搜索文件模板" placeholder="搜索名称、扩展名或内容…" spellcheck="false" />
-      <button class="subtle-button" :disabled="busy" @click="startCreate"><Plus :size="iconSize.menu" />新建模板</button>
+      <button class="subtle-button" :disabled="busy" @click="startCreate"><Plus aria-hidden="true" :size="iconSize.menu" />新建模板</button>
     </div>
 
     <div class="ft-list" role="list" aria-label="文件模板列表">
@@ -282,8 +282,8 @@ watch(scope, cancel)
 .ft-field-error { margin: 0; color: var(--error); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .ft-warn { margin: 0; color: var(--warning, var(--muted)); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .ft-slots { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
-.ft-hint { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.7; overflow-wrap: anywhere; }
-.ft-hint code { font: 10px var(--font-mono); color: var(--secondary); }
+.ft-hint { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.ft-hint code { font: 11px var(--font-mono); color: var(--secondary); }
 .ft-preview { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
 .ft-preview-head { display: flex; align-items: center; gap: var(--space-1); color: var(--secondary); font-size: 11px; }
 .ft-preview-head code { font: 11px var(--font-mono); color: var(--accent); }

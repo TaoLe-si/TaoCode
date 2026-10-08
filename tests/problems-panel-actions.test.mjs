@@ -12,9 +12,14 @@ const read = path => readFileSync(new URL(path, root), 'utf8')
 
 test('行菜单：逐行「操作」入口 + 抑制/修复/级别/文件四段', () => {
   const panel = read('src/components/ProblemsPanel.vue')
+  // 2026-10-06 接线：抑制/修复那两段搬进 `IntentionListMenu.vue`，两段标题只剩
+  // `src/intentionMenuModel.ts` 这一份（顺序改由上游档位判：先修复、后意图）。
+  const titles = read('src/intentionMenuModel.ts')
   assert.match(panel, /@click\.stop="openRowMenu\(p, \$event\)"/)
-  assert.match(panel, /抑制此检查（写入文件）/)
-  assert.match(panel, /快速修复（应用前预览）/)
+  assert.match(panel, /<IntentionListMenu :fixes="menuFixes" :options="menuOptions"/,
+    '两段标题有人画才算在场：宿主没挂上这个组件就是又断了')
+  assert.match(titles, /抑制此检查（写入文件）/)
+  assert.match(titles, /快速修复（应用前预览）/)
   assert.match(panel, /高亮级别/)
 })
 

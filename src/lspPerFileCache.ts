@@ -33,7 +33,9 @@ export interface LspCache {
 //     （生产写入方是 `src/lspCompletionStartup.ts` 那条「服务器没响应就重启」的恢复链）；
 //   · 服务器自己发 `workspace/…/refresh` 说「你手里那份过期了」——
 //     `LspServerNotificationsHandlerImpl.kt:341-368` 答 null，`LspClientImpl.kt:223-265`
-//     清对应的缓存并重取；本仓的分派在 `src/lspProgress.ts`。
+//     清对应的缓存并重取；本仓的分派在 `src/lspServerMessages.ts`（`handleRefresh` 在 `:409-416`，
+//     其中 `:410` 就是这一次 `clearAllLspCaches()`；留痕：原写「分派在 `src/lspProgress.ts`」，
+//     那个文件只做进度条与消息的表，不作废缓存）。
 // 与上游的差异（如实）：上游按**单个缓存**清（例如只清 `semanticTokensCache`），这里一次清整族。
 // 多出来的代价只是「下一次读重新请求一次」，既不会留下旧结果，也不会漏掉新结果。
 const registeredCaches = new Set<LspCache>()

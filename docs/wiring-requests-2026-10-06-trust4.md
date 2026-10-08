@@ -126,3 +126,16 @@
   `chooseMany()` 与 `src/components/FileChooserDialog.vue` 的选区（裸点清空 / Shift 段选 / Ctrl toggle，口径抄 `src/welcomeRowSelection.ts`）。
 - **要主代拍板的那一句**：要不要为 ① 那个「多选 jar」的真调用点立项？立了就同一批把 ②（native + `CMakeLists.txt` 都不在名下，得走请求）一起接；
   不立则本桶维持 `[-]`，不动代码。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R4** —— 已落登记。**T1（`workspaceLifecycle` 露两个名字）** —— 复核 `src/App.vue:1985` 已解构 `trustEntries, saveTrustedPaths`（welcome3 W1 已接）。
+- **T2（`semanticActions.ts:187` 看不见会话那一份）** —— 本 lane 可改面，登记。
+- **T3（「这次信任」进不了宿主硬边界）** —— native + 设计决策，非本 lane。
+
+结论：T1 已接线；T2 登记，T3 转 owner。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「T1 已接线；T2 登记，T3 转 owner。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

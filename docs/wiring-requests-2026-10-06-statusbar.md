@@ -178,3 +178,16 @@
 | 请求 3（`bridge` 假控件） | **已闭环 ⇒ 可关闭** | `src/statusWidgets.ts` 注册表里已无 `bridge`（只剩 `:25-36` 的留痕注释）；`tests/statusbar-popup-motion-parity.test.mjs:40` ⇒ `const KNOWN_GAPS = new Map()`（空）；`tests/status-widgets-registry.test.mjs` 那条「`bridge` 已删，存档里残留的键也不复活它」本轮实跑绿 |
 | 请求 4（治理 3 条） | `[-]` 不在本域 | 4.1 的 `build/` 白名单、4.2/4.3 都归主代理与折叠属主；本批未重复核，**不要按本批的报告认为它们已处理** |
 | 附（通知区那条闸） | 维持"登记不照抄" | 本轮复核：状态栏那颗通知芯片仍在 `src/App.vue:2297` 行内（`showWidget('notices')` 那一条），`presentationMode` 仍把整个 `<footer>` 隐藏 ⇒ 结论不变 |
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **请求 1（`Messages`/`messageDialog` 统一宿主）** —— 目标 `src/App.vue`（本 lane）。复核 `src/components/MessageDialog.vue` **不存在**，`messageDialog.ts` 仅被 `TrustedProjectDialog.vue` 消费。登记为待办（需先定门面形状，与 bucket7b A3 同一条）。
+- **请求 2（通知设置页）** —— `src/settingsTreeMeta.ts`（非本 lane）+ `SettingsDialog.vue`。需 settings-tree owner。
+- **请求 3 / 4** —— 判据/治理项。
+
+结论：零接线（请求 1 登记，请求 2 转 owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（请求 1 登记，请求 2 转 owner）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

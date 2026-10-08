@@ -187,3 +187,15 @@ node --test tests/module-size.test.mjs
 - `paragraph.fill` 上游没有默认键位（`$default.xml` 里没有它，全树只有
   `platform/platform-resources/src/keymaps/Sublime Text.xml:130` 给了键），所以本仓只挂菜单行、不挂键，
   这是照上游，不是漏（依据写在本域报告 §1 的 paragraph 行）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1** —— 目标 `src/components/CodeEditor.vue`（禁改清单）。需 CodeEditor owner（三格回车/引号设置灌进调用点）。
+- **W-2 已落地**（`editorLanguageId` facet）。**W-3** —— 判词（`docs/inventory/*`），非本 lane。**W-4** —— 拍板项。
+
+结论：零接线（W-1 转 CodeEditor owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（W-1 转 CodeEditor owner）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

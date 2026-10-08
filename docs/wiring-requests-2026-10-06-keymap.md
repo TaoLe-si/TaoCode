@@ -126,3 +126,18 @@
   「导航三条新键位：可用性与菜单行 enabled 同源，且上游的精确匹配不许串味」。
 - `tests/action-registry.test.mjs`：新增 1 条「编辑器一族注册进动作注册表：不凭空长加速键，run 走宿主的 runEditor」。
 - 反向验证数字写在 `docs/batch-2026-10-06-keymap.md` §4。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1 已接线**：`src/App.vue:1845` 的 `createKeymap({...})` 实参已含 `runEditor`。
+- **R2 已接线**：同对象已含 `gotoSuper, gotoTest, gotoRelated`。
+- **R3 已落**（keymap2）。
+- **R4（问题面板选中行 Alt+Enter）未注册** —— 目标 `src/actionRegistry.ts` + `src/keymapBindings.ts`（保留文件，非本 lane）。组件侧 `ProblemsPanel.vue:325` 的 `openMenuForSelected()` 已就绪。需 action/keymap owner。
+- **R5 已订正**。
+
+结论：R1/R2 已接线；R4 转给 action/keymap owner。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「R1/R2 已接线；R4 转给 action/keymap owner。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

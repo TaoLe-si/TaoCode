@@ -121,8 +121,8 @@ const hasSelection = computed(() => props.model.selected >= 0)
         <p v-if="model.error" class="change-signature-error" role="alert">{{ model.error }}</p>
         <p v-if="model.scanNote" class="change-signature-note">{{ model.scanNote }}</p>
         <div class="dialog-actions">
-          <button class="subtle-button" @click="emit('cancel')">取消</button>
           <button class="primary-button" :disabled="!canApply" @click="emit('apply')">重构</button>
+          <button class="subtle-button" @click="emit('cancel')">取消</button>
         </div>
       </footer>
     </section>
@@ -148,7 +148,7 @@ const hasSelection = computed(() => props.model.selected >= 0)
 .change-signature-tools { display: flex; flex-direction: column; gap: var(--space-1); }
 .change-signature-preview { padding: 0 var(--space-3) var(--space-2); }
 .change-signature-preview pre { margin: 0; height: 130px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm);
-  padding: var(--space-2); font: 12px var(--font-mono); color: var(--text); background: var(--surface); white-space: pre-wrap; }
+  padding: var(--space-2); font: 12px var(--font-mono); color: var(--text); background: var(--editor); white-space: pre-wrap; }
 .change-signature-foot { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); }
 .change-signature-error { margin: 0; font-size: 11px; color: var(--error); }
 .change-signature-note { margin: 0; font-size: 11px; color: var(--muted); }

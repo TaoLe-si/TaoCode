@@ -2,10 +2,10 @@
 
 | 档 | 类数 |
 |---|---:|
-| [x] | 0 |
-| [~] | 338 |
+| [x] | 19 |
+| [~] | 320 |
 | [ ] | 0 |
-| [-] | 297 |
+| [-] | 296 |
 | 合计 | 635 |
 
 | 类 | 族 | 档 | 行数 | Swing | 平台 | 测试 | TaoCode |
@@ -45,12 +45,12 @@
 | `XBreakpointType` | dbg/breakpoints | `[-]` | 295 | Y |  |  | 从未出现 |
 | `XLineBreakpoint` | dbg/breakpoints | `[~]` | 52 |  |  |  | 从未出现 |
 | `XLineBreakpointAdditionalInfo` | dbg/breakpoints | `[~]` | 59 |  |  |  | 从未出现 |
-| `XLineBreakpointType` | dbg/breakpoints | `[~]` | 360 |  |  |  | 只被注释引用 |
+| `XLineBreakpointType` | dbg/breakpoints | `[x]` | 360 |  |  |  | 只被注释引用 |
 | `XLineBreakpointTypeBase` | dbg/breakpoints | `[~]` | 30 |  |  |  | 从未出现 |
 | `XLineBreakpointVerticalPlacement` | dbg/breakpoints | `[~]` | 34 |  |  |  | 从未出现 |
 | `XWatchpointType` | dbg/breakpoints | `[~]` | 14 |  |  |  | 从未出现 |
 | `XBreakpointCustomPropertiesPanel` | dbg/breakpoints | `[-]` | 36 | Y |  |  | 从未出现 |
-| `XBreakpointGroup` | dbg/breakpoints | `[~]` | 43 |  |  |  | 从未出现 |
+| `XBreakpointGroup` | dbg/breakpoints | `[x]` | 43 |  |  |  | 从未出现 |
 | `XBreakpointGroupingRule` | dbg/breakpoints | `[~]` | 52 |  |  |  | 从未出现 |
 | `XBreakpointsGroupingPriorities` | dbg/breakpoints | `[~]` | 11 |  |  |  | 从未出现 |
 | `ControlExceptionBreakpointSupport` | dbg/misc | `[-]` | 28 |  |  |  | 从未出现 |
@@ -119,7 +119,7 @@
 | `XDebugTabLayouter` | dbg/misc | `[-]` | 51 | Y |  |  | 从未出现 |
 | `XEvaluationOrigin` | dbg/evaluate | `[~]` | 83 |  |  |  | 从未出现 |
 | `ValueHintType` | dbg/evaluate | `[~]` | 11 |  |  |  | 从未出现 |
-| `DebuggerSupport` | dbg/misc | `[-]` | 7 |  |  |  | 从未出现 |
+| `DebuggerSupport` | dbg/misc | `[x]` | 7 |  |  |  | 从未出现 |
 | `XDebuggerManagerProxyListener` | dbg/misc | `[-]` | 24 |  |  |  | 从未出现 |
 | `XSourceKind` | dbg/misc | `[-]` | 7 |  |  |  | 从未出现 |
 | `XSourcePositionImpl` | dbg/misc | `[-]` | 192 |  |  |  | 从未出现 |
@@ -141,7 +141,7 @@
 | `XStackFrameWithCustomBackgroundColor` | dbg/frames-vars | `[~]` | 12 |  |  |  | 从未出现 |
 | `XStackFrameWithSeparatorAbove` | dbg/frames-vars | `[~]` | 15 |  |  |  | 从未出现 |
 | `XValueMarkers` | dbg/frames-vars | `[~]` | 95 |  |  |  | 从未出现 |
-| `InlineWatch` | dbg/inline | `[~]` | 83 |  |  |  | 从未出现 |
+| `InlineWatch` | dbg/inline | `[x]` | 83 |  |  |  | 从未出现 |
 | `XInlineWatchesView` | dbg/inline | `[~]` | 16 |  |  |  | 从未出现 |
 | `XMixedModeExecutionStackDescriptor` | dbg/misc | `[-]` | 27 |  |  |  | 从未出现 |
 | `PinToTopMemberValue` | dbg/misc | `[-]` | 29 |  |  |  | 从未出现 |
@@ -169,11 +169,11 @@
 | `XAttachDebuggerProvider` | dbg/attach | `[~]` | 73 |  |  |  | 从未出现 |
 | `XAttachHost` | dbg/attach | `[~]` | 45 |  |  |  | 从未出现 |
 | `XAttachHostPresentationGroup` | dbg/attach | `[~]` | 6 |  |  |  | 从未出现 |
-| `XAttachHostProvider` | dbg/attach | `[~]` | 57 |  |  |  | 从未出现 |
+| `XAttachHostProvider` | dbg/attach | `[x]` | 57 |  |  |  | 从未出现 |
 | `XAttachMixedModeDebugger` | dbg/attach | `[~]` | 15 |  |  |  | 从未出现 |
 | `XAttachPresentationGroup` | dbg/attach | `[~]` | 71 |  |  |  | 从未出现 |
 | `XAttachProcessPresentationGroup` | dbg/attach | `[~]` | 13 |  |  |  | 从未出现 |
-| `XAttachRecentItemsMatcher` | dbg/attach | `[~]` | 21 |  |  |  | 从未出现 |
+| `XAttachRecentItemsMatcher` | dbg/attach | `[x]` | 21 |  |  |  | 从未出现 |
 | `XLocalAttachDebugger` | dbg/attach | `[~]` | 24 |  |  |  | 从未出现 |
 | `LazyAttachVirtualFS` | dbg/attach | `[~]` | 133 |  |  |  | 从未出现 |
 | `LazyAttachVirtualFile` | dbg/attach | `[~]` | 31 |  |  |  | 从未出现 |
@@ -196,13 +196,13 @@
 | `AttachToProcessAction` | dbg/actions | `[~]` | 18 |  |  |  | 从未出现 |
 | `AttachToProcessActionBase` | dbg/actions | `[-]` | 728 | Y |  |  | 从未出现 |
 | `DebuggerThreadActionHandler` | dbg/actions | `[~]` | 89 |  |  |  | 从未出现 |
-| `DefaultAttachRecentItemsMatcher` | dbg/actions | `[~]` | 49 |  |  |  | 从未出现 |
+| `DefaultAttachRecentItemsMatcher` | dbg/actions | `[x]` | 49 |  |  |  | 从未出现 |
 | `FreezeActiveThreadAction` | dbg/actions | `[~]` | 16 |  |  |  | 从未出现 |
 | `FreezeInactiveThreadsAction` | dbg/actions | `[~]` | 16 |  |  |  | 从未出现 |
 | `FreezeInactiveThreadsAmongSelectedAction` | dbg/actions | `[~]` | 16 |  |  |  | 从未出现 |
 | `FreezeSelectedThreadsAction` | dbg/actions | `[~]` | 16 |  |  |  | 从未出现 |
 | `LocalAttachHostPresentationGroup` | dbg/actions | `[~]` | 35 |  |  |  | 从未出现 |
-| `RemoveAllBreakpointsAction` | dbg/actions | `[~]` | 21 |  |  |  | 从未出现 |
+| `RemoveAllBreakpointsAction` | dbg/actions | `[x]` | 21 |  |  |  | 从未出现 |
 | `RemoveAllBreakpointsInFileAction` | dbg/actions | `[~]` | 26 |  |  |  | 从未出现 |
 | `RestoreBreakpointAction` | dbg/actions | `[~]` | 33 |  |  |  | 从未出现 |
 | `ThawActiveThreadAction` | dbg/actions | `[~]` | 16 |  |  |  | 从未出现 |
@@ -220,7 +220,7 @@
 | `LineBreakpointState` | dbg/breakpoints | `[~]` | 60 |  |  |  | 从未出现 |
 | `XBreakpointBase` | dbg/breakpoints | `[-]` | 603 | Y |  |  | 从未出现 |
 | `XBreakpointCustomTooltipProvider` | dbg/breakpoints | `[~]` | 21 |  |  |  | 从未出现 |
-| `XBreakpointDependencyState` | dbg/breakpoints | `[~]` | 69 |  |  |  | 从未出现 |
+| `XBreakpointDependencyState` | dbg/breakpoints | `[x]` | 69 |  |  |  | 从未出现 |
 | `XBreakpointManagerImpl` | dbg/breakpoints | `[~]` | 954 |  |  |  | 从未出现 |
 | `XBreakpointUtil` | dbg/breakpoints | `[~]` | 178 |  |  |  | 从未出现 |
 | `XDebugSessionBreakpointManager` | dbg/breakpoints | `[~]` | 325 |  |  |  | 从未出现 |
@@ -280,8 +280,8 @@
 | `package-info` | dbg/rpc | `[-]` | 5 |  |  |  | 从未出现 |
 | `RunToolbarDebugProcess` | dbg/misc | `[-]` | 40 | Y |  |  | 从未出现 |
 | `RunToolbarXDebuggerAction` | dbg/misc | `[-]` | 141 |  |  |  | 从未出现 |
-| `XDebuggerDataViewSettings` | dbg/settings | `[~]` | 84 |  |  |  | 从未出现 |
-| `XDebuggerGeneralSettings` | dbg/settings | `[~]` | 95 |  |  |  | 从未出现 |
+| `XDebuggerDataViewSettings` | dbg/settings | `[x]` | 84 |  |  |  | 从未出现 |
+| `XDebuggerGeneralSettings` | dbg/settings | `[x]` | 95 |  |  |  | 从未出现 |
 | `XDebuggerSettingManagerImpl` | dbg/settings | `[~]` | 145 |  |  |  | 从未出现 |
 | `XDebuggerSettingsStatisticsCollector` | dbg/settings | `[~]` | 21 |  |  |  | 从未出现 |
 | `state` | dbg/misc | `[-]` | 43 |  |  |  | 真实代码 |
@@ -348,7 +348,7 @@
 | `AttachTreeNodes` | dbg/attach | `[~]` | 26 |  |  |  | 从未出现 |
 | `FilteringTreeTableModel` | dbg/attach | `[-]` | 116 | Y |  |  | 从未出现 |
 | `AttachDialogStatisticsCollector` | dbg/attach | `[~]` | 47 |  |  |  | 从未出现 |
-| `XDebuggerTreeActionBase` | dbg/frames-vars | `[~]` | 133 |  |  |  | 从未出现 |
+| `XDebuggerTreeActionBase` | dbg/frames-vars | `[x]` | 133 |  |  |  | 从未出现 |
 | `XDebuggerTreeBackendOnlyActionBase` | dbg/frames-vars | `[~]` | 67 |  |  |  | 从未出现 |
 | `XFetchValueActionBase` | dbg/frames-vars | `[~]` | 60 |  |  |  | 从未出现 |
 | `BringDebuggeeInForegroundUtils` | dbg/misc | `[-]` | 46 |  |  |  | 从未出现 |
@@ -395,7 +395,7 @@
 | `EditBreakpointAction` | dbg/actions | `[~]` | 50 |  |  |  | 从未出现 |
 | `EditBreakpointActionHandler` | dbg/actions | `[-]` | 102 | Y |  |  | 从未出现 |
 | `EvaluateAction` | dbg/actions | `[~]` | 21 |  |  |  | 从未出现 |
-| `EvaluateInConsoleAction` | dbg/actions | `[~]` | 21 |  |  |  | 从未出现 |
+| `EvaluateInConsoleAction` | dbg/actions | `[x]` | 21 |  |  |  | 从未出现 |
 | `FocusOnBreakpointAction` | dbg/actions | `[~]` | 27 |  |  |  | 从未出现 |
 | `FocusOnFinishAction` | dbg/actions | `[~]` | 15 |  |  |  | 从未出现 |
 | `ForceRunToCursorAction` | dbg/actions | `[~]` | 20 |  |  |  | 从未出现 |
@@ -403,7 +403,7 @@
 | `ForceStepOverAction` | dbg/actions | `[~]` | 27 |  |  |  | 从未出现 |
 | `MarkObjectAction` | dbg/actions | `[~]` | 51 |  |  |  | 从未出现 |
 | `MarkObjectActionHandler` | dbg/actions | `[~]` | 27 |  |  |  | 从未出现 |
-| `MuteBreakpointAction` | dbg/actions | `[~]` | 70 |  |  |  | 从未出现 |
+| `MuteBreakpointAction` | dbg/actions | `[x]` | 70 |  |  |  | 从未出现 |
 | `OpenFilesInPreviewTabAction` | dbg/actions | `[~]` | 29 |  |  |  | 从未出现 |
 | `PauseAction` | dbg/actions | `[~]` | 45 |  |  |  | 从未出现 |
 | `RemoveAllButThisBreakpointAction` | dbg/actions | `[~]` | 13 |  |  |  | 从未出现 |
@@ -451,7 +451,7 @@
 | `AddXBreakpointAction` | dbg/breakpoints | `[~]` | 74 |  |  |  | 从未出现 |
 | `BreakpointChooser` | dbg/breakpoints | `[-]` | 244 | Y |  |  | 只被注释引用 |
 | `BreakpointNoneItem` | dbg/breakpoints | `[-]` | 92 | Y |  |  | 从未出现 |
-| `BreakpointsDialog` | dbg/breakpoints | `[~]` | 611 | Y |  |  | 真实代码 |
+| `BreakpointsDialog` | dbg/breakpoints | `[x]` | 611 | Y |  |  | 真实代码 |
 | `BreakpointsDialogFactory` | dbg/breakpoints | `[~]` | 159 |  |  |  | 从未出现 |
 | `BreakpointsDialogInitialBreakpoint` | dbg/breakpoints | `[~]` | 12 |  |  |  | 从未出现 |
 | `XBreakpointActionsPanel` | dbg/breakpoints | `[-]` | 338 | Y |  |  | 从未出现 |
@@ -492,7 +492,7 @@
 | `DebuggerTreeWithHistoryContainer` | dbg/evaluate | `[-]` | 210 | Y |  |  | 从未出现 |
 | `DebuggerTreeWithHistoryPanel` | dbg/evaluate | `[-]` | 56 | Y |  |  | 从未出现 |
 | `DebuggerTreeWithHistoryPopup` | dbg/evaluate | `[-]` | 151 | Y |  |  | 从未出现 |
-| `QuickEvaluateHandler` | dbg/evaluate | `[~]` | 45 |  |  |  | 从未出现 |
+| `QuickEvaluateHandler` | dbg/evaluate | `[x]` | 45 |  |  |  | 从未出现 |
 | `XDebuggerPopupPanel` | dbg/evaluate | `[-]` | 281 | Y |  |  | 从未出现 |
 | `XDebuggerTextPopup` | dbg/evaluate | `[-]` | 426 | Y |  |  | 从未出现 |
 | `XDebuggerTooltipPopup` | dbg/evaluate | `[-]` | 107 | Y |  |  | 从未出现 |
@@ -529,7 +529,7 @@
 | `XToggleEvaluateExpressionFieldAction` | dbg/frames-vars | `[-]` | 91 | Y |  |  | 从未出现 |
 | `XWatchesTreeActionBase` | dbg/frames-vars | `[~]` | 54 |  |  |  | 从未出现 |
 | `ui` | dbg/misc | `[-]` | 90 |  |  |  | 真实代码 |
-| `AddInlineWatchAction` | dbg/inline | `[~]` | 23 |  |  |  | 从未出现 |
+| `AddInlineWatchAction` | dbg/inline | `[x]` | 23 |  |  |  | 从未出现 |
 | `DebuggerInlayListener` | dbg/inline | `[~]` | 66 |  |  |  | 从未出现 |
 | `InlineDebugRenderer` | dbg/inline | `[-]` | 415 | Y |  |  | 从未出现 |
 | `InlineDebugRendererBase` | dbg/inline | `[-]` | 281 | Y |  |  | 从未出现 |
@@ -545,8 +545,8 @@
 | `XDebuggerPinToTopManager` | dbg/misc | `[-]` | 141 |  |  |  | 从未出现 |
 | `XDebuggerPinToTopAction` | dbg/misc | `[-]` | 121 |  |  |  | 从未出现 |
 | `package-info` | dbg/misc | `[-]` | 5 |  |  |  | 从未出现 |
-| `DataViewsConfigurable` | dbg/settings | `[~]` | 36 |  |  |  | 从未出现 |
-| `DataViewsConfigurableUi` | dbg/settings | `[~]` | 79 |  |  |  | 从未出现 |
+| `DataViewsConfigurable` | dbg/settings | `[x]` | 36 |  |  |  | 从未出现 |
+| `DataViewsConfigurableUi` | dbg/settings | `[x]` | 79 |  |  |  | 从未出现 |
 | `DebuggerConfigurable` | dbg/settings | `[-]` | 192 | Y |  |  | 从未出现 |
 | `DebuggerConfigurableProvider` | dbg/settings | `[~]` | 34 |  |  |  | 从未出现 |
 | `DebuggerGeneralConfigurable` | dbg/settings | `[~]` | 71 |  |  |  | 从未出现 |

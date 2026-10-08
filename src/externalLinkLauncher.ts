@@ -2,13 +2,16 @@
 //
 // 为什么要有这个文件：上游所有「在浏览器/关联程序里打开 URL」的动作都汇到同一个入口
 // （`platform/platform-api/src/com/intellij/ide/browsers/BrowserLauncherAppless.kt:88-112` 的
-// `browse()`：`:96` 先 trim、`:99` 才 `canBrowse`、过了才真的开），**判定就长在它里面**。
+// `browse()`：`:91-94` 先挡掉 `jar:`、`:96` 先 trim、`:99` 才 `canBrowse`、`:101-109` 才解析 URL
+// 与拒 UNC，过了才真的开），**判定就长在它里面**。
 // 本仓的 URL 出口本来有五条（`src/App.vue` 两条、`src/components/TerminalPanel.vue`、
 // `src/components/RunConsole.vue`、`src/quickDocHost.ts`），上一轮之前的形状是每一处各自
 // `request('shell.openUrl', …)` ⇒ 一句都没问（接线请求 welcome2 的 R2 记的就是这个）。
 // 逐处各判一次必漏，所以这里收成一条出口：判定复用 `src/trustedProjects.ts` 的
 // `browseWithTrustCheck`（`BrowserLauncherImpl.kt:59-87` 的 `canBrowse` 等价物，判据
-// `tests/welcome-trust-dialog.test.mjs`），调用方只负责「把 URL 交出来 + 接住自己的错误文案」。
+// `tests/welcome-trust-dialog.test.mjs`）+ `src/browsers.ts` 的 `externalLaunchRejection`
+// （`:91-94`/`:101-109` 那几道的等价物，判据 `tests/external-link-availability.test.mjs`），
+// 调用方只负责「把 URL 交出来 + 接住自己的错误文案」。
 //
 // 门禁由宿主**装配时安装**（`src/workspaceLifecycle.ts` 建那一域时就 `installExternalLinkGate`：
 // 它手里有工作区根、信任清单、落库那条 `settings.general.update`，以及那个 `mode="link"` 的弹框）。
@@ -21,6 +24,7 @@
 // `createWorkspaceLifecycle` 里，桌面端启动路径必然经过。
 
 import { request } from './bridge.ts'
+import { externalLaunchRejection } from './browsers.ts'
 import { EXTERNAL_LINK_LABELS, browseWithTrustCheck, type ExternalLinkChoice, type TrustedPathEntry } from './trustedProjects.ts'
 
 /** 那一句问话（`externalLinkPrompt` 的产物 + 被问的那条 URL）：宿主用它渲染 `mode="link"` 的弹框。 */
@@ -82,13 +86,29 @@ async function openViaHost(url: string): Promise<void> {
 }
 
 /**
- * 打开一条外部链接：装了门禁就先过 `browseWithTrustCheck`（已信任不问、未信任问那一句、
- * 答「信任项目并打开」才写清单），没装就保持接线前的行为。
+ * 打开一条外部链接：先过**可用性判定**（`src/browsers.ts` 的 `externalLaunchRejection`，
+ * 上游 `BrowserLauncherAppless.kt:88-112` 那四道判定的等价物），再走门禁，最后才运输。
+ * 三种结果：
+ *   · `'ignored'` —— `jar:` 那一档（上游 `:91-94` 只 `LOG.info` 就 return，不给用户看任何东西）
+ *     ⇒ 不运输、不问那一句、也不写信任清单；
+ *   · 抛错 —— 没有协议的串（`calc.exe`、`C:/x.exe`）与 `file://host/…`（UNC）：
+ *     前一句用上游 `error.malformed.url`（`IdeBundle.properties:15`）的直译，
+ *     后一句用 `error.unc.not.supported`（`:16`）。抛错而不是静默：宿主本来也会拒
+ *     （`native/workspace.cpp:1225-1231`，错误码 `INVALID_PATH`），而这一句要落在**问那一句之前**
+ *     —— 上游的 `canBrowse` 长在解析之前（`:99` → `:101`），本仓把它挪到之后是刻意的更严：
+ *     不能让「答了『信任项目并打开』（`:84` 会写信任清单）之后链接照样打不开」这种事发生；
+ *   · `'opened'` / `'canceled'` —— 门禁那一条路的两个结果（已信任不问、未信任问那三颗按钮）。
+ * 装了门禁就先过 `browseWithTrustCheck`；没装就保持接线前的行为。
  * `open` 只换**最后那一步的运输**（`src/quickDocHost.ts` 用它保住注入的 `request` 替身；
- * 宿主以后换成 `shell.openUrlWithBrowser` 也是这一格）—— 判定永远只有门禁那一条，
- * 调用方换不掉它。返回 `'canceled'` = 用户答了取消，调用方不必再报错（上游 `:85` 也是安静不开）。
+ * 宿主以后换成 `shell.openUrlWithBrowser` 也是这一格）—— 判定永远只有门禁那一条 + 这一道可用性，
+ * 调用方换不掉它们。返回 `'canceled'` = 用户答了取消，调用方不必再报错（上游 `:85` 也是安静不开）。
  */
-export async function openExternalUrl(url: string, open?: (url: string) => unknown): Promise<'opened' | 'canceled'> {
+export async function openExternalUrl(url: string, open?: (url: string) => unknown): Promise<'opened' | 'canceled' | 'ignored'> {
+  const rejection = externalLaunchRejection(url)
+  if (rejection) {
+    if (rejection.code === 'ignored') return 'ignored'
+    throw new Error(rejection.message)
+  }
   const transport = open ?? gate?.open ?? openViaHost
   const current = gate
   if (!current) { await transport(url); return 'opened' }

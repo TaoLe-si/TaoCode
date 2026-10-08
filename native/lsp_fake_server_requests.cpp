@@ -108,6 +108,21 @@ void handle_request(const Flags& flags, const std::string& method, const Json& p
                     {"requests", Json{{"full", Json{{"delta", !no_semantic_delta}}}}}};
             }
             write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", {{"capabilities", std::move(capabilities)}}}});
+            // --server-requests：握手一完成就**主动**发三条要回包的请求（协议返回类型都是 void）。
+            // 客户端那一头必须：①每条都回包（不回 = 服务器这条 future 永远不落），②把内容转给界面
+            // （转出的形状在 `native/lsp_host_bootstrap.cpp` 的 `set_server_message`）。
+            // 三条一起发 = 一次能同时钉住「回包」与「转出」两段：少一段这条 e2e 就红。
+            if (flags.server_requests) {
+                write_message({{"jsonrpc", "2.0"}, {"id", "srv-register-1"}, {"method", "client/registerCapability"},
+                               {"params", {{"registrations", Json::array({
+                     Json{{"id", "dyn-diagnostic"}, {"method", "textDocument/diagnostic"},
+                          {"registerOptions", Json::object()}}})}}}});
+                write_message({{"jsonrpc", "2.0"}, {"id", 90501}, {"method", "window/workDoneProgress/create"},
+                               {"params", {{"token", "import-token"}}}});
+                write_message({{"jsonrpc", "2.0"}, {"id", "srv-unregister-1"}, {"method", "client/unregisterCapability"},
+                               {"params", {{"unregisterations", Json::array({
+                     Json{{"id", "dyn-diagnostic"}, {"method", "textDocument/diagnostic"}}})}}}});
+            }
         } else if (method == "shutdown") {
             write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", Json(nullptr)}});
         } else if (method == "textDocument/foldingRange") {
@@ -124,6 +139,20 @@ void handle_request(const Flags& flags, const std::string& method, const Json& p
                                    ? params.at("position") : Json::object();
             const auto hover_line = point.contains("line") ? point.at("line").get<int>() : 0;
             const auto hover_char = point.contains("character") ? point.at("character").get<int>() : 0;
+            // 第 3 行专门回**数组形态**的 `MarkupContent`（`MarkedString[]`）：一段
+            // `{language, value}` 的代码 + 一段纯文本。上游
+            // `TextRangeAndMarkupContent.fromHover`（platform/lsp-impl/src/impl/features/documentation/
+            // TextRangeAndMarkupContent.kt:32-38）把 `{language, value}` 那一支**裹成围栏代码块**，
+            // 本仓宿主 `native/lsp_support.cpp` 的 `hover_text` 必须做同一件事（否则语言标记丢失）。
+            if (hover_line == 3) {
+                write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", {
+                    {"contents", Json::array({
+                        Json{{"language", "java"}, {"value", "int counter;"}},
+                        Json("the counter field")})},
+                    {"range", {{"start", {{"line", hover_line}, {"character", hover_char}}},
+                              {"end", {{"line", hover_line}, {"character", hover_char + 5}}}}}}}});
+                return;
+            }
             write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", {
                 {"contents", {{"kind", "markdown"}, {"value", contents}}},
                 {"range", {{"start", {{"line", hover_line}, {"character", hover_char}}},
@@ -153,6 +182,24 @@ void handle_request(const Flags& flags, const std::string& method, const Json& p
                                      {"documentation", {{"kind", "markdown"}, {"value", marker}}},
                                      // `data` 是服务器在 resolve 时找回条目的凭据，客户端必须原样带回。
                                      {"data", {{"label", label}, {"marker", marker}}}});
+            }
+            // 第 0 行专门回**列表级缺省**（`CompletionList.itemDefaults`）：条目自己不写
+            // `insertTextFormat`/`data`，也没有 `textEdit` —— 全靠列表级的 `editRange` 合成。
+            // 上游 `LspCompletionUtil.kt:47-63` 的 `applyItemDefaults` 逐项回填；不回填的话
+            // 客户端拿到的条目既没有默认编辑区间、也丢了 snippet 格式。
+            if (line == 0) {
+                Json defaults_items = Json::array();
+                for (const auto& [label, kind] : dictionary) {
+                    if (!prefix.empty() && label.rfind(prefix, 0) != 0) continue;
+                    defaults_items.push_back(Json{{"label", label}, {"kind", kind}, {"detail", marker}});
+                }
+                write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", {
+                    {"isIncomplete", false},
+                    {"itemDefaults", {{"editRange", range(0, 4, 0, 11)},
+                                      {"insertTextFormat", 2},
+                                      {"data", {{"marker", marker}}}}},
+                    {"items", std::move(defaults_items)}}}});
+                return;
             }
             write_message({{"jsonrpc", "2.0"}, {"id", id},
                            {"result", {{"isIncomplete", false}, {"items", std::move(items)}}}});

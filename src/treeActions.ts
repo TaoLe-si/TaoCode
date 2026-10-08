@@ -12,6 +12,7 @@ import { nextTick } from 'vue'
 import { request, type Entry, type LspReferencesResult, type ProjectSettings } from './bridge.ts'
 import { copyToClipboard } from './clipboard.ts'
 import { declarationTarget, safeDeleteNotice, safeDeleteReport } from './safeDelete.ts'
+import { findUsagesElementAt, usageViewTarget } from './findUsagesProvider.ts'
 import { errorMessage } from './errors.ts'
 import { markRootGroupTitle, markRootItems, markRootNotice, markRootPatch, type MarkRootCommand, type MarkRootState, type MarkRootTarget } from './pvMarkRoots.ts'
 import type { Tab } from './editorTab'
@@ -113,7 +114,14 @@ async function findUsagesOf(path: string) {
   // IDEA's FindUsages on a file targets the class the file declares: pick the
   // class-like symbol named after the file stem, else the first symbol.
   const target = declarationTarget(path, outline.value)
-  void onSemantic({ kind: 'references', path, line: target?.startLine ?? 0, character: target?.startChar ?? 0 })
+  const line = target?.startLine ?? 0
+  const character = target?.startChar ?? 0
+  // 用法视图的标题两段来自**按语言的 provider 层**（上游 `FindUsagesProvider.getNodeText`/
+  // `getDescriptiveName`/`getType`，见 `src/findUsagesProvider.ts`）：元素种类取自 LSP 的
+  // `documentSymbol`（包住该位置的最内层符号 + 它的祖先名当容器），短名上标签、描述名上面板标题。
+  const element = findUsagesElementAt(outline.value, line, character)
+  const usage = element ? usageViewTarget(element) : undefined
+  void onSemantic({ kind: 'references', path, line, character, usage })
 }
 /**
  * Safe Delete 的检查半程（上游 `SafeDeleteProcessor`）：删**已打开**的文件前，用它声明的

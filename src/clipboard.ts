@@ -34,8 +34,33 @@ async function readSystemClipboard(): Promise<string | null> {
  */
 export async function copyToClipboard(text: string): Promise<void> {
   if (!text) return
-  clipboardRing.value = pushClipboardContent(clipboardRing.value, text)
+  recordClipboardText(text)
   await writeSystemClipboard(text)
+}
+
+/** 记录已由编辑器 copy 事件写入系统剪贴板的文本，不再异步覆盖其其它 flavor。 */
+export function recordClipboardText(text: string): void {
+  if (!text) return
+  clipboardRing.value = pushClipboardContent(clipboardRing.value, text)
+}
+
+/** 写入编辑器复制的纯文本与 HTML flavor；剪贴板 API 不支持时回退到纯文本。 */
+export async function copyRichToClipboard(text: string, html: string): Promise<void> {
+  if (!text) return
+  recordClipboardText(text)
+  const clipboard = navigator.clipboard
+  if (!html || !clipboard?.write || typeof ClipboardItem === 'undefined') {
+    await writeSystemClipboard(text)
+    return
+  }
+  try {
+    await clipboard.write([new ClipboardItem({
+      'text/plain': new Blob([text], { type: 'text/plain' }),
+      'text/html': new Blob([html], { type: 'text/html' }),
+    })])
+  } catch {
+    await writeSystemClipboard(text)
+  }
 }
 
 /**

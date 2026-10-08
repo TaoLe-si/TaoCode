@@ -212,3 +212,16 @@ import { getCommandProcessor } from './pvCommandProcessor.ts'
 这条是 `node --test tests/source-citations.test.mjs` 现在红的两条之一（另一条是
 `docs/batch-2026-10-06-completion2.md` 的 `SuppressIntentionAction`），都不在本桶名下，留给对应桶改。
 本桶自己的两份文档没有带行号的假路径（假路径一律去掉行号写，避免门禁止把它当一条真引用收集）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1 已接线**：`src/App.vue:226-227` 的 `todoSource` 已带 `character: active.value.column`（结构视图跟随用偏移量 = 行 + 列，上游 StructureViewComponent.java:804-849）。判据 `tests/structure-follow.test.mjs` **pass 18 / fail 0**。
+- **W2（新建/删除登记成可撤命令）** —— 目标 `src/App.vue:1691-1730`（本 lane）+ `FileUndoProvider` 模块。登记为待办（需 undo 命令栈的文件步骤形状确认）。
+- **W2'** —— 目标 `src/menus/editMenu.ts`（本 lane）+ 命令栈。登记。
+
+App.vue 行数：2701 → 2705（+4：W1 注释 3 行 + 表达式换行）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

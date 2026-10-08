@@ -213,3 +213,17 @@ IDE 自己打开）变成打不开或报错文案变化 = **行为变更**，不
 `native/workspace.hpp:96-99` 的 scheme 白名单，判据 `native/workspace_test.cpp:584-594` 那批拒绝用例）。
 要搬请拍：(a) 在 `src/externalLinkLauncher.ts` 里加一道 `externalLinkRefusal(url)` 纯函数（jar:/无协议/UNC 三档），
 `openExternalUrl` 先问它；(b) 或者维持现状，只靠原生边界。本轮按 (b) 不动，登记在报告 §6。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1 已接线**：`src/App.vue:1985` 解构已含 `trustConfigDir, trustCanTrustAll, linkPrompt, resolveLinkPrompt, openExternalUrl`；`:2670` 已挂 `<TrustedProjectDialog v-if="linkPrompt" mode="link" … @resolve-link="resolveLinkPrompt" />`；URL 出口已走 `openExternalUrl`（`:1011` 附近）。
+- **W2（`shell.openUrlWithBrowser`）** —— native + bridge，非本 lane。
+- **W3（浏览器设置页）** —— 依赖 W2。**W4** —— 与 trust4 T2 同族，非本 lane。
+- 判据 `tests/welcome-external-link-launch.test.mjs` / `welcome-trust-dialog.test.mjs` **pass 23 / fail 0**。
+
+结论：W1 已接线；W2/W3/W4 非本 lane。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「W1 已接线；W2/W3/W4 非本 lane。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

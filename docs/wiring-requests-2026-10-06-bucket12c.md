@@ -57,3 +57,12 @@
 1. **请求 2 的前提是编的**：本仓没有 `src/dbgBreakpointStore.ts`，`toSourceBreakpoints` 这个符号全仓零命中（`ls src/dbg*` 只有 `dbgBreakpointsDialogHost.ts` / `dbgRunToCursorGutter.ts`）。它引用的三条上游坐标也都不存在（`XDebugProcessBase.java`、`impl/frame/XBreakpoint.java`、`impl/projectView/XTreeRoot.java`、`breakpointMapping`、`myUpdateRequested` —— Glob 按文件名 + 包路径 + 全树 grep 三条路都走过）。
    **实质欠账我按真实存在的上游做完了**：断点下发收成一个口 `src/dbgBreakpointUpdate.ts`（合并 + 全量重发 + 册子维护），面板与「查看断点…」都只走它；`isEnabledByDependency` / `allBreakpointFiles` / `breakpointMarkersOf` / `propertiesForRef` 四个「只有测试消费」的规则函数全部拿到生产消费方；重复实现 `mutePlan`、`enabledBreakpoints` 删掉。详见 `docs/batch-2026-10-06-bucket12c.md` 第 2 节。
 2. **W2（逻辑断点组的写入口）也已经不成立**：写入口不在保留文件里，就在本桶名下的 `src/components/BreakpointsDialog.vue`（组节点 + 按组启用/`:128 toggleGroup`、逐条「所在组」下拉 + 新建：`:133 moveToGroup`、默认组走 `@set-default-group` 事件回到面板）与 `src/components/DebugBreakpointsPane.vue`（富编辑里那一格）。**仍缺的是组的改名/删除**——上游 `XBreakpointGroup` 的树节点支持，本仓没做；这条不需要保留文件，是我名下下一轮的活（不卡你）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **X1 已接线**：`src/App.vue:1370` 已有 `setBreakpointsDialogOpener(openBreakpoints)`，import 在 `:107`。断点区「更多选项」与编辑框里那条链接现在能点到对话框（`App.vue:2565` 的 `<BreakpointsDialog>`）。
+- **X2 已接线**：同 12b W1，`src/App.vue:276-278` 三处都在。
+- **X3 已接线**：`src/bridge.ts:236` 的 `DapBreakpoint` 已含 `logMessage?: string`；`src/dbgBreakpointUpdate.ts:66` 的注释也记明「已登记 logMessage?（2026-10-06 R1）」。投影类型可撤但已不阻塞。
+- **X4** —— 记账项，无需写代码；12c 自己已订正。
+
+结论：**零待接**，未改任何文件。

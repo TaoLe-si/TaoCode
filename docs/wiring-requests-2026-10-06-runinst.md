@@ -273,3 +273,15 @@ grep `setEncoding` 零命中）；上游的「控制台编码」是**应用级�
 `platform/lang-impl/src/com/intellij/execution/console/ConsoleEncodingComboBox.kt:20-57` +
 同目录 `ConsoleConfigurable.java:116-125`、`:157-159`、`:183-190`。
 `src/runInstances.ts` 里那处注释本轮已按上游改；`src/consoleEncoding.ts:5-7` 不在本族可改面里 ⇒ 请该文件的所有者同步。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（`src/bridge.ts` instance 传给解码入口）** —— bridge 保留文件，非本 lane。
+- **R2a / R2b（`MainToolbar.vue` / `RunConsole.vue` 读行模型）** —— 本 lane 可改面，登记为待办（属运行域 owner 的在途面）。
+
+结论：零接线（R1 转 bridge owner，R2a/R2b 登记）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（R1 转 bridge owner，R2a/R2b 登记）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

@@ -16,9 +16,25 @@ import { syntaxTree } from '@codemirror/language'
 import type { SyntaxNode } from '@lezer/common'
 import { type EditorState, type Extension, type Text } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import { rainbowPalette, rgbToHex } from './colorGenerator.ts'
+// `com.intellij.lang.braceMatcher`（`PairedBraceMatcher`）的消费端：`<>` 那一对先问 EP（见
+// 下面 `hasAngleBraces`），第三方给别的语言登记一对就当场生效。
+import { bracePairsFor } from './editorActionExtensionPoints.ts'
 
 /** 上游 `RAINBOW_JB_COLORS_DEFAULT` 是五档。 */
 export const RAINBOW_COLORS = 5
+
+/**
+ * 五档颜色来自 `src/colorGenerator.ts` 的 `rainbowPalette`（上游
+ * `RainbowHighlighter.java:232-234` 那一句 `ColorGenerator.generateLinearColorSequence` 的等价物）
+ * —— 锚色就是 `RAINBOW_JB_COLORS_DEFAULT` 的五档（`:47-53`），这里只取锚点档（步长
+ * `RAINBOW_COLORS_BETWEEN + 1`），与 `rainbowSlot` 的五档语义一致。
+ * 之所以仍走 `colorGenerator`：插值表本身是上游 `ColorGenerator` 的行为，本模块只消费它。
+ */
+export const RAINBOW_LIGHT_COLORS: readonly string[] = Array.from({ length: RAINBOW_COLORS }, (_, slot) =>
+  rgbToHex(rainbowPalette('light')[slot * 5]!))
+export const RAINBOW_DARK_COLORS: readonly string[] = Array.from({ length: RAINBOW_COLORS }, (_, slot) =>
+  rgbToHex(rainbowPalette('dark')[slot * 5]!))
 
 const OPEN: Record<string, string> = { '(': ')', '[': ']', '{': '}' }
 const CLOSE = new Set([')', ']', '}'])
@@ -114,16 +130,16 @@ export function rainbowBrackets(): Extension {  const cache = new RainbowState()
   }, {
     decorations: plugin => plugin.decorations,
     provide: () => EditorView.baseTheme({
-      '&light .cm-rainbow-0': { color: '#9b3b6a' },
-      '&light .cm-rainbow-1': { color: '#114d77' },
-      '&light .cm-rainbow-2': { color: '#bc8650' },
-      '&light .cm-rainbow-3': { color: '#005910' },
-      '&light .cm-rainbow-4': { color: '#bc5150' },
-      '&dark .cm-rainbow-0': { color: '#529d52' },
-      '&dark .cm-rainbow-1': { color: '#be7070' },
-      '&dark .cm-rainbow-2': { color: '#3d7676' },
-      '&dark .cm-rainbow-3': { color: '#be9970' },
-      '&dark .cm-rainbow-4': { color: '#9d527c' },
+      '&light .cm-rainbow-0': { color: RAINBOW_LIGHT_COLORS[0] },
+      '&light .cm-rainbow-1': { color: RAINBOW_LIGHT_COLORS[1] },
+      '&light .cm-rainbow-2': { color: RAINBOW_LIGHT_COLORS[2] },
+      '&light .cm-rainbow-3': { color: RAINBOW_LIGHT_COLORS[3] },
+      '&light .cm-rainbow-4': { color: RAINBOW_LIGHT_COLORS[4] },
+      '&dark .cm-rainbow-0': { color: RAINBOW_DARK_COLORS[0] },
+      '&dark .cm-rainbow-1': { color: RAINBOW_DARK_COLORS[1] },
+      '&dark .cm-rainbow-2': { color: RAINBOW_DARK_COLORS[2] },
+      '&dark .cm-rainbow-3': { color: RAINBOW_DARK_COLORS[3] },
+      '&dark .cm-rainbow-4': { color: RAINBOW_DARK_COLORS[4] },
     }),
   })
 }
@@ -147,8 +163,21 @@ export function rainbowBrackets(): Extension {  const cache = new RainbowState()
 // 不按「IDEA 一般是…」补。
 export const LANGUAGE_ANGLE_BRACES: Readonly<Record<string, boolean>> = { java: true }
 
+/**
+ * 这门语言把 `<>` 也算一对括号吗。
+ *
+ * **2026-10-06 本 lane 补**：先问扩展点（`com.intellij.braceMatcher` 与
+ * `com.intellij.lang.braceMatcher`，出处见 `src/editorActionExtensionPoints.ts` 文件头）——
+ * 第三方为**别的**语言登记一对 `<>` 就当场生效（本仓此前只有写死的 `LANGUAGE_ANGLE_BRACES` 表，
+ * 插件挂不进来）。没有任何贡献认领 `<>` 时回落到那张静态表（bundled 的 Java 那一条由
+ * `registerBundledEditorActionDefaults()` 登记，所以 Java 仍然为 true，行为不变）。
+ */
 export function hasAngleBraces(language: string | undefined): boolean {
-  return language !== undefined && LANGUAGE_ANGLE_BRACES[language] === true
+  if (language === undefined) return false
+  for (const pair of bracePairsFor({ language })) {
+    if (pair.leftBrace === '<' && pair.rightBrace === '>') return true
+  }
+  return LANGUAGE_ANGLE_BRACES[language] === true
 }
 
 // 「尖括号之间是类型」的那一层判定，上游靠 PSI（`JavaPairedBraceMatcher.java:13-20` 的

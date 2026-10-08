@@ -100,3 +100,11 @@ const smartEnter = smartEnterCommand(() => {
 `src/bridge*.ts`、`src/keymap.ts`、`src/keymapBindings.ts`、`src/actionRegistry.ts`、
 `src/menus/types.ts`、`tests/module-size.test.mjs`、`tests/source-citations.test.mjs`、
 `CMakeLists.txt`、`package.json`、`tsconfig.json` —— 均未改动，也没有改动它们的需要。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **1（块注释词法喂进回车家族）已接线**：`src/enterHandlers.ts:140` 已走 `block: blockLexiconFor(style ?? undefined)`（块词法从语言工厂透出），`:169` 已带 `blockCloseOnEnter`。
+- **2（`CLOSE_COMMENT_ON_ENTER` 开关）已接线**：`src/settingsModel.ts:473` 已有 `closeCommentOnEnter: boolean`（默认 `true`），`src/enterHandlers.ts:112/:169/:501` 已消费 `blockCloseOnEnter ?? true`。
+- **3** —— 只读边界确认。
+
+结论：**零待接**（1/2 均已在真实链路），未改任何文件。

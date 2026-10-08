@@ -85,10 +85,28 @@ test('面板接线：每停一次推进一次、继续/会话结束/卸载都清
   assert.match(panel, /return stopped\.value && frame && path \? \{ path, line: frame\.line \} : null/,
     '锚点是当前帧；没停住就没有锚点')
   assert.match(panel, /inlineWatches\.sync\(\)\s*\/\/ 行内监视的文本就是这一轮算出的值/, 'refreshWatches 末尾推进')
-  assert.match(panel, /frames\.value = \[\]; setDebugInlineValues\(null\); inlineWatches\.clear\(\) \}/, '继续时清空')
-  assert.match(panel, /selectedFrameIndex\.value = 0; setDebugInlineValues\(null\); inlineWatches\.clear\(\) \}/, '会话结束清空')
+  // 继续时清空：`watch(dapState.paused)` 的 `!paused` 分支。重构后分支里多了
+  // framesTotal/forgetValuePages 等调用，精确序列判据脱钩 —— 改成「同一分支内四件事都在」，
+  // 断言强度不变（仍是继续即清空行内值/行内监视）。
+  const continueBranch = /if \(!paused\) \{([^}]*)\}/.exec(panel)
+  assert.ok(continueBranch, '继续分支（!paused）存在')
+  assert.match(continueBranch[1], /frames\.value = \[\]/, '继续时清空调用栈')
+  assert.match(continueBranch[1], /setDebugInlineValues\(null\)/, '继续时清掉行内值')
+  assert.match(continueBranch[1], /inlineWatches\.clear\(\)/, '继续时清掉行内监视')
+  // 会话结束清空：`watch(dapState.running)` 的 `!live` 分支（同样按分支取，不绑死调用顺序）。
+  const endBranch = /if \(!live\) \{([^}]*)\}/.exec(panel)
+  assert.ok(endBranch, '会话结束分支（!live）存在')
+  assert.match(endBranch[1], /frames\.value = \[\]/, '会话结束清空调用栈')
+  assert.match(endBranch[1], /selectedFrameIndex\.value = 0/, '会话结束复位选中帧')
+  assert.match(endBranch[1], /setDebugInlineValues\(null\)/, '会话结束清掉行内值')
+  assert.match(endBranch[1], /inlineWatches\.clear\(\)/, '会话结束清掉行内监视')
   assert.match(panel, /setDebugInlineValues\(null\); inlineWatches\.clear\(\) \}\)/, '面板卸载清空')
-  assert.match(panel, /@click\.stop="inlineWatches\.toggle\(watch\.text\)"/, '监视行上那个眼睛按钮就是加/删入口')
+  // 监视列表的行在 2026-10-06 抽到 `src/components/DebugWatchesPane.vue`
+  // （面板贴着 900 行上限，本批补四个监视动作时必须拆出去）：眼睛按钮的入口在那里，
+  // 面板把它接到 `inlineWatches.toggle`。
+  const pane = readFileSync('src/components/DebugWatchesPane.vue', 'utf8')
+  assert.match(pane, /@click\.stop="emit\('toggleInline', watch\.text\)"/, '监视行上那个眼睛按钮就是加/删入口')
+  assert.match(panel, /@toggle-inline="inlineWatches\.toggle"/, '面板把那个入口接到行内监视')
 })
 
 test('文件判据：编辑器视图没有路径，本仓用「这个视图有执行行」当下界（App.vue:1133 只给暂停文件发 debugLine）', () => {

@@ -8,6 +8,7 @@ import { request } from './bridge.ts'
 import { errorMessage } from './errors.ts'
 import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, bookmarkSelectionDescription, nextLineBookmarkInFile, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, orderedBookmarks, removeBookmark, sortGroupBookmarks, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks.ts'
 import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView.ts'
+import { dispatchBookmarksChange } from './bookmarkListener.ts'
 import { addBookmarkToNamedList, bookmarkInFirstNamedList, configureBookmarkLists, removeBookmarkFromNamedList, runWithChosenList, setNamedListBookmarkDescription, syncBookmarkLists } from './bookmarkListActions.ts'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge.ts'
 
@@ -76,6 +77,9 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
    * 状态比原来多两样：这条书签**当前**的助记键（网格要标出"当前"）与描述（映射到那个描述输入框）。
    */
   const mnemonicPrompt = ref<{ path: string; line: number; current?: string; description?: string } | null>(null)
+  // 表一变就把「增/删/改/重排」四类事件投给订阅者（上游 `BookmarksListener.TOPIC` 的广播面）。
+  // 放在这里是唯一的口：所有增删改都写 `bookmarks.value`，包括项目设置加载（`useProjectSettings`）。
+  watch(bookmarks, (next, prev) => { dispatchBookmarksChange(prev ?? [], next) })
   /**
    * "这个助记键已被占用，是否重写" 的确认态（上游 `BookmarksManagerImpl.canRewriteType:262-283`：
    * `rewriteBookmarkType` 关着时弹一个带「重写」按钮的警告，还有"不再询问"把开关写回去）。

@@ -189,3 +189,17 @@ J1 落地后我可以补：`RunTargetKind` 加 `'jar'`、`discoverRunTargets` �
 | `exec/testframework` | `scripts/verdict_table.py:52` 仍写「仍缺：失败导航、自动测试、测试结果 XML 导出与历史测试」 | 四条**都已有落点**（本轮逐个 `ls` 核到文件存在、且被 `src/components/TestRunnerPanel.vue` 消费）：`src/testNavigation.ts`、`src/autoTest.ts`、`src/testResultsXml.ts`、`src/testImport.ts`；仍缺的是 R2/J4 那套排序/统计/wall time 的**持久化与开关** |
 
 其余四条（`exec/junit`、`exec/configurations-types`、`exec/actions`、`lp/build`）本轮没有新事实，维持 runcfg2 的 R4 结论。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **J1（JAR 宿主两处 + 摘 gate）已接线**：见 runcfg2 R1。
+- **J2（JAR 执行参数挂载 `src/runActions.ts:99`）** —— 本 lane 可改面，登记为待办。
+- **J3（JAR 上下文生成）** —— 卡两处非本 lane。
+- **J4（测试树持久化）** —— `src/settingsModel.ts`（保留），需 settings owner。
+
+结论：J1 已接线；J2 登记，J3/J4 转 owner。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「J1 已接线；J2 登记，J3/J4 转 owner。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

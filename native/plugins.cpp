@@ -447,7 +447,8 @@ Json to_json(const std::vector<Plugin>& plugins) {
                                   {"implementationClass", entry.implementation_class},
                                   {"fieldName", entry.field_name}});
         Json value{{"id", plugin.id}, {"name", plugin.name}, {"version", plugin.version},
-                   {"description", plugin.description}, {"category", plugin.category},
+                   {"description", plugin.description}, {"changeNotes", plugin.change_notes},
+                   {"category", plugin.category},
                    {"vendor", plugin.vendor},
                    {"path", plugin.path}, {"enabled", plugin.enabled},
                    {"depends", plugin.depends}, {"optionalDepends", plugin.optional_depends},
@@ -491,6 +492,10 @@ std::vector<Plugin> list(const fs::path& directory) {
             // 厂商：上游 `<vendor>` 元素（`PluginXmlConst.kt:36`）。长度上限取名称那一档（120），
             // 因为它和 `name` 一样是**给人读的一行字**，不是标识符；超长与没写同义（前端不渲染那一行）。
             plugin.vendor = text_or(document, "vendor", 120);
+            // 变更说明：上游 `<change-notes>`（`PluginXmlConst.kt:42`，读取面 `XmlReader.kt:193`）。
+            // 上限 1200 取「一段话」那一档：比 description 的 400 宽，但远小于模板正文的 2666 ——
+            // 它是给人读的一段更新说明，不是第二份正文。超长与没写同义（前端不渲染那一行）。
+            plugin.change_notes = text_or(document, "changeNotes", 1200);
             if (plugin.name.empty()) plugin.name = plugin.id;
             plugin.depends = read_dependencies(document, "depends", plugin.id);
             plugin.optional_depends = read_dependencies(document, "optionalDepends", plugin.id);

@@ -8,12 +8,20 @@
 //
 // 用法与 `.tree-menu` 完全一致（同样的 class、同样的点击外面/Esc 由外层 backdrop 负责），
 // 所以模板里只是把开闭标签换了 —— App.vue 一行没多（上限卡死在 2737）。
-import { ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { usePopupAnchor } from '../popupAnchor'
 
 const props = defineProps<{ x: number; y: number }>()
 const box = ref<HTMLElement>()
-const { style } = usePopupAnchor(box, () => ({ x: props.x, y: props.y }))
+const { style, refresh } = usePopupAnchor(box, () => ({ x: props.x, y: props.y }))
+let resizeObserver: ResizeObserver | undefined
+watch(() => [props.x, props.y], () => refresh())
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined' || !box.value) return
+  resizeObserver = new ResizeObserver(() => refresh())
+  resizeObserver.observe(box.value)
+})
+onBeforeUnmount(() => resizeObserver?.disconnect())
 /**
  * 把这一层的 DOM 根节点露给宿主：全局弹层栈（`src/popupStack.ts` 的 `usePopupLayer`）要拿它
  * 量矩形（`StackingPopupDispatcherImpl.java:116-164` 判"落点在哪一层里面"）也判

@@ -84,3 +84,12 @@
 - 上游坐标：设置分组名 `settings.hints.new.group.code.vision`（`platform/ide-core/resources/messages/ApplicationBundle.properties:724-726`）；
   与 3a 无关；`native/settings_schema.cpp` 是桶 7 名下（同键默认值那段见 `:315`）。
 - 备注：这一条与 `docs/wiring-requests-2026-10-06-bucket3.md` 里 S1（若存在）是同一件事的两半，合并时以本条为准。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1 未接** —— 目标 `src/components/CodeEditor.vue`（禁改清单）。复核 `createCodeVisionLocalChannel` / `localChannel` 在该文件 0 命中。需 CodeEditor owner。
+- **W2 已接线**：`src/App.vue:163` import `localCodeVisionAction`、`:1042-1047` `runCodeLensCommand` 先问本地动作。
+- **W3 已接线**：`src/App.vue:29` import + `:2379` 状态栏已挂 `<LspServicesWidget :active-path="activePath" @notify="…" />`。
+- **W4（Code Vision 设置页与持久化）** —— 目标含 `src/settingsTreeMeta.ts`（保留文件）+ `native/settings_schema.cpp`（非本 lane）。需 settings/native owner。
+
+结论：W2/W3 已接线；W1/W4 转给对应 owner。

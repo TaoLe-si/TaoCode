@@ -117,8 +117,12 @@ test('the editor installs the extension and binds INSERT', () => {
   const editor = read('src/components/CodeEditor.vue')
   assert.match(editor, /overwriteExtension\(\)/, '扩展要进编辑器')
   assert.match(editor, /overwriteTheme/, '块光标主题要进编辑器')
-  assert.match(editor, /\{ key: 'Insert', preventDefault: true, run: editor => \{ toggleOverwrite\(editor\); return true \} \}/)
-  assert.match(editor, /'editor\.overwrite': editor => \{ toggleOverwrite\(editor\); return true \}/, '菜单要走同一个实现')
+  // 键位与动作表 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限，拆一次降一次）；
+  // 宿主注入同一个 `toggleOverwrite`，两个面因此仍解析到同一个实现。
+  const keymap = read('src/editorKeymap.ts')
+  assert.match(keymap, /\{ key: 'Insert', preventDefault: true, run: editor => \{ toggleOverwrite\(editor\); return true \} \}/)
+  assert.match(keymap, /'editor\.overwrite': editor => \{ toggleOverwrite\(editor\); return true \}/, '菜单要走同一个实现')
+  assert.match(editor, /toggleOverwrite, goToError,/, '宿主把 toggleOverwrite 注入了常驻 keymap 与动作表')
 })
 
 test('the menu row sits before the column-selection one, as upstream', () => {

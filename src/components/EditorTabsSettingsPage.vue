@@ -36,15 +36,13 @@ const squeeze = computed({
 <template>
   <h3>编辑器 › 常规 › 编辑器标签页</h3>
   <div class="editor-page-head">
-    <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“应用”生效）" @click="emit('reset')">恢复默认</button>
+    <button type="button" class="subtle-button" @click="emit('reset')">恢复默认</button>
   </div>
-  <p class="section-description">对应 IDEA 的 Editor › General › Editor Tabs（EditorTabsConfigurable.kt:109 的 editbox.tab.limit，注册 id="editor.preferences.tabs"）。</p>
   <fieldset class="settings-fields" :disabled="busy">
     <div class="input-row">
       <label :for="`${idPrefix}-tab-limit`">每个编辑器组的标签页上限</label>
-      <input :id="`${idPrefix}-tab-limit`" v-model.number="settings.tabLimit" type="number" min="1" max="100" step="1" required aria-describedby="editor-tab-limit-hint" />
+      <input :id="`${idPrefix}-tab-limit`" v-model.number="settings.tabLimit" type="number" min="1" max="100" step="1" required :aria-invalid="invalidTabLimit || undefined" />
     </div>
-    <p id="editor-tab-limit-hint" class="field-hint" :class="{ 'validation-error': invalidTabLimit }">超过上限时，IDEA 会先关闭未修改且最久未选中的标签页（默认 30，范围 1–100）。</p>
     <fieldset class="input-row tabs-placement">
       <legend>在以下位置显示标签页：</legend>
       <label class="settings-radio"><input v-model="oneRow" type="radio" name="tab-one-row" :value="true" /><span>一行，如果标签页不适合：</span></label>

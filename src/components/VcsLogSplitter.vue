@@ -57,5 +57,5 @@ function keys(event: KeyboardEvent) {
 .divider::after { content: ''; position: absolute; inset: 0 -3px; }
 .vertical > .divider { cursor: row-resize; }
 .vertical > .divider::after { inset: -3px 0; }
-.divider:focus-visible { outline: 1px solid var(--accent); }
+.divider:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 </style>

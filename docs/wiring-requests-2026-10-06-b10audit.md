@@ -395,3 +395,16 @@ new（在其后补一行；文案 = 上游 `ApplicationBundle.properties:396` �
 6. `src/components/CodeEditor.vue:853-868` + `src/menus/editMenu.ts` 的 `enabled` + `:1106` 的 `replace-mode` ——
    大文件动作门禁（第 4 条，模块侧已就位：`src/largeFileMode.ts:66/:81/:88`）。
 7. 第 5、6 条：建议**撤掉/改判**（理由与证据见对应小节），不留悬案。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+逐条复核本审计的 6 条，**本 lane 只动了第 4 条的菜单侧**：
+
+- **第 1 条（Run Anything cwd）已接线**：`src/App.vue:2638` 已透传 `payload.cwd`；`RunAnythingDialog.vue:51` emit 类型已含 `cwd?: string | null`、`:153-154` 已按上下文选择结果发 cwd。三处同批落，非假通道。
+- **第 2 条（Ctrl+滚轮改字号 / 终端基准字号）已接线**：`src/settingsModel.ts:265/:344` 两键 + 默认值；`native/settings_schema.hpp:124` / `settings_schema.cpp:419` 白名单与默认；`src/previewSettings.ts:52/:58` 预览桩；`SettingsDialog.vue:736` 两格设置行；`TerminalPanel.vue:75/:124/:137` 取数 + `App.vue:2336` `:settings="editorSettings"`。整条闭环。
+- **第 3 条（ANSI 16 色覆盖）模块侧 + 宿主取数已接**：`TerminalPanel.vue:351` 第四参 `props.ansiOverrides`、`RunConsole.vue:161/:163` 第四参 `props.ansiOverrides` 都已接。**仍缺一处**：设置键 `general.terminalAnsiColors` 全仓 `grep` 只命中 `RunConsole.vue:110` 的注释 —— `GeneralSettingsState`（`src/settingsModel.ts:153`）没有该字段，`GENERAL_SETTING_KEYS`（`native/settings_schema.hpp:127`）也没有 ⇒ 用户无法写入覆盖表，`ansiOverrides` 恒空。补键需同批改 `src/settingsModel.ts` + `native/settings_schema.hpp/.cpp` + `src/previewSettings.ts` + 设置页，跨 `native/`（非本 lane 可改面），**需 settings owner + native owner 处理**。
+- **第 4 条（大文件动作替换）已接线（菜单侧）**：本 lane 在 `src/App.vue` 补 `import { largeFilePolicy, largeFileCommandAllowed } from './largeFileMode'`（:96）、`heavyActive()`（:1449）并把 `editable` 的 `enabled` 改成 `hasEditor() && largeFileCommandAllowed(name, heavyActive())`（:1455），并在 `runEditor`（:1444）加同一道门 —— 菜单、键位分发、动作搜索共用一个入口。**键位面**（`src/components/CodeEditor.vue:853-868` 的 `Mod-r`/`Ctrl-F3`/`Ctrl-Shift-F3`/`Alt-Shift-j`/`Alt-j`/`Ctrl-Shift-Alt-j`）与**查找栏替换行**（`CodeEditor.vue:1099` 的 `:replace-mode`）在 CodeEditor 名下，**需 CodeEditor owner 处理**（`EditorFindBar.vue` 是 VCS lane 独占，一并跳过）。
+- **第 5 条（大文件正则提示）不落** —— 认同审计判定（前提不成立），不改。
+- **第 6 条（RunStartParams.elevate）不落** —— 认同审计判定（缺传输层），登记为独立批次，不改。
+
+App.vue 行数：2677 → 2686（+9：1 import 行 + 2 注释 + heavyActive + editable/runEditor 两处门）。上限 2737 未破。

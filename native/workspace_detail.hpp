@@ -22,6 +22,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "workspace.hpp"  // WorkspaceError
@@ -49,5 +50,18 @@ void remove_tree(const std::filesystem::path& directory, const std::filesystem::
 // — IDEA's pasted copies stay editable.
 void copy_tree(const std::filesystem::path& source, const std::filesystem::path& target,
                const std::filesystem::path& root, std::size_t& budget);
+
+// 2026-10-08 「路径守卫」一族从 native/workspace.cpp 搬进 native/workspace_paths.cpp 后，
+// 这里只补声明：定义只剩新文件那一份（设备名 / NTFS 数据流拒法复制一份就会漂移）。
+// 大小写不敏感的序数比较（Windows 的目录名比较口径，CompareStringOrdinal）。
+bool equal_name(std::wstring_view left, std::wstring_view right);
+// 单个路径分量必须是普通 Windows 名字：拒绝 . / .. / 尾部点或空格 / 控制字符与 NTFS 设备名。
+void validate_component(const std::wstring& name);
+// 调用方给的**工作区相对**路径 → fs::path：拒绝对路径、盘符、数据流、`..` 与非法字符。
+std::filesystem::path parse_relative(const std::string& relative);
+// 去掉 `\\?\` / `\\?\UNC\` 前缀并归一化（只接受普通盘符路径或 UNC 共享）。
+std::filesystem::path plain_path(std::wstring path);
+// path 是否落在 root 之下（逐段比分量，不解析符号链接）。
+bool within(const std::filesystem::path& path, const std::filesystem::path& root);
 
 }  // namespace taocode::detail

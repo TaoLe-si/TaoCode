@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,14 @@ std::string patch(const std::filesystem::path& repo, bool include_untracked);
 Json compare(const std::filesystem::path& repo, const std::string& base);
 std::string head(const std::filesystem::path& repo);                 // branch name, detached hash, or empty
 std::vector<std::string> branches(const std::filesystem::path& repo);
+struct BranchTrackInfo {
+    std::string local_branch;
+    std::string remote_name;
+    std::string remote_branch;
+};
+std::vector<BranchTrackInfo> branch_track_infos(const std::filesystem::path& repo,
+                                                const std::vector<std::string>& local_branches);
+std::optional<bool> is_on_branch(const std::filesystem::path& repo);
 void stage(const std::filesystem::path& repo, const std::string& path);
 void unstage(const std::filesystem::path& repo, const std::string& path);
 // `amend` rewrites the last commit; an empty message then keeps the original one.
@@ -52,13 +61,30 @@ void unstage(const std::filesystem::path& repo, const std::string& path);
 // `author_name`/`author_email` override the commit author for this commit only
 // (git commit --author=…), which is IDEA's CommitAuthorComponent editor; both empty
 // means "use the repository configuration".
-// `paths` is IDEA's "Commit File…" subset (`CommonCheckinFilesAction.kt:26-78` →
-// `CheckinActionUtil.kt:100-160`, `pathsToCommit`): non-empty means ONLY these paths go
-// into this commit. It lands on `git commit --only -- <paths>`, so the index entries of
-// the other files stay staged and untouched. Untracked selections are `git add`ed first
-// (git refuses a `--only` pathspec for a file it does not know, while the upstream
-// subset does include untracked changes). Empty = the whole-index commit, i.e. the exact
-// command line this file produced before the parameter existed.
+// `paths` is IDEA's "Commit File…" subset (`VcsActions.xml:187` registers `CheckinFiles` as the first
+// row of `ChangesViewPopupMenu`; `CommonCheckinFilesAction.kt:37-53` hands the selected paths to
+// `CheckinActionUtil.kt:104-106`/`:121-147`, whose `getIncludedChanges()` at `:153-167` becomes the
+// commit scope via `workflowHandler.setCommitState(...)`). Non-empty means ONLY these paths go into
+// this commit. Upstream realises that by rewriting the index and committing without a pathspec
+// (`GitCheckinEnvironment.kt:393-434` + `GitResetAddStagingAreaStateManager.kt:30-60` +
+// `GitFileUtils.kt:156-179` + `GitRepositoryCommitter.kt:77-108`); this repository takes the short
+// cut that produces the same observable result: `git commit --only -- <paths>`, so the index entries
+// of the other files stay staged and untouched (measured: a selected `MM` file commits both halves
+// from the working tree, an unselected `M ` file is still `M ` afterwards).
+// Only the selected paths git does not know yet are `git add`ed — an untracked file's pathspec is
+// refused by git ("did not match any file(s) known to git", measured) while a rename's old side no
+// longer exists anywhere and makes `git add` fail hard (exit 128, `--ignore-errors` does not
+// suppress it, measured). Renames therefore have to arrive as a pair, like upstream's single
+// `ChangedPath` carrying beforePath/afterPath (`GitCheckinEnvironment.kt:403-404`); one-sided
+// selections are rejected because they write a broken history (measured: new side only ⇒ `A` and
+// HEAD keeps the old file; old side only ⇒ `D` and the new content stays in the index).
+// Every pathspec is a repo-relative POSIX **literal** (`checked_pathspec` in native/git.cpp): the glob
+// characters `*` `?` `[` and the magic prefixes `:` / `:(` are refused as INVALID_REQUEST, because a
+// glob pathspec commits MORE than the user selected (measured: `-- '*.ts'` took two files,
+// `-- 'foo[1].ts'` also took `foo1.ts`) and `:(exclude)…` would drop a selected one. Upstream cannot
+// hit this — it rewrites the index instead of passing a pathspec (see the two references above).
+// Empty = the whole-index commit, i.e. the exact command line this file produced before the
+// parameter existed.
 void commit(const std::filesystem::path& repo, const std::string& message, bool amend = false,
             bool signoff = false, const std::string& author_name = std::string(),
             const std::string& author_email = std::string(),
@@ -81,7 +107,7 @@ void checkout(const std::filesystem::path& repo, const std::string& branch);
 Json log(const std::filesystem::path& repo, const std::string& path, int limit);
 // Full log for the VCS Log tool window: includes parent hashes and ref names so the
 // frontend can draw the commit graph and label branches/tags without a second round-trip.
-// Shapes {commits:[{hash, shortHash, author, date, subject, parents:[hash], refs:[{name,type}]}], offset, limit, hasMore}.
+// Shapes {commits:[{hash, shortHash, author, date, committerDate, subject, parents:[hash], refs:[{name,type}]}], offset, limit, hasMore}.
 Json log_full(const std::filesystem::path& repo, int limit);
 void pull(const std::filesystem::path& repo);
 void push(const std::filesystem::path& repo);
@@ -93,7 +119,9 @@ void rebase(const std::filesystem::path& repo, const std::string& branch);
 void cherry_pick(const std::filesystem::path& repo, const std::string& commit);
 Json stash_list(const std::filesystem::path& repo);
 void stash_save(const std::filesystem::path& repo, const std::string& message);
-void stash_pop(const std::filesystem::path& repo);
+// `ref` 为空 = 弹出栈顶（`git stash pop`，LIFO）；给了 `stash@{n}` = `git stash pop <ref>`
+// （搁架面板按序号取回某一条，上游 `ShelfToolWindowPanel` 的「取出」对任意一行都可用）。
+void stash_pop(const std::filesystem::path& repo, const std::string& ref = std::string());
 void create_branch(const std::filesystem::path& repo, const std::string& name, bool checkout);
 void delete_branch(const std::filesystem::path& repo, const std::string& name);
 void merge(const std::filesystem::path& repo, const std::string& branch);

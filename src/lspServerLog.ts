@@ -18,10 +18,14 @@ import { ref } from 'vue'
 
 /** 日志行的来源类别（对应上游几处写入点：服务器通知、进度、会话生命周期、服务端编辑、
  * 服务器要求重取（`workspace/…/refresh`，上游同样只写日志不弹通知：
- * `LspServerNotificationsHandlerImpl.kt:341-368`））。
+ * `LspServerNotificationsHandlerImpl.kt:341-368`）、
+ * 服务器**主动发起**的那几条**请求**在本端的答复（`client/registerCapability` /
+ * `client/unregisterCapability` / `window/workDoneProgress/create` —— 上游
+ * `LspServerNotificationsHandlerImpl.kt:119-123`、`:125-128`、`:255` 三条都是 `completedFuture(null)`，
+ * 本仓除了回包还要把内容记下来，否则"服务器注册了什么、我们答应了什么"这一层永远不可观察）。
  * `dropped` = 前端没有登记这条方法的处理器（`src/lspServerMessages.ts` 的注册表拦下来的那些）：
  * 「声明了 capability 却没处理器」这一类缺陷在本仓唯一可观察的痕迹就是它，不记就等于无声丢弃。 */
-export type LspLogKind = 'message' | 'progress' | 'session' | 'edit' | 'refresh' | 'dropped'
+export type LspLogKind = 'message' | 'progress' | 'session' | 'edit' | 'refresh' | 'request' | 'dropped'
 
 /** 严重级与 LSP `MessageType` 同口径：1 错误 / 2 警告 / 3 信息 / 4 日志。 */
 export type LspLogLevel = 1 | 2 | 3 | 4

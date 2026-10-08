@@ -69,3 +69,12 @@
   `:33`（子级缩进四个空格）、`:36`（每行 = `indent + getHighlightedText().getText()`，不含位置）、
   `:32`+`:39-41`（不可见根不打印）、
   `platform/lsp-impl/src/impl/features/hierarchy/LspHierarchyNodeDescriptor.kt:25`/`:28`（高亮文本 = `name` + 可选 `" : detail"`）
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1 已接线**：`src/App.vue:1323` 解构含 `gotoSuper, gotoTest, gotoRelated`，`:1609` `navigateMenuContext` 已含三者。
+- **W2 已接线**：`src/App.vue:1329` `chooseTargets: (targets, title) => { navChooserTitle.value = title; return openNavChooser(targets, {}) }`（标题槽位也补上了）。
+- **W3 已接线**：`src/App.vue:2216`（top）与 `:2243`（bottom）两处 `<BreadcrumbsBar>` 均已带 `:show-members="editorSettings.showMembersInNavigationBar"`。
+- **W4 已接线**：`src/App.vue:1408` 解构 `exportCurrentHierarchy, hierarchyExportSummary`、`:1425` 已接 `app.writeExportFiles` 导出。
+
+结论：**零待接**，未改任何文件。

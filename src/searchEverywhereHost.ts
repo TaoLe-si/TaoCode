@@ -4,7 +4,7 @@
 // 新逻辑一律拆到 src/xxx.ts、App 里只留一行调用。
 //
 // **已接的供给者**（每个都接已有的真实通道，不是造出来的）：
-//   · 文件   —— `workspace.files`（宿主，和自动发现运行目标用的是同一条）
+//   · 文件   —— `workspace.searchFiles`（宿主独立候选扫描，按 `.zcodeignore` 过滤）
 //   · 符号   —— LSP `workspace/symbol`（与「转到符号」同一个请求，同一个防抖阈值：≥2 字）；
 //               Classes 档在这批符号上按 kind 取类型，`Foo#bar` 再取 `documentSymbol` 定位直接成员
 //   · 动作   —— 菜单模块已经装配好的 `actionList`（Find Action 面板同一个源）
@@ -20,7 +20,7 @@
 // Autocompletion 要按当前文档取词（IDEA 的 `WordCompletionContributor`），IDE 要另一套范围 ——
 // 等有真实供给者再渲染，不塞一个永远空着的 tab。
 import { computed, ref, watch, type Ref } from 'vue'
-import { fsChanges, request, type LspDocumentSymbol, type SearchResult, type Workspace } from './bridge.ts'
+import { fsChanges, request, type LspDocumentSymbol, type SearchResult, type Workspace, type WorkspaceSearchFileEntry } from './bridge.ts'
 import type { ActionEntry } from './menuUi'
 import type { SymbolEntry } from './lspNavigation'
 import type { SearchEverywhereItem, SearchEverywhereTab } from './searchEverywhere'
@@ -39,7 +39,21 @@ import {
 // 工程排除目录：与「在文件中查找」同一份口径（`SearchPanel.vue` 也是并进去的），
 // SE 的 Text 档扫的是同一个工作区，不能把被排除的目录又扫一遍。
 import { excludedDirsOf, mergeSearchExclude, projectExclusionPatterns } from './searchExclusions.ts'
+import { loadWorkspaceFileSearchEntries, workspaceFileIgnoreChanged } from './workspaceFileSearchIgnore.ts'
 import type { ProjectSettings } from './settingsModel.ts'
+// 会话级搜索历史（上游 `SearchHistoryList` + `HistoryIterator`）：规则在
+// `src/searchEverywhereHistory.ts`，这里负责记录时机（关弹层时记一次，照
+// `SearchEverywhereManagerImpl.java:138-141` 的 `setCancelCallback → saveSearchText()`）。
+import {
+  ALL_CONTRIBUTORS_TAB,
+  historyNext,
+  historyPrev,
+  loadSearchHistory,
+  saveSearchHistory,
+  searchHistoryFor,
+  storeSearchHistory,
+  type SearchHistoryItem,
+} from './searchEverywhereHistory.ts'
 
 /** 与 `lspNavigation.globalSymbolEntries` 同一道门槛：语言服务少于两个字不给结果。 */
 export const SEARCH_EVERYWHERE_SYMBOL_MIN = 2
@@ -87,7 +101,7 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
          allRunConfigNames, selectRunConfig, runSelectedConfig, baseName } = deps
 
   const searchEverywhereOpen = ref(false)
-  const searchEverywhereFiles = ref<string[]>([])
+  const searchEverywhereFiles = ref<WorkspaceSearchFileEntry[]>([])
   const searchEverywhereSymbols = ref<SymbolEntry[]>([])
   /** Text 档的命中（宿主 `search.run` 回来的那批，已映射成候选行）。 */
   const searchEverywhereTextHits = ref<ReturnType<typeof textHitViews>>([])
@@ -99,6 +113,13 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
   let textExcludedOrigin: string | null = null
   /** 当前 tab：Text 档的扫描只在 All / Text 两档跑（其余档不给候选就不发请求）。 */
   const activeTab = ref<SearchEverywhereTab>('all')
+  /**
+   * 会话级搜索历史（上游 `SearchHistoryList`，`SearchHistoryList.kt:9-33`）：表在内存里，
+   * 开弹层时读存档、关弹层时写回（照 `SearchEverywhereManagerImpl.java:138-141` 的记录时机）。
+   */
+  const searchHistory = ref<SearchHistoryItem[]>(loadSearchHistory())
+  /** 当前 tab 的历史游标（`HistoryIterator`，`HistoryIterator.kt:10-42`）；`index` 从 -1 起。 */
+  let historyIndex = -1
   let symbolTimer: ReturnType<typeof setTimeout> | undefined
   let refreshTimer: ReturnType<typeof setTimeout> | undefined
   let textTimer: ReturnType<typeof setTimeout> | undefined
@@ -110,6 +131,12 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
   let sessionActive = false
   /** 最近一次查询词 —— 数据源变化后要按同一个词重发符号请求（PopupUpdateProcessor 那一层）。 */
   let lastQuery = ''
+  /**
+   * 最近一次**非空**查询词：关弹层时记进历史用的是它。对话框在关闭时会 `onQuery('')`
+   * （`SearchEverywhereDialog.vue` 的 open 监听），空串会把 `lastQuery` 抹掉，所以历史那一笔
+   * 单独留一份（上游记的是关闭那一刻输入框里的文本，`:444-447`）。
+   */
+  let lastNonEmptyQuery = ''
 
   function isCurrent(epoch: number) {
     return sessionActive && searchEverywhereOpen.value && generation === epoch
@@ -120,8 +147,9 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
     const epoch = generation
     const id = ++fileRequestId
     try {
-      const { files } = await request<{ files: string[] }>('workspace.files')
-      if (isCurrent(epoch) && id === fileRequestId) searchEverywhereFiles.value = files
+      const candidates = await loadWorkspaceFileSearchEntries(workspace.value.root)
+      if (isCurrent(epoch) && id === fileRequestId)
+        searchEverywhereFiles.value = candidates.filter(entry => entry.type === 'file')
     } catch { /* 当前会话刷新失败保留清单；新会话从空清单开始。 */ }
   }
 
@@ -140,6 +168,10 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
   function onSearchEverywhereQuery(raw: string) {
     const query = raw.trim()
     lastQuery = query
+    if (query) lastNonEmptyQuery = query
+    // 打了新词 ⇒ 历史游标作废（下一次 Alt+Up/Down 从最近一条重来，
+    // 上游 `SearchEverywhereManagerImpl.java:484-489` 的 `updateHistoryIterator` 同义）。
+    historyIndex = -1
     // 在防抖开始时就作废旧请求，不能等下一次请求真正发出。
     const id = ++symbolRequestId
     const epoch = generation
@@ -221,7 +253,39 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
   function setSearchEverywhereTab(tab: SearchEverywhereTab) {
     if (activeTab.value === tab) return
     activeTab.value = tab
+    // 换档就换历史游标（上游 `updateHistoryIterator`，`:484-489`）：历史按 tab 分家。
+    historyIndex = -1
     scheduleText()
+  }
+
+  /**
+   * 记一次搜索历史（上游 `saveSearchText()` `:439-448`）—— 关弹层时调一次，空串不记。
+   * 当前 tab 取的是**关之前**那一档（`getSelectedTabID()`）。
+   */
+  function rememberSearchText(text: string) {
+    const next = saveSearchHistory(searchHistory.value, text, activeTab.value || ALL_CONTRIBUTORS_TAB)
+    if (next === searchHistory.value) return
+    searchHistory.value = next
+    storeSearchHistory(next)
+  }
+
+  /**
+   * `Alt+Down`（`SearchTextField.SHOW_HISTORY_SHORTCUT`，`:64-67`）：往后取一条历史。
+   * `next=true` 走 `HistoryIterator.next()`，否则 `prev()`（`:465-472` 的 `showHistoryItem`）。
+   */
+  function searchHistoryStep(next: boolean): string {
+    const list = searchHistoryFor(searchHistory.value, activeTab.value)
+    const cursor = next ? historyNext(list, historyIndex) : historyPrev(list, historyIndex)
+    historyIndex = cursor.index
+    return cursor.text
+  }
+
+  /** 打开弹层时预填的词（`SearchEverywhereManagerImpl.java:128` 的 `myHistoryIterator.prev()`）。 */
+  function openSearchHistoryText(): string {
+    const list = searchHistoryFor(searchHistory.value, activeTab.value)
+    if (!list.length) return ''
+    historyIndex = list.length - 1
+    return list[historyIndex]!
   }
 
   /** 改一个开关：立刻写回存档并按新开关重扫（上游 Text 档的筛选器就是这三个布尔）。 */
@@ -278,7 +342,7 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
   }
 
   const searchEverywhereItems = computed<SearchEverywhereItem[]>(() => [
-    ...searchEverywhereFiles.value.map(path => ({
+    ...searchEverywhereFiles.value.map(({ path }) => ({
       id: `file:${path}`,
       title: baseName(path),
       subtitle: path,
@@ -344,7 +408,12 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
     searchEverywhereSymbols.value = []
     searchEverywhereTextHits.value = []
     activeTab.value = 'all'
-    if (!open) lastQuery = ''
+    if (!open) {
+      // 关弹层时记一笔（上游 `setCancelCallback → saveSearchText()`，`:138-141`）：空串不记。
+      rememberSearchText(lastNonEmptyQuery)
+      lastQuery = ''
+      lastNonEmptyQuery = ''
+    }
     onCleanup(() => {
       sessionActive = false
       generation++
@@ -358,6 +427,9 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
       refreshTimer = undefined
       textTimer = undefined
     })
+  watch(() => workspaceFileIgnoreChanged.revision, () => {
+    if (workspaceFileIgnoreChanged.root === workspace.value?.root) void refreshFiles()
+  })
     if (open) {
       void refreshFiles()
       onSearchEverywhereQuery(lastQuery)
@@ -393,6 +465,15 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
     onSearchEverywhereQuery,
     /** 当前 tab 交给宿主：Text 档的扫描只在 All / Text 两档发（`setSearchEverywhereTab`）。 */
     setSearchEverywhereTab,
+    /**
+     * 会话级搜索历史（上游 `SearchHistoryList`）：`Alt+Down`/`Alt+Up` 取上一条/下一条
+     * （`SearchTextField.SHOW_HISTORY_SHORTCUT`/`ALT_SHOW_HISTORY_SHORTCUT`，`:64-67`），
+     * 打开时预填最近一条（`openSearchHistoryText`）。表本身在 `src/searchEverywhereHistory.ts`。
+     * **UI 那一半（Alt+Up/Down 的键盘分支）在 `src/components/SearchEverywhereDialog.vue` —— 归 UI 审查 lane，
+     * 已登记接线请求**；宿主这一侧的数据与规则都在这里，接上即可用。
+     */
+    searchHistoryStep,
+    openSearchHistoryText,
     /** Text 档的三个开关（上游 `SeTextSearchOptions`）。 */
     searchEverywhereTextOptions: computed(() => textOptions.value),
     setTextSearchOption,

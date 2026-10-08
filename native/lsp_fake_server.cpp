@@ -89,6 +89,9 @@ int main(int argc, char** argv) {
     // implementation 同理（「选择实现」）。
     flags.multi_implementation =
         std::find(switches.begin(), switches.end(), std::string("--multi-implementation")) != switches.end();
+    // --server-requests：握手后主动发三条服务器请求（判据在 lsp_session_test.cpp 的那条 e2e）。
+    flags.server_requests =
+        std::find(switches.begin(), switches.end(), std::string("--server-requests")) != switches.end();
     // --hang=<method>: that method is accepted and never answered, so the client's
     // request deadline is the only thing that can end the wait.
     for (const auto& option : switches)
@@ -119,6 +122,11 @@ int main(int argc, char** argv) {
                 if (notification == "textDocument/didOpen") {
                     opened_uri = params.at("textDocument").at("uri").get<std::string>();
                     document_text = params.at("textDocument").value("text", std::string());
+                    // 真实服务器把「我分析的是哪一版」回在 `PublishDiagnosticsParams.version`
+                    // （客户端在 didOpen 里报上来的那一个），客户端据此拒收陈旧批：
+                    // `LspPublishDiagnosticsCache.kt:56-66`。假服务器照同样的规矩回显，
+                    // 宿主那侧的透传才是**被真的测到**（键名/类型写错就会红）。
+                    const int opened_version = params.at("textDocument").value("version", -1);
                     // 一条 `$/progress`（begin → report(40%) → end）：真实服务器在建索引/导工程时
                     // 就是这个形状，客户端必须把它转出去而不是丢弃（见 lsp.cpp 的通知分支）。
                     write_frame(Json{{"jsonrpc", "2.0"}, {"method", "$/progress"},
@@ -141,10 +149,12 @@ int main(int argc, char** argv) {
                     // 所以两条都得出得去、并且分得开（`method` 由客户端补上）。
                     write_frame(Json{{"jsonrpc", "2.0"}, {"method", "window/logMessage"},
                                      {"params", {{"type", 4}, {"message", "fake log line"}}}});
-                    write_frame(Json{{"jsonrpc", "2.0"}, {"method", "textDocument/publishDiagnostics"}, {"params",
-                        {{"uri", opened_uri}, {"diagnostics", Json::array({
-                            {{"range", {{"start", {{"line", 0}, {"character", 0}}}, {"end", {{"line", 0}, {"character", 5}}}}},
-                             {"severity", 1}, {"message", "fake diagnostic"}}})}}}});
+                    Json publish_params{{"uri", opened_uri}, {"diagnostics", Json::array({
+                        {{"range", {{"start", {{"line", 0}, {"character", 0}}}, {"end", {{"line", 0}, {"character", 5}}}}},
+                         {"severity", 1}, {"message", "fake diagnostic"}}})}};
+                    if (opened_version >= 0) publish_params["version"] = opened_version;
+                    write_frame({{"jsonrpc", "2.0"}, {"method", "textDocument/publishDiagnostics"},
+                                 {"params", std::move(publish_params)}});
                 } else if (notification == "textDocument/didChange") {
                     // Both wire forms: a full-text change replaces the buffer, a
                     // range change is spliced into it. Keeping the text is what lets

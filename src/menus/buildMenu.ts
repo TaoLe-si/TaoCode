@@ -11,7 +11,7 @@ export interface BuildMenuContext {
   isDesktop: boolean
   workspace: any
   runState: any
-  startBuild: (rebuild?: any) => any
+  startBuild: (rebuild?: any, filesOnly?: any) => any
   stopRun: () => any
   showOutput: (id: any) => any
 }
@@ -27,6 +27,13 @@ function registerBuildActions(ctx: BuildMenuContext): void {
     id: 'build.rebuild', title: '重新构建项目', keywords: 'rebuild project clean 重新构建', source: 'menu',
     enabled: () => ctx.isDesktop && Boolean(ctx.workspace.value) && !ctx.runState.running,
     run: () => void ctx.startBuild(true),
+  })
+  // 「编译当前文件」（上游 `CompileAction` 的 `compile(files)` 那一支，`CompileFile` id 无默认键位）：
+  // 只编活动标签那个 .java（javac 逐文件）；Gradle/Maven 项目退回整模块构建，理由见 src/projectBuild.ts。
+  ACTIONS.register({
+    id: 'build.file', title: '编译当前文件', keywords: 'compile file recompile 编译文件 当前文件', source: 'menu',
+    enabled: () => ctx.isDesktop && Boolean(ctx.workspace.value) && !ctx.runState.running,
+    run: () => void ctx.startBuild(false, true),
   })
   ACTIONS.register({
     id: 'build.stop', title: '停止构建', keywords: 'stop build cancel 停止构建', source: 'menu',
@@ -45,6 +52,7 @@ export function createBuildMenuRows(ctx: BuildMenuContext): MenuRow[] {
   return [
     actionRow('build.project', { keys: 'Ctrl F9' }),
     actionRow('build.rebuild', { keys: 'Ctrl Shift F9' }),
+    actionRow('build.file'),
     actionRow('build.stop'),
     { id: 'build.rule1', rule: true },
     actionRow('build.output'),

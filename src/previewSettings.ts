@@ -13,6 +13,11 @@ import { MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE } from './editorFontSize.ts'
 // terminalFontSize.ts 不 import 任何东西 ⇒ 这里没有环。
 import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from './terminalFontSize.ts'
 import { isBidiDirection } from './bidiTextDirection.ts'
+// Code Vision 的组白名单与**渲染侧同源**（`CODE_VISION_GROUP_IDS` 是「本仓真会画出条目的那几组」）。
+// 抄两份必然漂移，而这一处漂错的代价不是"存不下来"而是"存下去会毁掉之后每一次设置保存"：
+// 运行时表由右键「隐藏这一组」直接写（`handleCodeVisionExtraAction` 不查白名单），
+// 白名单少一组 ⇒ 那一次右键之后，盘上那份再也写不进去。
+import { CODE_VISION_GROUP_IDS } from './codeLensSettings.ts'
 
 export function previewSettingsError(key: string, value: unknown, languages: readonly string[]): string | null {
   const accepted = key === 'fontSize' || key === 'tabSize' || key === 'wordWrap' ||
@@ -73,9 +78,13 @@ export function previewSettingsError(key: string, value: unknown, languages: rea
       // Code Vision 的可见条数：界 1..10 = 上游 spinner(1..10, 1)（CodeVisionGlobalSettingsProvider.kt:43）。
       : key === 'codeVisionVisibleEntries' ? !Number.isInteger(value) || Number(value) < 1 || Number(value) > 10
       // Code Vision 的两个组集合（CodeVisionSettings.kt:45/:50，只装与出厂相反的那一半）：
-      // 条目必须是本仓已知的组 id（src/codeLensSettings.ts:48-50 的 LspCodeVisionProvider / problems）。
+      // 条目必须是本仓**真的会渲染出条目**的那一组 —— 白名单与渲染侧同源（`CODE_VISION_GROUP_IDS`），
+      // 不在这里另抄一份（抄少一个组 = 右键隐藏那一组之后，盘上那份永远存不下）。
+      // 上游的三个内置组 id 逐字取自 `PlatformCodeVisionIds.kt:5-7`（references / inheritors / problems），
+      // 第四个 `LspCodeVisionProvider` 是服务端 lens 那一组（`LspCodeVisionProvider.kt:20`）。
+      // 非字符串条目也要挡（原生 `settings_editor_keys.hpp` 那条 `entry.is_string()` 的等价物）。
       : key === 'codeVisionDisabledGroups' || key === 'codeVisionEnabledGroups' ? !Array.isArray(value) || value.length > 8 ||
-        value.some(id => id !== 'LspCodeVisionProvider' && id !== 'problems')
+        value.some(id => typeof id !== 'string' || !CODE_VISION_GROUP_IDS.includes(id))
       // 与原生 validate_language_flags 同一套规则：键必须是已知语言 id，值是布尔。
       : key === 'breadcrumbsLanguages' ? !value || typeof value !== 'object' || Array.isArray(value) ||
         Object.entries(value).some(([id, flag]) => !(languages as readonly string[]).includes(id) || typeof flag !== 'boolean')

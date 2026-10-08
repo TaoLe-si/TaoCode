@@ -16,12 +16,13 @@
 //   · 「更多」：`MoreSquareStripeButton.kt`（左键 = 没有侧条按钮的窗口列表 `ShowMoreToolWindowsAction:100-123`；
 //     右键 = 「移至<对侧>」`createPopupGroup:49-61`；可达名 `more.button.accessible.name` = 更多）。
 import { computed, onUnmounted, ref } from 'vue'
-import { Check, MoreHorizontal } from 'lucide-vue-next'
+import {  } from 'lucide-vue-next'
 import { startStripeResize, stripeRailWidth, stripeWidthLimits, type StripeSide } from '../stripeResize'
 import type { ToolWindowId } from '../toolWindowMeta'
 import { windowInfo } from '../toolWindowManager.ts'
 import { STRIPE_SEPARATOR_HEIGHT_PX, STRIPE_SEPARATOR_LINE_THICKNESS_PX, STRIPE_SEPARATOR_LINE_WIDTH_PX,
          stripeSeparatorIndex } from '../toolStripeSplit.ts'
+import { IdeaCheckedIcon, IdeaMoreHorizontalIcon } from './icons/toolWindowIcons.ts'
 import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
@@ -37,10 +38,11 @@ const props = defineProps<{
   isActive: (id: ToolWindowId) => boolean
   /** 正在被拖拽的窗口 id（`AbstractDroppableStripe` 的拖影态）。 */
   dragging: string | null
-  /** 拖拽重排的落点（`AbstractDroppableStripe` 的投放标记）：`isDropBefore(side, id)`，宿主侧那份判据。 */
-  isDropBefore: (side: StripeSide, id: ToolWindowId) => boolean
-  /** 最后一个按钮之后要画标记（拖到这一侧末尾）。 */
-  dropAtEnd: boolean
+  /** 拖拽重排的落点（`AbstractDroppableStripe` 的投放标记）：`isDropBefore(side, id)`，宿主侧那份判据。
+   *  `id` 给 `null` 问的是**末尾槽**（最后一个按钮之后，上游 `dragInsertPosition = -1`，
+   *  `AbstractDroppableStripe.kt:436-441`）—— 这一位不再依赖宿主算好的 `dropAtEnd`，
+   *  因为宿主给右条写死的是 `false`（不对称，登记在 wiring 请求 D-1）。 */
+  isDropBefore: (side: StripeSide, id: ToolWindowId | null) => boolean
   /** 这一侧的自定义宽度，0 = 没设（`myCustomWidth == 0`）。 */
   width: number
   /** 「显示工具窗口名称」（`UISettings.showToolWindowsNames`）。 */
@@ -189,20 +191,23 @@ onUnmounted(() => {
         <span v-if="separatorAt === index" class="stripe-split-separator" :style="separatorBox" aria-hidden="true"><span :style="separatorLine" /></span>
         <span v-if="isDropBefore(side, id)" class="stripe-drop-marker" aria-hidden="true" />
         <button
-          class="activity-button" :class="{ active: isActive(id), dragging: dragging === id }" draggable="true"
+          class="activity-button" :class="{ active: isActive(id), dragging: dragging === id }" :aria-pressed="isActive(id)" draggable="true"
           :title="`${labels[id]}（可拖到另一侧或拖动重排）`" :aria-label="`切换${labels[id]}`" :disabled="isDisabled(id)"
           @click="emit('activate', id)" @contextmenu.prevent.stop="emit('menu', id, $event)"
           @dragstart="emit('dragStart', id, $event)" @dragover="emit('dragOver', id, $event)"
           @drop="emit('drop', id, $event)" @dragend="emit('dragEnd')"
-        ><component :is="icons[id]" :size="iconSize.rail" /><span class="activity-name">{{ labels[id] }}</span><span class="activity-number">{{ mnemonicOf(id) }}</span></button>
+        ><component aria-hidden="true" :is="icons[id]" :size="iconSize.rail" /><span class="activity-name">{{ labels[id] }}</span><span class="activity-number">{{ mnemonicOf(id) }}</span></button>
       </template>
-      <span v-if="dropAtEnd" class="stripe-drop-marker" aria-hidden="true" />
+      <!-- 末尾槽的落点标记：`isDropBefore(side, null)` 是**这一侧自己的**判据（上游
+           `AbstractDroppableStripe.kt:436-441` 那条 `dragInsertPosition = -1` 的兜底），
+           两侧条纹对称，不再依赖宿主算好的 `dropAtEnd`（wiring 请求 D-1 已闭环）。 -->
+      <span v-if="isDropBefore(side, null)" class="stripe-drop-marker" aria-hidden="true" />
       <!-- 「更多」（`MoreSquareStripeButton`）：位置在上条纹之后、拆分按钮之前。 -->
       <button
         v-if="moreVisible" ref="moreButton" class="activity-button stripe-more" :class="{ active: moreOpen }"
         :title="moreTitle" :aria-label="moreLabel" :aria-expanded="moreOpen"
         @click.stop="toggleMore()" @contextmenu.prevent="toggleMoveTo"
-      ><MoreHorizontal :size="iconSize.rail" /></button>
+      ><IdeaMoreHorizontalIcon :size="iconSize.rail" /></button>
     </div>
     <span v-if="side === 'right'" class="stripe-drop-hint" aria-hidden="true" />
     <!-- 宽度的分隔线（`ResizeStripeManager` 的 `mySplitter`）：只有名称开着时才挂（`:89-102`）。 -->
@@ -216,7 +221,7 @@ onUnmounted(() => {
     <Teleport v-if="moreOpen || moveOpen || namesOpen" to="body">
       <div v-if="moreOpen" class="stripe-popup stripe-popup-more" role="menu" :aria-label="moreTitle" :style="{ left: `${at.left}px`, top: `${at.top}px` }">
         <button v-for="id in moreIds" :key="id" class="menu-button stripe-popup-row" role="menuitem" @click="pickMore(id)">
-          <span class="menu-item-icon"><component :is="icons[id]" :size="iconSize.menu" /></span>
+          <span class="menu-item-icon"><component aria-hidden="true" :is="icons[id]" :size="iconSize.menu" /></span>
           <span class="menu-item-title">{{ labels[id] }}</span>
           <span v-if="mnemonicOf(id)" class="stripe-popup-key">Alt+{{ mnemonicOf(id) }}</span>
         </button>
@@ -229,7 +234,7 @@ onUnmounted(() => {
       <!-- `ToolWindowShowNamesAction`（`ActionsBundle.properties:2813` = 显示工具窗口名称）。 -->
       <div v-if="namesOpen" class="stripe-popup" role="menu" aria-label="显示工具窗口名称" :style="{ left: `${at.left}px`, top: `${at.top}px` }">
         <button class="menu-button stripe-popup-row" role="menuitemcheckbox" :aria-checked="showNames" @click="closePopups(); emit('toggleNames')">
-          <span class="menu-item-icon"><Check v-if="showNames" :size="iconSize.menu" /></span>
+          <span class="menu-item-icon"><IdeaCheckedIcon v-if="showNames" :size="iconSize.menu" /></span>
           <span class="menu-item-title">显示工具窗口名称</span>
         </button>
       </div>

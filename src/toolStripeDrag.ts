@@ -26,14 +26,29 @@ export interface ToolStripeDragContext {
 export function createToolStripeDrag(ctx: ToolStripeDragContext) {
   const draggingTool = ref<string | null>(null)
   const dropTarget = ref<{ side: string | null; before: string | null } | null>(null)
+  /**
+   * 上游 `AbstractDroppableStripe` 的 `dragTargetChosen` 位（`doLayout` 里每一档认领落点之前都先问
+   * `if (processDrop && !data.dragTargetChosen)`，`:354`、`:375`、`:409`、`:436`；只有**一个按钮都没
+   * 认领**时那条 `:436-441` 才把落点兜到末尾 `dragInsertPosition = -1`）。
+   * DOM 里同一次 `dragover` 会先命中按钮、再冒泡到轨道（轨道自己那条 `dragover` 给的是 `before = null`
+   * = 末尾），没有这一位的话轨道的兜底会把按钮已经认领的落点覆盖掉 —— 表现就是"插入线永远画在条尾"。
+   * 记的是**事件对象本身**：同一次事件里按钮赢；下一次事件（指针真的移到空白处）末尾才生效。
+   */
+  let claimedFor: DragEvent | null = null
 
   function onToolDragStart(id: string, event: DragEvent) {
     draggingTool.value = id
+    claimedFor = null
     beginDrag(event, { text: id, action: 'move' })
   }
 
   function onToolDragOver(side: string, before: string | null, event: DragEvent) {
     if (!draggingTool.value) return
+    if (before === null) {
+      // 轨道的末尾兜底：同一次事件里已经被某个按钮认领过就不覆盖（`!data.dragTargetChosen`）。
+      if (claimedFor === event) return
+    }
+    else claimedFor = event
     dropTarget.value = { side, before }
     acceptDrop(event, dropActionForEvent(event) ?? 'move')
   }
@@ -60,6 +75,9 @@ export function createToolStripeDrag(ctx: ToolStripeDragContext) {
     const id = draggingTool.value
     draggingTool.value = null
     dropTarget.value = null
+    // 一次拖放结束就把「谁认领过这次事件」清掉：下一段拖放必须重新认领（残留会把下一次的
+    // 末尾落点当成"已被按钮认领过"而永远画不出来）。
+    claimedFor = null
     if (!id) return
     // Dropping onto a stripe both moves the window to that side and reorders it there.
     const anchor = ctx.toolAnchors()[id] ?? 'left'
@@ -85,10 +103,20 @@ export function createToolStripeDrag(ctx: ToolStripeDragContext) {
     ctx.saveToolOrder()
   }
 
-  function onToolDragEnd() { draggingTool.value = null; dropTarget.value = null }
+  /** 拖放结束（含**取消**：Esc 与"在条纹外面松手"都只走这条路，不走 `onToolDrop`）。 */
+  function onToolDragEnd() { draggingTool.value = null; dropTarget.value = null; claimedFor = null }
 
-  function isDropBefore(side: string, id: string) {
-    return dropTarget.value?.side === side && dropTarget.value.before === id && draggingTool.value !== id
+  /**
+   * 「这一格前面是不是落点」。`id === null` 问的是**末尾槽**（这条条纹最后一个按钮之后）——
+   * 上游同一档就是 `dragInsertPosition = -1`（`AbstractDroppableStripe.kt:436-441`：一个按钮都没
+   * 认领这次拖放时，落点兜到末尾）。宿主把这一位直接喂给右侧条也画得出标记，所以两侧对称：
+   * 不必依赖调用方自己再算一遍（`App.vue` 现在给左条算了一份、给右条写死 `false`，那条不对称
+   * 登记在 `docs/wiring-requests-2026-10-06-dnd8.md` D-1）。
+   */
+  function isDropBefore(side: string, id: string | null) {
+    if (dropTarget.value?.side !== side) return false
+    if (id === null) return dropTarget.value.before === null && draggingTool.value !== null
+    return dropTarget.value.before === id && draggingTool.value !== id
   }
 
   return { draggingTool, dropTarget, onToolDragStart, onToolDragOver, onToolDrop, onToolDragEnd, isDropBefore }

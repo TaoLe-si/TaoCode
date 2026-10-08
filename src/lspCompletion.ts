@@ -2,7 +2,9 @@ import { pickedCompletion, snippetCompletion, type Completion, type CompletionCo
 import type { EditorState } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import type { LspCompletionItem, LspCompletionItemResolveResult, LspCompletionResult, LspTextEdit, LspWorkspaceSymbol } from './bridge.ts'
-import { sortCompletions } from './completionSort.ts'
+// 诊断表（reactive Map）—— 错误修复命令那一格要按当前路径读它（见 `errorFixInputOf`）。
+import { lspDiagnostics } from './bridge.ts'
+import { completionSorterFor } from './completionSorter.ts'
 import { camelHumpMatcher } from './completionCamelHump.ts'
 import { currentCompletion, expectsTypeNameAt, keepsByExpectedKind, keepsInMode, lookupPlaceholderText, symbolKindToItemKind } from './completionModes.ts'
 import { isClassLikeSymbol, symbolKindName } from './lspSymbolBridge.ts'
@@ -13,6 +15,12 @@ import { createContributorRegistry, wordCompletionContributor, type ContributorI
 import { registerOpenEditor } from './completionOpenEditors.ts'
 import { ACTIONS } from './actionRegistry.ts'
 import { keymapKeys } from './keymapBindings.ts'
+// 扩展点 `com.intellij.completion.confidence` 的消费端：自动弹出入口问一次自信度
+// （任一贡献返回 yes ⇒ 这次不弹），见下面 createLspCompletion 的返回函数。
+import { completionConfidences, errorFixCommandProviders, shouldPreselectFirstSuggestion, shouldSkipAutopopup, type ErrorFixCommandInput } from './completionExtensionPoints.ts'
+// `com.intellij.platform.backend.documentation.lookupElementTargetProvider` 的消费端：
+// 候选文档面板先问登记表（见下面 `info` 回调里的注释）。
+import { documentationTargetForLookupElement, lookupElementDocumentationTargetProviders } from './documentationTargetExtensionPoints.ts'
 
 interface CompletionDeps {
   enabled: () => boolean
@@ -97,11 +105,9 @@ const localActions = {
  * `mode: 'fallback'` 的（文档词补全）只在服务端一条都没回时接上
  * （上游是 `LspCompletionContributor.kt:45` 那条 `FORBID_WORD_COMPLETION` 禁令的等价物：
  * 有 LSP 客户端接管这个文件就不掺词补全）。
+ * 表建在 `createLspCompletion` 里面（不再挂模块级）—— 错误修复命令那一格要按当前路径读诊断表，
+ * 只有拿到 `deps` 才做得到。
  */
-const localContributors = createContributorRegistry([
-  wordCompletionContributor(),
-  commandCompletionContributor(localActions),
-])
 
 /** 命令条目接受后的动作（上游 `CommandInsertHandler.kt:96-103` + `ActionUtil.performAction`）。 */
 function applyCommand(item: ContributorItem) {
@@ -168,6 +174,23 @@ function localOption(item: ContributorItem): Completion {
 export function createLspCompletion(deps: CompletionDeps) {
   let lastError = ''
   let synced = ''
+  /**
+   * `com.intellij.codeInsight.completion.error.intention` 的输入：这一处有诊断时给命令表一份错误清单
+   * （上游 `DirectIntentionCommandProvider.kt:474` 在命令补全里问 `ErrorFixCommandProvider`）。
+   * **没有贡献者就不构造**（读诊断表是零成本的，但要避免无谓的 map）⇒ 零开销、行为不变。
+   */
+  const errorFixInputOf = (context: { text: string; offset: number; language: string }): ErrorFixCommandInput | null => {
+    if (errorFixCommandProviders(context.language).length === 0) return null
+    const path = deps.path()
+    const errors = (lspDiagnostics.get(path) ?? []).map(diagnostic => ({
+      severity: diagnostic.severity, message: diagnostic.message,
+    }))
+    return { path, language: context.language, text: context.text, offset: context.offset, errors }
+  }
+  const localContributors = createContributorRegistry([
+    wordCompletionContributor(),
+    commandCompletionContributor(localActions, {}, errorFixInputOf),
+  ])
   // Host::request cancels the previous completion when a new one starts
   // (native/lsp_host.cpp is_superseding), and a server may also drop a request it
   // considers obsolete. That is normal typing churn, not a broken dependency, so
@@ -189,6 +212,17 @@ export function createLspCompletion(deps: CompletionDeps) {
     // 的 `otherOpenEditorTexts` 那一次跳过它、但**不**把它从表里摘掉（上游只读 `getAllEditors()`）。
     if (path) registerOpenEditor(path, () => deps.view()?.state.sliceDoc() ?? '')
     if (!deps.enabled()) return null
+    // `com.intellij.completion.confidence`：自动弹出入口问一次自信度。**没有贡献时不构造上下文**
+    // （`doc.toString()` 对超大文档不便宜）⇒ 第三方没挂时零开销、行为不变。
+    const language = path.includes('.') ? path.slice(path.lastIndexOf('.') + 1).toLowerCase() : ''
+    if (completionConfidences(language).length > 0) {
+      const caretLine = context.state.doc.lineAt(context.pos)
+      const skip = shouldSkipAutopopup({
+        path, language, text: context.state.doc.toString(),
+        line: caretLine.number - 1, character: context.pos - caretLine.from,
+      })
+      if (skip) return null
+    }
     const doc = context.state.doc
     const current = () => deps.enabled() && deps.path() === path && deps.view()?.state.doc === doc
     // No `validFor` is returned below, so the query must die with the document it
@@ -282,14 +316,29 @@ export function createLspCompletion(deps: CompletionDeps) {
       // 顺序在交给 CodeMirror 之前排好（src/completionSort.ts：IDEA 排序器链的六档 —— 预选、
       // LSP sortText 相关性、**匹配形状**（打出来的前缀/驼峰命中排在只含关键字的前面）、大小写不敏感、
       // 长度、字母序），它自己的 sortText 排序从此不参与语义；这里只排候选表，`Completion` 对象的形状不变。
-      const ordered = sortCompletions(matchedItems
-        .map(item => {
+      // 走 `src/completionSorter.ts` 的**排序器扩展点**（上游 `CompletionSorter` 一族）而不是直接
+      // 调 `sortCompletions`：默认链逐条同序，但 `WeighingService.getWeighers('completion')` 注册进来的
+      // 档位（`registerCompletionWeigher`）能插在 `prefix` 之后参与排序 —— 上游那条扩展面在本仓的落点。
+      // `com.intellij.completion.preselectionBehaviourProvider`：自动弹层要不要预选第一条
+      // （上游 `CompletionPreselectionBehaviourProvider.java:11-13` 的语义 —— 只作用于自动弹层，
+      // 显式调用一律预选）。`context.explicit` 就是上游那条「显式 vs 自动」的分界。
+      // 没有贡献时恒 true ⇒ 与本文件此前的行为逐字相同。
+      // 落点是排序链的**档①「预选」**（`src/completionSort.ts` 文件头）：把决定打成第一条的
+      // `preselected` 标记，由排序器抬到最前 —— CodeMirror 的 `CompletionResult` 没有
+      // 「打开时选中哪条」这个字段（`@codemirror/autocomplete` `dist/index.d.ts:243-280`），
+      // 所以这条决定必须落在候选顺序上，而不是回参上。
+      const selectFirst = shouldPreselectFirstSuggestion({
+        path, language, prefix: word?.text ?? '', lookupString: '',
+        autoPopup: !context.explicit, outcome: 'cancelled',
+      })
+      const ordered = completionSorterFor().sort(matchedItems
+        .map((item, index) => {
           const raw = item.raw as (RawItem & { sortText?: unknown; preselect?: unknown }) | undefined
           // `sortText` 缺省就**留空**（上游 weigher 对没有它的项返回 null → 那一档不参与）。
           return [
             item,
             typeof raw?.sortText === 'string' ? raw.sortText : undefined,
-            raw?.preselect === true,
+            raw?.preselect === true || (selectFirst && index === 0),
           ] as const
         })
         .map(([item, sortText, preselected]) => ({ item, label: item.label, sortText, preselected, typedPrefix: word?.text })))
@@ -307,6 +356,28 @@ export function createLspCompletion(deps: CompletionDeps) {
         info: async () => {
           try {
             if (!current()) return null
+            // `com.intellij.platform.backend.documentation.lookupElementTargetProvider`：第三方按 id 挂的
+            // 提供方**优先于**服务端那条 `completionItem/resolve`（接口注释
+            // `LookupElementDocumentationTargetProvider.java:20-22` 明说 precedence over the PSI-provided
+            // documentation）。**没挂就不构造上下文**（`doc.toString()` 对超大文档不便宜）⇒ 零开销、行为不变。
+            if (lookupElementDocumentationTargetProviders(language).length > 0) {
+              const line = doc.lineAt(context.pos)
+              const claimed = documentationTargetForLookupElement({
+                path, language, text: doc.toString(),
+                line: line.number - 1, character: context.pos - line.from,
+                lookupString: String(item.label), itemKind: item.kind, detail: item.detail,
+              })
+              if (claimed) {
+                let text: string | null = null
+                try { text = claimed.computeDocumentation() } catch { text = null }
+                if (text) {
+                  const dom = document.createElement('div')
+                  dom.className = 'completion-info'
+                  dom.textContent = text
+                  return { dom }
+                }
+              }
+            }
             const detail = await resolve(item)
             if (!current()) return null
             const text = detail?.documentation ?? item.documentation ?? detail?.detail ?? item.detail ?? ''

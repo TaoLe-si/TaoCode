@@ -8,8 +8,10 @@
 // `popup="true"` 的组是一个可展开的子段（上游是嵌套 popup，本仓浮层里用行内展开，
 // 因为再开一层浮层就得自己处理层叠与焦点）。
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { Check } from 'lucide-vue-next'
+import {  } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 import { usePopupAnchor } from '../popupAnchor'
 import { nextMenuIndex, rowActivatable, visibleMenuRows } from '../menuKeyboard'
 
@@ -94,7 +96,7 @@ onUnmounted(() => {
         </template>
       </template>
       <button v-else type="button" role="menuitem" :class="{ 'is-checked': row.checked?.(), 'is-active': activeId === row.id }" :aria-checked="row.checked ? row.checked() : undefined" :disabled="!rowEnabled(row)" @mouseenter="activeId = row.id" @click="emit('pick', row)">
-        <span v-if="row.checked" class="menu-check" aria-hidden="true"><Check :size="iconSize.menu" /></span>{{ typeof row.title === 'function' ? row.title() : row.title }}<kbd v-if="row.keys">{{ row.keys }}</kbd>
+        <span v-if="row.checked" class="menu-check" aria-hidden="true"><IdeaCheckedIcon :size="iconSize.menu" /></span>{{ typeof row.title === 'function' ? row.title() : row.title }}<kbd v-if="row.keys">{{ row.keys }}</kbd>
       </button>
     </template>
   </div>

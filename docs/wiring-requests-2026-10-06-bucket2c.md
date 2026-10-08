@@ -114,3 +114,14 @@ function forgetEditorRefs(path: string) { editorRefs.delete(`0:${path}`); editor
 ## 需要人复核的一件事（不是请求，是警报）
 
 `src/completionUi.ts` 本轮被**外部并发修改**过一次：我写的 `revision: view.state.changeCount` 被改成 `view.state.seq` —— 两者在 `@codemirror/state` 的 `EditorState` 上**都不存在**（`node_modules/@codemirror/state/dist/index.d.ts` 里两个名字都搜不到），会是一个编译期就炸、跑起来才暴露的坑。我改成用 `EditorState.doc` 的**对象身份**当上游那个 `modificationStamp`（不可变 `Text`，改一次换一个新对象；判据 `tests/cyclic-word-completion.test.mjs` 的「文档改动号变了 = 新一轮」）。同一次外部改动里的 `EditorSelection.create(...)` 是合法 API，我保留了。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1（补全三条动作）** —— `src/components/CodeEditor.vue` / `src/editorKeymap.ts` 在 **CodeEditor lane 名下**（禁改清单含 `CodeEditor.vue`）。复核：`src/editorKeymap.ts:85` 仍是 `completion: startCompletion`（未换成 `startCompletionAs`），`smartTypeCompletion`/`classNameCompletion` 仍 0 命中。**需 CodeEditor owner + 桶 1 的 `codeMenu.ts`**（`codeMenu.ts` 属本 lane 可改面，但无 `editorActions` 侧的 run 时加行 = 假控件，故不单方面加）。本 lane 不改。
+- **W2 已接线**：`src/App.vue:142` import `clearOpenEditors, registerOpenEditor, unregisterOpenEditor`；`:191` `setEditorRef` 登记、`:195` `forgetEditorRefs` 注销、`:209` 换工程清表。三个导出全部有生产消费方。
+- **W3（行内补全悬浮操作条）** —— 已接：`src/inlineCompletionExtension.ts:15/:79/:121/:134/:161` 已装配 `inlineCompletionTooltip`（右键触发 + 文本变即收），宿主在 CodeEditor 扩展数组里（CodeEditor lane 名下，但已接）。
+- **W4（行内补全 provider 开关 / options 页）** —— 目标 `src/settingsModel.ts`（保留文件，非本 lane）+ `SettingsDialog.vue`（本 lane 可改）。当前 `grep inlineCompletion src/settingsModel.ts` 0 命中 ⇒ 无存储键；单在设置页加开关 = 假控件。需 settings owner 先落键。
+- **W5（问题面板逐行抑制入口）** —— 目标 `src/components/ProblemsPanel.vue`（本 lane 可改面，但属「桶 2 的 2b 半区」）。为不与 ProblemsPanel owner 撞车，登记为「需 ProblemsPanel owner 处理」（条目侧 `suppressionActionsFor` 已就绪）。
+- **警报（`completionUi.ts` 的 `seq`/`changeCount`）** —— `src/completionUi.ts` 属本 lane 可改面；复核现状已改为用 `EditorState.doc` 对象身份（无 `view.state.seq` 残留），无需处理。
+
+结论：W2/W3 早已接线；W1/W4/W5 转给对应 owner。

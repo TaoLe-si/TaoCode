@@ -71,3 +71,13 @@
   - `Project and Libraries` / `All Places` / `Scratches and Consoles`：本仓没有库作用域、没有外部文件参与检查、没有 scratches ⇒ 列出来永远是全集或空集，属假控件（理由同 `src/scopeIdMapper.ts:23-26` 文件头那三条）。
   - `ANALYZE_INJECTED_CODE` 控件、`PerformAnalysisInBackgroundOption`：维持 13b 的判定（上游 `BaseAnalysisActionDialog.java:105` 自己隐藏；宿主请求本就异步）。
   - 书签族的 `BookmarkBundle.messagePointer` / `BookmarksListener`：维持 `[~]`（无消费者 ⇒ 不造空壳），本轮没有新证据要翻案。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W-1（问题面板 `AnalysisUIOptions` 四控件）跳过** —— 目标 `src/components/ProblemsPanel.vue`，本 lane 可改面含 `src/components/**`，但该请求点名「桶 2 名下」且现状 `grep` 仍 0 命中；为不与 ProblemsPanel 的既有 owner 冲突，登记为「需 ProblemsPanel owner 处理」（挂点四键 `groupBySeverity`/`filterResolvedItems`/`autoScrollToSource`/`splitterProportion`，出口 `src/analysisScope.ts`）。
+- **W-2 已接线**：`src/App.vue` 在 `projectSettings` 声明后（:499-506）加 `watch(() => projectSettings.value.scopes, …, { immediate: true, deep: true })` → `setAnalysisScopeNamedScopes(...)`，并补 `import { setAnalysisScopeNamedScopes } from './analysisScope'`（:96）。这补的是「开项目 / 换项目后、进设置页之前」那一半（原唯一生产调用方仍是 `ScopesSettingsPage.vue:395`）。
+- **W-3 已接线** —— 与 `docs/wiring-requests-2026-10-06-bm3.md` 的 R-1/R-2 是同一条（该文件自己写明「二选一，别两处都改」）：本 lane 已在 `src/components/TabContextMenu.vue:68-70` 与 `src/App.vue:2511-2512` 按上游 `intellij.platform.bookmarks.xml:222-227` 的行序接上。**未重复改**。
+- **W-4（`git.commit` 可选 `paths`）跳过** —— 目标 `native/main.cpp` + `native/git.cpp`，本 lane 禁改 `native/main.cpp`，其余属 vcs 半区。需 native/vcs owner 处理。
+- **W-5（标准范围剩余四档）跳过** —— 目标 `src/App.vue` 或 `src/toolViewContext.ts` 需要「打开中的路径」与「历史表」两个宿主状态；本 lane 不新建假判定（请求原文自己也说硬做就是假判定）。需 appPlacesRing / 文件历史两张表的 owner 提供状态后再接。
+
+App.vue 行数：2686 → 2695（与 b1b7verdict 的 W-1 同一批改动合计）。

@@ -36,6 +36,7 @@
 //      "KNOWN_GAPS 不能过期"的反查会红）。用户存档里残留的 `bridge` 覆盖键由 `loadOverrides()`
 //      丢弃（认不出的键不猜语义，同上游 `loadState`）。
 import { ref } from 'vue'
+import { EXTENSIONS, STATUS_BAR_WIDGET_FACTORY_EP, type ExtensionHandle, type RegisterExtensionOptions } from './extensionPoints.ts'
 import {
   configurableFactories, migrateHiddenKeys, shouldCreateWidget, widgetEnabled, widgetToggleEnabled, withWidgetEnabled,
   type StatusBarWidgetFactory,
@@ -147,10 +148,56 @@ export const STATUS_WIDGETS: StatusBarWidget[] = [
 
 const BY_ID = new Map(STATUS_WIDGETS.map(widget => [widget.id, widget]))
 
-/** 按 id 反查工厂 —— 上游 `StatusBarWidgetsManager.findWidgetFactory`（`:139`）。 */
+/** 按 id 反查工厂 —— 上游 `StatusBarWidgetsManager.findWidgetFactory`（`:149`；`:139` 是另一条按 id 查已建组件的 `wasWidgetCreated`）。 */
 export function findWidgetFactory(id: string): StatusBarWidget | undefined {
   return BY_ID.get(id)
 }
+
+/** 把 EP（`com.intellij.statusBarWidgetFactory`）里的工厂收编进本表，返回新收编的条数。 */
+function adoptFromExtensions(): number {
+  let added = 0
+  for (const widget of EXTENSIONS.extensionsOf<StatusBarWidget>(STATUS_BAR_WIDGET_FACTORY_EP)) {
+    if (!widget || typeof widget.id !== 'string' || !widget.id) continue
+    if (BY_ID.has(widget.id)) continue
+    STATUS_WIDGETS.push(widget)
+    BY_ID.set(widget.id, widget)
+    added += 1
+  }
+  return added
+}
+
+/**
+ * 第三方（或测试）按上游同名的 EP id 挂一个状态栏部件工厂。
+ *
+ * 上游口径：`StatusBarWidgetFactory` 挂在 `com.intellij.statusBarWidgetFactory`
+ * （`platform/platform-api/resources/intellij.platform.ide.xml:98`，接口
+ * `com.intellij.openapi.wm.StatusBarWidgetFactory`），`StatusBarWidgetsManager` 遍历
+ * `getWidgetFactories()`（`StatusBarWidgetsManager.kt:96` 的 `updateWidget`）。
+ * 本仓的等价物：注册进 EP + 立刻收编进本表 —— 于是它出现在状态栏右键的勾选清单
+ * （`listWidgets()`）与「显示 <组件名>」那批可搜索动作（`widgetToggleRows()`）里，
+ * 可见性与持久化走同一套 `widgetEnabled`。
+ *
+ * 渲染那一半仍是静态的：App.vue 的状态栏模板按 id 逐条写死（每个组件的 DOM 各不相同）——
+ * 上游的 `StatusBarWidget.getComponent()` 在这里没有等价物，见 `docs/ui-parity-checklist.md`。
+ */
+export function registerStatusWidgetFactory(
+  widget: StatusBarWidget,
+  options: RegisterExtensionOptions = {},
+): ExtensionHandle {
+  const handle = EXTENSIONS.registerExtension(STATUS_BAR_WIDGET_FACTORY_EP, widget.id, widget, options)
+  adoptFromExtensions()
+  return handle
+}
+
+/** 已挂成 EP 贡献的内置工厂（模块加载时登记；第三方按同一 id 追加）。 */
+for (const widget of STATUS_WIDGETS) {
+  EXTENSIONS.registerExtension(STATUS_BAR_WIDGET_FACTORY_EP, widget.id, widget, { source: 'bundled' })
+}
+adoptFromExtensions()
+// EP 内容变化时立刻收编（上游 `ExtensionPointListener` 同口径）—— 第三方注册后无需再手动调 adopt。
+EXTENSIONS.addListener(extensionPoint => {
+  if (extensionPoint === STATUS_BAR_WIDGET_FACTORY_EP) adoptFromExtensions()
+})
 
 function loadOverrides(): Record<string, boolean> {
   try {
@@ -176,21 +223,21 @@ function persist() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(widgetOverrides.value)) } catch { /* session-only */ }
 }
 
-/** 这个组件此刻该不该画 —— 上游三道闸（`StatusBarWidgetsManager.updateWidget:98-100`）。 */
+/** 这个组件此刻该不该画 —— 上游三道闸（`StatusBarWidgetsManager.updateWidget`，函数 `:96`、闸 `:97-99`）。 */
 export function showWidget(id: string): boolean {
   const widget = BY_ID.get(id)
   if (!widget) return false
   return shouldCreateWidget(widget, widgetOverrides.value)
 }
 
-/** 勾选清单只列可配置的（上游 `StatusBarActionsManager.getActionsFor` 过滤 `isConfigurable`）。 */
+/** 勾选清单只列可配置的（上游 `StatusBarActionManager.getActionsFor`，`StatusBarWidgetsActionGroup.kt:208-211`，过滤那一句在 `:210`）。 */
 export function listWidgets(): StatusBarWidget[] {
   return configurableFactories(STATUS_WIDGETS) as StatusBarWidget[]
 }
 
 /**
  * 勾选项此刻能不能点 —— 上游 `ToggleWidgetAction.update` 在状态栏位置用
- * `canBeEnabledOnStatusBar`（`StatusBarWidgetsActionGroup.kt:104-110`），对 editor-based 工厂
+ * `canBeEnabledOnStatusBar`（调用 `StatusBarWidgetsActionGroup.kt:116-117`，判据本体 `StatusBarWidgetsManager.kt:176-181`），对 editor-based 工厂
  * 就是「有打开的编辑器」。没编辑器时那一格变灰，而不是让用户点一个点了没反应的开关。
  */
 export function widgetClickable(id: string, hasEditor: boolean): boolean {

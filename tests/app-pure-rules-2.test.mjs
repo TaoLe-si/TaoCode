@@ -11,6 +11,7 @@ import { nextTick } from 'vue'
 import { createMenuKeyboard } from '../src/appMenuKeyboard.ts'
 import { createToolWindowActivation } from '../src/appToolWindowActivation.ts'
 import { createToolWindowDockPlacement } from '../src/appDockPlacement.ts'
+import { createToolWindowDockSide } from '../src/toolWindowDockSide.ts'
 import { createToolWindowsHoverPopup } from '../src/appToolWindowHoverPopup.ts'
 import { createPlacesRing, PLACES_RING_LIMIT, recentPlacesList } from '../src/appPlacesRing.ts'
 import { affectedDirtyTabs } from '../src/appAffectedTabs.ts'
@@ -123,15 +124,18 @@ test('侧条一次点击：底部档收起 / 展开，files 档翻左栏，outli
     const bottomTab = { value: 'output' }
     const explorer = { value: true }
     const leftView = { value: 'files' }
+    const rightView = { value: 'agent' }
+    const rightVisible = { value: false }
     const made = createToolWindowActivation({
-      bottom, bottomTab, explorer, leftView,
+      bottom, bottomTab, explorer, leftView, rightView, rightVisible,
       toolDisabled: id => id === 'notifications',
       restoreStripeButton: id => calls.push('restore:' + id),
-      dockOf: id => (id === 'gradle' ? 'bottom' : 'side'),
+      anchorOf: id => (id === 'gradle' ? 'bottom' : 'left'),
+      routeToDock: id => { if (id === 'gradle') return 'bottom'; explorer.value = true; leftView.value = id; return 'left' },
       toggleOutline: () => calls.push('toggleOutline'),
       recordActiveToolWindow: id => calls.push('record:' + id),
     })
-    return { ...made, bottom, bottomTab, explorer, leftView }
+    return { ...made, bottom, bottomTab, explorer, leftView, rightView, rightVisible }
   }
   const off = host()
   off.activateToolWindow('notifications')
@@ -172,16 +176,20 @@ test('停靠落点：showView 按锚点选 dock 并记激活、requestEvaluate �
     const state = {
       bottom: { value: false }, bottomTab: { value: 'output' }, explorer: { value: true }, leftView: { value: 'files' },
     }
+    // 用真的 dock 分派（`routeToDock` 就是它的产出面）：锚点由夹具按窗口种类钉住。
+    const dock = createToolWindowDockSide({
+      toolAnchors: { git: anchor === 'bottom' ? 'bottom' : 'left', todo: 'bottom', debug: anchor === 'bottom' ? 'bottom' : 'left' },
+      leftView: state.leftView, explorer: state.explorer,
+    })
     const made = createToolWindowDockPlacement({
-      bottom: state.bottom, bottomTab: state.bottomTab, explorer: state.explorer, leftView: state.leftView,
-      anchorOf: () => anchor, recordActiveToolWindow: id => recorded.push(id), closeMenu: () => { menuClosed++ },
+      bottom: state.bottom, bottomTab: state.bottomTab, leftView: state.leftView, routeToDock: dock.routeToDock,
+      recordActiveToolWindow: id => recorded.push(id), closeMenu: () => { menuClosed++ },
     })
     return { ...made, ...state }
   }
   const side = make('left')
   side.showView('git')
-  assert.equal(side.explorer.value, true, '侧边档打开左栏')
-  assert.equal(side.leftView.value, 'git', '并把该窗口设为当前视图')
+  assert.equal(side.leftView.value, 'git', '侧边档把该窗口设为左 dock 的当前视图')
   assert.equal(side.bottom.value, false, '侧边档不碰底部 dock')
   assert.deepEqual(recorded.at(-1), 'git', '每次显示都记一次激活')
   const bottomed = make('bottom')

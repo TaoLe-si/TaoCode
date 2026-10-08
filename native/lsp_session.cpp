@@ -179,25 +179,9 @@ void Session::request(const std::string& kind, const std::string& path, int line
             {"position", position}, {"context", {{"triggerKind", 1}}}},
             [on_result = std::move(on_result)](Json result, Json error) {
                 if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
-                Json items = Json::array();
-                const Json* source = nullptr;
-                if (result.is_array()) source = &result;
-                else if (result.is_object() && result.contains("items")) source = &result.at("items");
-                if (source) {
-                    for (const auto& item : *source) {
-                        if (!item.is_object() || !item.contains("label")) continue;
-                        Json entry{{"label", item.at("label")}, {"kind", completion_kind(item.value("kind", 1))}};
-                        if (item.contains("detail") && item.at("detail").is_string()) entry["detail"] = item.at("detail");
-                        if (item.contains("insertText") && item.at("insertText").is_string()) entry["apply"] = item.at("insertText");
-                        // 有些服务器不等 resolve 就给了文档，能省一次往返。
-                        if (item.contains("documentation")) entry["documentation"] = hover_text(item.at("documentation"));
-                        // `raw` 是**服务器给的原始项**：`completionItem/resolve` 要求把它原样发回去
-                        // （服务器靠里面的 `data` 找回条目）。与层级项用的是同一套做法。
-                        entry["raw"] = item;
-                        items.push_back(std::move(entry));
-                    }
-                }
-                on_result({{"available", true}, {"items", std::move(items)}}, Json(nullptr));
+                // 回参整形（数组 / `CompletionList` 两形态 + `itemDefaults` 回填）在
+                // `lsp_support.cpp` 的 `shape_completion_items` —— 这一层只管门控与发信。
+                on_result({{"available", true}, {"items", shape_completion_items(result)}}, Json(nullptr));
             });
     } else {
         // 不是位置型 kind：转交 `semantic()` 的统一分派，而不是直接判死。

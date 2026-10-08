@@ -13,6 +13,9 @@ import { excerptAt, qualifierCandidates, qualifierFromHoverText, quickDefinition
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
 const editor = read('src/components/CodeEditor.vue')
+// 动作表与常驻 keymap 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限）；
+// 「快速定义」的菜单动作与键位都在那里，宿主那一半（建宿主、挂弹层）仍在 CodeEditor.vue。
+const keymap = read('src/editorKeymap.ts')
 const menu = read('src/menus/navigateMenu.ts')
 const popup = read('src/components/QuickDefinitionPopup.vue')
 const host = read('src/quickDefinitionHost.ts')
@@ -101,7 +104,9 @@ test('两路都没有就返回 null（不弹空壳）', async () => {
 })
 
 test('接线：编辑器命令 + Ctrl+Shift+I + 菜单行 + 弹层三件齐', () => {
-  assert.match(editor, /quickDefinition: editor => quickDefinitionCommand\(editor\)/, '编辑器命令表里有这一条（菜单与键位共用同一个函数）')
+  // 动作名在 src/editorKeymap.ts（2026-10-06 从 CodeEditor.vue 搬出）；Ctrl+Shift+I 那把键挂在
+  // lspExtensions() 里（与 quickDefinitionCommand 的语言服务门同处），仍在 CodeEditor.vue。两处都钉。
+  assert.match(keymap, /quickDefinition: editor => quickDefinitionCommand\(editor\)/, '编辑器命令表里有这一条（菜单与键位共用同一个函数）')
   assert.match(editor, /\{ key: 'Ctrl-Shift-i', preventDefault: true, run: editor => quickDefinitionCommand\(editor\) \}/, '$default.xml:162-164 的键位')
   assert.match(menu, /id: 'navigate\.quickDefinition', title: '快速定义', keys: 'Ctrl Shift I'/)
   assert.match(popup, /<div ref="box" class="quick-definition" role="dialog" aria-label="快速定义"/)

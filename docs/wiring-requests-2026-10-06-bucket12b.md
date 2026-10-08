@@ -58,3 +58,11 @@
 
 1. **系统进程枚举**（`dbg/attach` 缺①）：上游 `AttachToProcessDialog` 的 PID/用户/可执行/命令行四列 + Show only my processes 需要一个新的 native 查询方法。现状：`run.instances` 只列本仓自己启动的实例、`native/run_host.cpp` 的 descendant_processes 只走自己那棵进程树 ⇒ 面板只能收手输 PID/pipeName（`src/debugAttach.ts` + 最近附加目标已做，判据 `tests/debug-attach-history.test.mjs`）。
 2. **`stepInTargets` + `stepIn(targetId)`**（`dbg/actions` 缺①：Smart Step Into / 强制单步）：需要 DAP 的新 Method 名进 `src/bridge.ts` 的请求面（`:756-784` 那一组）与 `native/main.cpp` 分派表。两处都冻结 ⇒ 面板里没有这两格按钮（不放假控件）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **W1 已接线**：`src/App.vue:276-278` 已有 `debuggerWindowHost` 三个回调 + `watch(dapState.paused)` → `applyDebuggerPause(...)` + `watch(dapState.running)` → `applyDebuggerTermination(..., currentDebuggerWindowPolicy().hideDebuggerOnProcessTermination)`，import 在 `:107`。`alert` 那行保留。
+- **W2（逻辑断点组写入口）** —— 见 `docs/wiring-requests-2026-10-06-bucket12c.md` X4：该请求「写入口在保留文件」的前提已不成立，组节点/按组启停/新建已在 `src/components/BreakpointsDialog.vue` 内闭环；仍缺的「组改名/删除」是 12b 名下下一轮的活，**不卡宿主**。本 lane 不改。
+- **W3 / W4** —— `scripts/verdict_table.py` 与 `src/bridge.ts` / `native/main.cpp` 均非本 lane 可改面（禁改清单 + 别人 lane）。跳过。
+
+结论：**W1 早已接线**，未改任何文件。

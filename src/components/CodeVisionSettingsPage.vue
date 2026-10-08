@@ -17,30 +17,38 @@
 //   · 打开页面 ⇒ `syncRuntime()` 按盘上那一份刷一遍运行时表；
 //   · 每次改动 ⇒ 同时写草稿对象（保存由对话框的「应用」统一做）与运行时表（立刻生效）。
 // 上游那两个集合**只装"与出厂相反"的那一半**（`CodeVisionSettings.kt:41-50` 的注释），
-// 本仓两组 provider 出厂都是开 ⇒ 界面上只会写 `codeVisionDisabledGroups`；
+// 本仓四组 provider 出厂都是开 ⇒ 界面上只会写 `codeVisionDisabledGroups`；
 // `codeVisionEnabledGroups`（`:50`）由 `codeVisionSettingsPatch()` 存盘、`restoreCodeVisionSettings()` 读回，
 // 等出现「出厂关着的 provider」时才有写入方 —— 现在没有，就不假装有一个勾选框。
 //
 // 消费链路（逐条点名，不是本页自造的行为）：
-//   · 总闸与每组的开关 → `shouldShowCodeVisionEntry`（`src/codeLensSettings.ts:119-124`），
-//     渲染侧的过滤点是 `src/codeLensExtension.ts` 的 `buildDecorations` —— 那一行还没接
-//     （`shouldShowCodeVisionEntry` 今天只有导入、没有调用点，接线请求 K-4 给可照抄的那一条）；
-//   · 每行可见条数 → `groupAnchoredLenses(lenses, limit)`（`src/codeLens.ts:149-150`，出厂
-//     `CODE_LENS_VISIBLE_MAX = 5`，`src/codeLens.ts:127`），调用点同样在 `codeLensExtension.ts:238`；
-//   · 右键「隐藏这一组 / 全部隐藏」→ `handleCodeVisionExtraAction`（`src/codeLensExtension.ts:136` 在用）。
+//   · 总闸与每组的开关 → `shouldShowCodeVisionEntry`（`src/codeLensSettings.ts`），
+//     渲染侧的过滤点是 `src/codeLensExtension.ts` 的 `buildDecorations` 里那一行
+//     `lenses.filter(lens => shouldShowCodeVisionEntry(codeVisionGroupId(lens.item)))`；
+//     订正留痕（2026-10-06 codelens2）：原写「那一行还没接、只有导入没有调用点」是 K-4 之前的状态，
+//     现在调用点在，并且有**渲染结果级**的判据（`tests/code-lens-grouping.test.mjs` 逐组关一遍、
+//     数装饰集里还剩哪几条，不是读源码文本）。
+//   · 每行可见条数 → `groupAnchoredLenses(visible, codeVisionVisibleEntryLimit())`（`src/codeLens.ts:149-150`，
+//     出厂 `CODE_LENS_VISIBLE_MAX = 5`，`src/codeLens.ts:127`），调用点在 `codeLensExtension.ts` 的 `buildDecorations`；
+//     本页 `syncRuntime()` 也刷这一格（2026-10-06 codelens2 落 `docs/wiring-requests-2026-10-06-lensgate.md` 的 L-3）。
+//   · 右键「隐藏这一组 / 全部隐藏」→ `handleCodeVisionExtraAction`（`src/codeLensExtension.ts` 在用）。
 import { onMounted, watch } from 'vue'
 import { useId } from 'vue'
 import {
-  LSP_CODE_VISION_GROUP_ID, PROBLEMS_CODE_VISION_GROUP_ID,
-  codeVisionGroupName, codeVisionSettings, setCodeVisionGroupEnabled,
+  CODE_VISION_GROUP_IDS,
+  codeVisionGroupName, codeVisionSettings, codeVisionVisibleEntryLimit, setCodeVisionGroupEnabled,
 } from '../codeLensSettings.ts'
 import type { EditorSettings } from '../settingsModel'
 
 const props = defineProps<{ settings: EditorSettings; busy?: boolean }>()
 
-// 本仓的两个 provider 组（`src/codeLensSettings.ts:48-50` 的两个 id；组名走
-// `codeVisionGroupName`，页面不自己拼字符串）。
-const GROUPS = [LSP_CODE_VISION_GROUP_ID, PROBLEMS_CODE_VISION_GROUP_ID] as const
+// 本仓的四个 provider 组：**取渲染侧那一份白名单**（`CODE_VISION_GROUP_IDS`），页面不自己列。
+// 自己列就会少 —— 原来只列了两组，而 `src/codeVisionProviders.ts` 的注册表其实会产出
+// `references`（用法计数）与 `inheritors`（继承者计数）两组的条目：那两组既能由右键
+// 「隐藏这一组」写进运行时表，又会被这里的 `syncRuntime()` 按白名单**重新打开**
+// （旧实现只刷两组 ⇒ 用户右键隐藏了用法计数，一回到本页就被勾回来）。
+// 组名走 `codeVisionGroupName`，页面不自己拼字符串。
+const GROUPS = CODE_VISION_GROUP_IDS
 const spinnerId = useId()
 
 /** 某一组现在是不是开着：出厂开，被写进 `codeVisionDisabledGroups` 才是关（上游 :45 的语义）。 */
@@ -57,37 +65,32 @@ function toggleGroup(id: string, checked: boolean) {
   setCodeVisionGroupEnabled(id, checked)
 }
 
-/** 运行时表按草稿对象刷一遍（打开页面时、以及三把键任何一个变了之后）。 */
+/** 运行时表按草稿对象刷一遍（打开页面时、以及四把键任何一个变了之后）。 */
 function syncRuntime() {
   codeVisionSettings.enabled = props.settings.codeVisionEnabled
   for (const id of GROUPS) setCodeVisionGroupEnabled(id, groupOn(id))
+  // 每锚点条数也刷（`docs/wiring-requests-2026-10-06-lensgate.md` 的 L-3）：没有这一句，
+  // 这一格要等重启才见效（读盘那一份由 `src/workspaceLifecycle.ts` 的 `restoreCodeVisionSettings` 灌）。
+  // 坏值（清空输入框 = 0 / NaN / 小数）由 `codeVisionVisibleEntryLimit` 自己兜回出厂 5，
+  // 页面不再发明第二条兜底口径；界 1..10 的原生校验在 `native/settings_editor_keys.hpp`。
+  codeVisionSettings.visibleEntries = codeVisionVisibleEntryLimit(
+    { ...codeVisionSettings, visibleEntries: props.settings.codeVisionVisibleEntries })
 }
 onMounted(syncRuntime)
-watch(() => `${props.settings.codeVisionEnabled}|${props.settings.codeVisionDisabledGroups.join(',')}|${props.settings.codeVisionEnabledGroups.join(',')}`, syncRuntime)
+watch(() => `${props.settings.codeVisionEnabled}|${props.settings.codeVisionDisabledGroups.join(',')}|${props.settings.codeVisionEnabledGroups.join(',')}|${String(props.settings.codeVisionVisibleEntries)}`, syncRuntime)
 </script>
 
 <template>
   <h3>编辑器 › Code Vision</h3>
-  <p class="section-description">
-    对应 IDEA Settings › Editor › Code Vision（页名与 “Enable Code Vision” 见
-    <code>CodeVisionBundle.properties:2-3</code>；可见条数那一行见
-    <code>CodeVisionGlobalSettingsProvider.kt:38-47</code> 的 <code>spinner(1..10, 1)</code>）。
-    行上方的提示条目（引用数、问题计数…）上游叫 Code Vision，本仓的条目来自语言服务的
-    <code>textDocument/codeLens</code> 与本地 problems provider。
-  </p>
   <fieldset class="settings-fields" :disabled="busy">
-    <label class="checkbox-row"><input v-model="settings.codeVisionEnabled" type="checkbox" aria-describedby="cv-enabled-hint" /><span>启用 Code Vision</span></label>
-    <p id="cv-enabled-hint" class="field-hint restore-hint">上游 “Enable Code Vision”（<code>CodeVisionSettings.kt:36</code> 的 <code>isEnabled = true</code>，门面 <code>:55-60</code>）。关掉后行上方不再画任何条目；右键「隐藏所有 Code Vision 嵌入提示」写的就是同一把总闸。</p>
+    <label class="checkbox-row"><input v-model="settings.codeVisionEnabled" type="checkbox" /><span>启用 Code Vision</span></label>
     <label v-for="id in GROUPS" :key="id" class="checkbox-row">
-      <input type="checkbox" :checked="groupOn(id)" :aria-describedby="`cv-group-${id}-hint`" @change="toggleGroup(id, ($event.target as HTMLInputElement).checked)"
+      <input type="checkbox" :checked="groupOn(id)" @change="toggleGroup(id, ($event.target as HTMLInputElement).checked)"
       /><span>显示 {{ codeVisionGroupName(id) }} 嵌入提示</span>
     </label>
-    <p id="cv-group-LspCodeVisionProvider-hint" class="field-hint">两组开关 = 上游按 provider 分组的那一档（<code>CodeVisionSettings.kt:45</code> 的 <code>disabledCodeVisionProviderIds</code>，只装与出厂相反的那一半）。服务端下发的条目全归 <code>LspCodeVisionProvider</code> 一组、本地问题计数归 <code>problems</code> 一组，两组出厂都是开。</p>
-    <p id="cv-group-problems-hint" class="field-hint restore-hint">右键某一组条目 →「隐藏 <code>Code Vision: …</code> 嵌入提示」写的也是这一格（<code>src/codeLensExtension.ts:134-136</code> 的 <code>handleCodeVisionExtraAction</code>）。</p>
     <div class="input-row">
       <label :for="spinnerId">声明上方可见的条数</label>
-      <input :id="spinnerId" v-model.number="settings.codeVisionVisibleEntries" type="number" min="1" max="10" step="1" aria-describedby="cv-visible-count-hint" />
+      <input :id="spinnerId" v-model.number="settings.codeVisionVisibleEntries" type="number" min="1" max="10" step="1" />
     </div>
-    <p id="cv-visible-count-hint" class="field-hint">上游 “Visible metrics above declaration:”（<code>CodeVisionBundle.properties:17</code>）那一格，范围 <code>1..10</code>（<code>CodeVisionGlobalSettingsProvider.kt:43</code>），出厂 5（<code>CodeVisionSettings.kt:38-39</code>）。本仓的条目一律画在行**上方**，所以上游那两档（上方 / 旁边）在本仓只剩一档。</p>
   </fieldset>
 </template>

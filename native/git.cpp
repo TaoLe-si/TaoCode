@@ -14,10 +14,13 @@
 #include <windows.h>
 
 #include <array>
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <ctime>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -228,24 +231,9 @@ std::wstring checked_ref(const fs::path& repo, const std::string& base) {
     return wide;
 }
 
-// A ref the caller is about to CREATE (a branch or a tag). Nothing in the repo can
-// vouch for it yet, so rev-parse cannot be used; instead it is held to what git
-// itself would accept before it ever reaches a command line: no leading '-' (which
-// git would parse as an option, e.g. -f / --hard), no spaces, no control characters.
-std::wstring checked_new_name(const std::string& name, const std::string& label) {
-    if (name.empty() || name.size() > 200)
-        throw WorkspaceError("INVALID_REQUEST", label + "不能为空，且不能超过 200 个字符。");
-    if (name.front() == '-')
-        throw WorkspaceError("INVALID_REQUEST", label + "不能以 '-' 开头，否则会被 Git 当成命令行选项。");
-    for (const char ch : name) {
-        const auto value = static_cast<unsigned char>(ch);
-        if (ch == ' ' || value < 32 || value == 127)
-            throw WorkspaceError("INVALID_REQUEST", label + "不能包含空格或控制字符。");
-    }
-    const auto wide = utf8_to_wide(name);
-    if (wide.empty()) throw WorkspaceError("INVALID_REQUEST", label + "必须是有效的 UTF-8 文本。");
-    return wide;
-}
+// `checked_new_name`（「要新建的 ref」那道闸：不以 '-' 开头、无空格/控制字符）2026-10-08 跟着
+// 分支/标签那一族搬进了 native/git_refs.cpp —— 只有那边的 create_branch / tag_create 在用它，
+// 所以它落在那边的匿名 namespace 里（没有外部链接），本文件不再需要 `using`。
 
 std::vector<std::wstring> range_args(const fs::path& repo, const std::string& base) {
     // "git diff HEAD base" reads as "what does that side have that I do not": its files
@@ -264,16 +252,60 @@ std::wstring checked_path(const std::string& path) {
     return utf8_to_wide(path);
 }
 
+// 「提交文件…」的 pathspec 比上面那道严一档，因为它决定"这次提交带哪些文件"，写歪了就是少提交。
+// 三条新增，全部是实测出来的：
+//  · **控制字符**：`checked_path` 原来只挡 CR/LF。JSON 里的 `\u0000` 进得了 std::string，
+//    而 argv 到 git 那一头是 C 字符串 ⇒ `a.txt\0--amend` 到了 git 只剩 `a.txt`：请求的路径和
+//    git 真正拿到的路径不是同一条。宁可拒掉（同文件 `format_author` 对作者字段就是这道口径）。
+//  · **绝对路径**：实测 `git add -- C:/…/c.txt` 这种**仓内**绝对路径能走通、仓外的报
+//    `fatal: … is outside repository`（退出码 128）。前者绕过了"pathspec 是仓库相对"这一整条约定
+//    （前端去重、目录前缀判定、native 的变更行匹配全按相对路径算），后者把一条本该 INVALID_REQUEST
+//    的请求变成 GIT_FAILED 的 git 尾巴。都在这里拒掉。
+//  · **反斜杠**：git 的 pathspec 只认 `/`。实测 `git commit --only -- newdir\f.txt` 报
+//    `error: pathspec 'newdir\f.txt' did not match any file(s) known to git` —— 一个分隔符写错的
+//    请求不会失败在"分隔符"上，而是失败在"没有这个文件"上，那种错误没人看得懂。
+//  · **通配与魔术**（2026-10-06 commitpaths 落地 `docs/wiring-requests-2026-10-06-partialcommit.md` W3）：
+//    git 的 pathspec 里 `*` `?` `[` 是**通配**、开头的 `:` 与任意位置的 `:(` 是**魔术**，都不是字面量。
+//    partialcommit 那批的实测：`git commit --only -m glob -- '*.ts'` 一次提交走掉 `a.ts` **和** `b.ts`
+//    两篇，`-- 'foo[1].ts'` 连 `foo1.ts` 一起提交走 ⇒ "只提交选中的路径"会提交得比选中的多，
+//    这是这一族最贵的错。上游没有这一档风险，因为它**不发 pathspec**、改的是 index
+//    （`plugins/git4idea/backend/src/checkin/GitCheckinEnvironment.kt:393-434` stage +
+//    `plugins/git4idea/backend/src/util/GitFileUtils.kt:156-179` add），本仓走的
+//    `git commit --only -- <paths>` 这条短路必须自己补闸（同一发命令的 `git add` 也吃 pathspec）。
+//    另一条更贴上游的形状是把每条 pathspec 包成 `:(literal)<path>`：那样文件名里真带 `[` 的那一篇
+//    也提交得动，但要在**每一发**命令上改，且魔术前缀 `:` 本身仍然得拒（`:(exclude)…` 会把用户
+//    选中的那一篇反向排除掉）。这里选"只接受字面量"：一处闸、口径与前端
+//    `src/commitChecks.ts` 的 `PATHSPEC_MAGIC_RE` 逐条一致，代价（`[` 在文件名里走不了「提交文件…」）
+//    写在 `src/commitScope.ts` 的文件头。
+std::wstring checked_pathspec(const std::string& path) {
+    const auto wide = checked_path(path);
+    for (const char character : path)
+        if (static_cast<unsigned char>(character) < 0x20 || character == '\\')
+            throw WorkspaceError("INVALID_REQUEST", "提交路径只能是仓库相对的 POSIX 写法。");
+    if (path.front() == '/') throw WorkspaceError("INVALID_REQUEST", "提交路径不能是绝对路径。");
+    if (path.size() > 1 && path[1] == ':' &&
+        ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')))
+        throw WorkspaceError("INVALID_REQUEST", "提交路径不能带盘符。");
+    // 四档与前端 PATHSPEC_MAGIC_RE = /[*?[]|:\(|^:/ 一字不差：三个通配字符、任意位置的 `:(`、
+    // 开头的 `:`。`path.front()` 在这儿是安全的 —— checked_path 已经拒过空串。
+    if (path.find_first_of("*?[") != std::string::npos || path.front() == ':' ||
+        path.find(":(") != std::string::npos)
+        throw WorkspaceError("INVALID_REQUEST", "提交路径只能是字面量，不能含 git 的 pathspec 通配或魔术前缀。");
+    return wide;
+}
+
 }  // namespace detail
 
 // 上面这一块原来就是匿名命名空间；2026-10-05 拆出「工作树 + 子模块」一族（native/git_worktree.cpp）
 // 之后改成 detail，因为那一族要拿到**同一份** run()（job object 与看门狗不能复制到第二个 TU）。
 // 其中跨 TU 用的那几个（Result / run / require_ok / utf8_to_wide / split_lines / utf8_path，
 // 加上 2026-10-06 拆「提交历史 / 追溯」一族时补的 trim / checked_ref / checked_path / parse_records）
-// 声明在 native/git_detail.hpp。下面这排 using 让本文件与拆出去的那两个 TU 里的调用保持原样，
-// 不必改成 detail::xxx(...)。
-using detail::checked_new_name;
+// 声明在 native/git_detail.hpp。下面这排 using 让本文件与拆出去的那几个 TU 里的调用保持原样，
+// 不必改成 detail::xxx(...)。2026-10-08 拆「分支 / 标签 / 储藏」一族（native/git_refs.cpp）时
+// 只多拆走一个 `checked_new_name` —— 它只被那一族里的 create_branch / tag_create 用到，所以
+// 跟着定义一起走（进那边的匿名 namespace），本文件这排 using 不再列它。
 using detail::checked_path;
+using detail::checked_pathspec;
 using detail::checked_ref;
 using detail::kill_current;
 using detail::max_output;
@@ -417,6 +449,97 @@ std::vector<std::string> branches(const fs::path& repo) {
     return names;
 }
 
+std::vector<BranchTrackInfo> branch_track_infos(const fs::path& repo,
+                                                const std::vector<std::string>& local_branches) {
+    struct ConfiguredBranch {
+        std::optional<std::string> remote;
+        std::optional<std::string> merge;
+        std::optional<std::string> rebase;
+    };
+
+    const auto config = run(repo, {L"config", L"--null", L"--list"});
+    if (config.code != 0) return {};
+
+    std::map<std::string, ConfiguredBranch> configured_branches;
+    std::vector<std::string> configured_remotes;
+    for (std::size_t start = 0; start < config.out.size();) {
+        const auto end = config.out.find('\0', start);
+        if (end == std::string::npos) break;
+        const auto record = config.out.substr(start, end - start);
+        start = end + 1;
+        const auto separator = record.find('\n');
+        if (separator == std::string::npos) continue;
+        const auto key = record.substr(0, separator);
+        const auto value = record.substr(separator + 1);
+
+        constexpr std::string_view remote_prefix = "remote.";
+        constexpr std::string_view remote_url_suffix = ".url";
+        if (key.starts_with(remote_prefix) && key.ends_with(remote_url_suffix)) {
+            const auto remote_name = key.substr(remote_prefix.size(), key.size() - remote_prefix.size() - remote_url_suffix.size());
+            if (!remote_name.empty() && !value.empty() &&
+                std::find(configured_remotes.begin(), configured_remotes.end(), remote_name) == configured_remotes.end()) {
+                configured_remotes.push_back(remote_name);
+            }
+            continue;
+        }
+
+        constexpr std::string_view branch_prefix = "branch.";
+        if (!key.starts_with(branch_prefix)) continue;
+        const auto field_separator = key.rfind('.');
+        if (field_separator == std::string::npos || field_separator < branch_prefix.size()) continue;
+        const auto field = key.substr(field_separator + 1);
+        const auto branch_name = key.substr(branch_prefix.size(), field_separator - branch_prefix.size());
+        if (branch_name.empty()) continue;
+        auto& branch = configured_branches[branch_name];
+        if (field == "remote") branch.remote = value;
+        else if (field == "merge") branch.merge = value;
+        else if (field == "rebase") branch.rebase = value;
+    }
+
+    const auto blank = [](const std::string& value) {
+        return std::all_of(value.begin(), value.end(), [](unsigned char character) { return std::isspace(character) != 0; });
+    };
+    const auto strip_refs_prefix = [](std::string value) {
+        constexpr std::string_view prefixes[] = {"refs/heads/", "refs/remotes/", "refs/tags/"};
+        for (const auto prefix : prefixes)
+            if (value.starts_with(prefix)) return value.substr(prefix.size());
+        return value;
+    };
+    std::vector<BranchTrackInfo> result;
+    for (const auto& [configured_local_branch, config] : configured_branches) {
+        const auto local_branch = strip_refs_prefix(configured_local_branch);
+        if (std::find(local_branches.begin(), local_branches.end(), local_branch) == local_branches.end()) continue;
+        if (!config.remote || blank(*config.remote) ||
+            std::find(configured_remotes.begin(), configured_remotes.end(), *config.remote) == configured_remotes.end()) continue;
+        const auto& configured_upstream = config.merge ? config.merge : config.rebase;
+        if (!configured_upstream || blank(*configured_upstream)) continue;
+
+        const auto remote_branch = strip_refs_prefix(*configured_upstream);
+        if (remote_branch.empty()) continue;
+        result.push_back({local_branch, *config.remote, *config.remote + "/" + remote_branch});
+    }
+    return result;
+}
+
+std::optional<bool> is_on_branch(const fs::path& repo) {
+    const auto head_ref = run(repo, {L"symbolic-ref", L"--quiet", L"HEAD"});
+    if (head_ref.code == 1) return false;
+    if (head_ref.code != 0) return std::nullopt;
+    if (!trim(head_ref.out).starts_with("refs/heads/")) return false;
+
+    for (const auto* operation : {L"rebase-apply", L"rebase-merge"}) {
+        const auto path_result = run(repo, {L"rev-parse", L"--git-path", operation});
+        if (path_result.code != 0) return std::nullopt;
+        auto marker = fs::u8path(trim(path_result.out));
+        if (marker.is_relative()) marker = repo / marker;
+        std::error_code error;
+        const bool exists = fs::exists(marker, error);
+        if (error) return std::nullopt;
+        if (exists) return false;
+    }
+    return true;
+}
+
 void stage(const fs::path& repo, const std::string& path) {
     require_ok(run(repo, {L"add", L"--", utf8_to_wide(path)}), "暂存");
 }
@@ -450,22 +573,70 @@ void commit(const fs::path& repo, const std::string& message, bool amend, bool s
              const std::vector<std::string>& paths) {
     // IDEA's CommitAuthorComponent: the author override is per commit, not per repository.
     const bool override_author = !trim(author_name).empty() || !trim(author_email).empty();
-    // 「提交文件…」（`CommonCheckinFilesAction.kt:26-78` → `CheckinActionUtil.kt:100-160` 的
-    // `pathsToCommit` → `workflowHandler.setCommitState(...)`：**只有被选中的那些变更进这次提交**）。
-    // 本仓的提交面是 git index，所以"只提交这些路径"落到 `git commit --only -- <paths>`：
-    // `--only` 让 git 用**工作区内容**构造这一次提交，index 里其它已暂存的文件不参与、也不被清掉。
-    // 未跟踪的文件 git 不认 pathspec（实测 `error: pathspec 'c.txt' did not match any file(s)
-    // known to git`），而上游那一支把未跟踪文件当"新文件"一起纳入（`getIncludedChanges` 含
-    // untracked）⇒ 先只对这些路径各 `git add -- <path>`（不碰其它暂存项），再 `--only` 提交。
+    // 「提交文件…」（上游 `CheckinFiles` = `VcsActions.xml:187` 挂在 `ChangesViewPopupMenu` 第一行 →
+    // `CommonCheckinFilesAction.kt:37-53` → `CheckinActionUtil.kt:104-106`、`:121-147` →
+    // `getIncludedChanges(...)`（`:153-167`）→ `workflowHandler.setCommitState(...)`：只有被选中的那些变更
+    // 进这次提交）。
+    // 订正留痕：这一段原来写的是 `CommonCheckinFilesAction.kt:26-78` → `CheckinActionUtil.kt:100-160`
+    // 的 `pathsToCommit`，那个函数名不存在（它只是参数名），行号也是抄虚的。
+    // 上游真到 git 那一层**不发 `--only`**：`GitCheckinEnvironment.kt:393-434` 先把不属于这次的暂存项
+    // 临时退回（`GitResetAddStagingAreaStateManager.kt:30-60`）、把被选项刷进 index
+    // （`GitFileUtils.kt:156-179`：删除侧 `git rm --cached -r --ignore-unmatch`、新增侧 `addPathsForce`），
+    // 再跑一次**不带 pathspec** 的 `git commit -F`（`GitRepositoryCommitter.kt:77-108`），退出 `use {}`
+    // 时恢复（`GitStagingAreaStateManager.kt:24-28`）。本仓取同一 observable 结果的短路路径：
+    // `git commit --only -- <paths>` —— 被选项取工作区内容，其余暂存项原地不动（四条实测：
+    // `M ` 的另一篇提交后仍是 `M `；`MM` 的一整篇工作区版本进这次提交；`A ` 与 `D ` 不 add 也提交得动；
+    // 重命名两朵 pathspec 一起给 ⇒ `R100`）。
     const bool scoped = !paths.empty();
     if (paths.size() > 500) throw WorkspaceError("INVALID_REQUEST", "一次最多提交 500 个所选文件。");
     std::vector<std::wstring> specs;
     specs.reserve(paths.size());
-    for (const auto& path : paths) specs.push_back(checked_path(path));
+    for (const auto& path : paths) specs.push_back(checked_pathspec(path));
     if (scoped) {
-        std::vector<std::wstring> add{L"add", L"--"};
-        add.insert(add.end(), specs.begin(), specs.end());
-        require_ok(run(repo, add), "暂存所选文件");
+        // 这一发要读变更列表，为的是三件事：只 add 未跟踪的那几条、重命名必须成对、
+        // 陌生路径当场拒（上游 `CommonCheckinFilesAction.kt:75-78` 对 `NOT_CHANGED` 直接不启用动作）。
+        // 必须写全限定名：`repo` 是 `std::filesystem::path`，按参数查找（ADL）会把
+        // `std::filesystem::status(const path&)` 一起摆进候选集，而它与本文件的
+        // `git::status(const fs::path&, bool)` 在实参上同样精确匹配 ⇒ MSVC 报 C2668 重载不明确。
+        // 本文件其余那一族调用（native/git_worktree.cpp、native/git_log.cpp）都在别的 TU 里、
+        // 走 `taocode::git::status(...)`，只有这一发是本文件内的裸名字。
+        const auto changes = taocode::git::status(repo);
+        std::vector<std::wstring> to_add;
+        for (const auto& path : paths) {
+            bool matched = false;    // 有变更行对得上 ⇒ 不是陌生路径
+            bool untracked = false;  // 这条 pathspec（或它下面的内容）里有 git 还不认识的文件
+            const auto prefix = path + '/';
+            for (const auto& change : changes) {
+                const bool inside = change.path == path || change.path.rfind(prefix, 0) == 0;
+                if (!inside && change.rename_from != path) continue;
+                matched = true;
+                // 目录那一条要能摊得开：`git status --untracked-files=all` 报的是目录下面的每个文件
+                // （实测 `?? sub/x.txt` ⇒ 选中 `sub` 时 add 的必须是 `sub` 这一条 pathspec）。
+                if (change.untracked) untracked = true;
+            }
+            if (!matched) throw WorkspaceError("INVALID_REQUEST", "这个路径没有可提交的变更：" + path);
+            if (untracked) to_add.push_back(utf8_to_wide(path));
+        }
+        // 只把**未跟踪**的那几条交给 `git add`（实测 `git add -- <已 mv 走的旧路径>` 会
+        // `fatal: pathspec … did not match any files`，退出码 128，`--ignore-errors` 压不住 ⇒
+        // 整批 add 会把这次带重命名的提交一枪打死）。
+        if (!to_add.empty()) {
+            std::vector<std::wstring> add{L"add", L"--"};
+            add.insert(add.end(), to_add.begin(), to_add.end());
+            require_ok(run(repo, add), "暂存所选文件");
+        }
+        // 重命名成对：上游一条 `ChangedPath` 同时带 beforePath/afterPath
+        // （`GitCheckinEnvironment.kt:403-404` 把两朵路径分别放进 toCommitAdded / toCommitRemoved）。
+        // 单边提交实测写出坏历史：只给新路径 ⇒ 提交是 `A e.txt`、HEAD 里的旧路径**还在**（等于复制一份）；
+        // 只给旧路径 ⇒ 提交是 `D d.txt`、新内容留在 index 没提交。两朵一起给才是 `R100`。
+        for (const auto& change : changes) {
+            if (change.rename_from.empty()) continue;
+            const bool has_new = std::find(paths.begin(), paths.end(), change.path) != paths.end();
+            const bool has_old = std::find(paths.begin(), paths.end(), change.rename_from) != paths.end();
+            if (has_new == has_old) continue;
+            throw WorkspaceError("INVALID_REQUEST",
+                                 "重命名要成对提交：" + change.rename_from + " → " + change.path);
+        }
     }
     std::vector<std::wstring> arguments{L"commit"};
     if (amend) arguments.push_back(L"--amend");
@@ -491,12 +662,12 @@ Json user(const fs::path& repo) {
     return {{"name", read(L"user.name")}, {"email", read(L"user.email")}};
 }
 
-void checkout(const fs::path& repo, const std::string& branch) {
-    if (branch.empty()) throw WorkspaceError("INVALID_REQUEST", "要切换的分支不能为空。");
-    // checked_ref: the name is a ref that must exist, and it can never start with
-    // '-', which git would otherwise read as an option (`git checkout --hard …`).
-    require_ok(run(repo, {L"checkout", checked_ref(repo, branch)}), "切换分支");
-}
+// 「分支 / 标签 / 储藏」一族（checkout、create_branch、delete_branch、stash_list / stash_save /
+// stash_pop、tag_list / tag_create / tag_delete）2026-10-08 整段搬进了 native/git_refs.cpp ——
+// 那一族只做一件事：ref 本身的增删查改与切换，与留在本文件的 status/diff/commit、远端同步
+// （pull/push/fetch/rebase/merge/cherry-pick）不共一个职责域。搬动时**实现一个字没改**：
+// 入口声明在 git.hpp，run / require_ok / checked_ref / trim / utf8_to_wide / parse_records 的
+// 实现仍然只有本文件这一份（声明见 native/git_detail.hpp）。
 
 namespace detail {
 // Split a single record on the 0x1F unit separator git was asked to emit.
@@ -554,32 +725,8 @@ std::string log_command(const fs::path& repo, const std::vector<std::string>& ar
 void pull(const fs::path& repo) { require_ok(run(repo, {L"pull"}), "拉取"); }
 void push(const fs::path& repo) { require_ok(run(repo, {L"push"}), "推送"); }
 
-Json stash_list(const fs::path& repo) {
-    const auto result = run(repo, {L"stash", L"list", L"--pretty=%gd\x1f%s"});
-    require_ok(result, "读取储藏");
-    Json entries = Json::array();
-    for (const auto& record : parse_records(result.out)) {
-        if (record.empty()) continue;
-        entries.push_back({{"ref", record[0]}, {"message", record.size() > 1 ? record[1].get<std::string>() : std::string()}});
-    }
-    return {{"entries", std::move(entries)}};
-}
-
-void stash_save(const fs::path& repo, const std::string& message) {
-    if (message.empty()) require_ok(run(repo, {L"stash", L"push"}), "储藏更改");
-    else require_ok(run(repo, {L"stash", L"push", L"-m", utf8_to_wide(message)}), "储藏更改");
-}
-
-void stash_pop(const fs::path& repo) { require_ok(run(repo, {L"stash", L"pop"}), "弹出储藏"); }
-
-void create_branch(const fs::path& repo, const std::string& name, bool checkout_now) {
-    // The branch does not exist yet, so it cannot be resolved with rev-parse; it is
-    // still a name landing on git's command line and gets the same option/control
-    // character rejection an existing ref would.
-    const auto wide = checked_new_name(name, "分支名");
-    if (checkout_now) require_ok(run(repo, {L"checkout", L"-b", wide}), "新建分支");
-    else require_ok(run(repo, {L"branch", wide}), "新建分支");
-}
+// `stash_list` / `stash_save` / `stash_pop` 与 `create_branch` 2026-10-08 搬进 native/git_refs.cpp
+// （连同 checkout / delete_branch / tag_*，原顺序一字未改）。
 
 void merge(const fs::path& repo, const std::string& branch) {
     if (branch.empty()) throw WorkspaceError("INVALID_REQUEST", "要合并的分支不能为空。");
@@ -662,78 +809,11 @@ void ignore_path(const fs::path& repo, const std::string& path) {
     stream << path << '\n';
 }
 
-namespace {
-
-struct DiffHunk { int index; std::string header; std::string body; };
-
-// Split a unified diff (as produced by git diff [--cached] -- <path>) into the
-// file header plus each "@@" hunk. Header lines are everything before the first @@.
-std::pair<std::string, std::vector<DiffHunk>> split_hunks(const std::string& unified) {
-    std::string header;
-    std::vector<DiffHunk> hunks;
-    std::istringstream stream(unified);
-    std::string line;
-    bool in_header = true;
-    while (std::getline(stream, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (in_header && line.rfind("@@", 0) == 0) in_header = false;
-        if (in_header) { header += line + "\n"; continue; }
-        if (line.rfind("@@", 0) == 0) hunks.push_back({static_cast<int>(hunks.size()), line + "\n", ""});
-        else if (!hunks.empty()) hunks.back().body += line + "\n";
-    }
-    return {header, hunks};
-}
-
-}  // namespace
-
-Json diff_hunks(const fs::path& repo, const std::string& path, bool staged) {
-    const auto unified = diff(repo, path, staged);
-    const auto [header, hunks] = split_hunks(unified);
-    Json list = Json::array();
-    for (const auto& hunk : hunks) {
-        int additions = 0, deletions = 0;
-        std::istringstream body(hunk.body);
-        std::string line;
-        while (std::getline(body, line)) {
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (!line.empty() && line[0] == '+') ++additions;
-            else if (!line.empty() && line[0] == '-') ++deletions;
-        }
-        list.push_back({{"index", hunk.index}, {"header", hunk.header},
-                        {"body", hunk.body}, {"additions", additions}, {"deletions", deletions}});
-    }
-    return {{"hunks", std::move(list)}, {"header", header}};
-}
-
-void apply_hunks(const fs::path& repo, const std::string& path, bool staged,
-                 const std::vector<int>& hunks, bool reverse) {
-    if (hunks.empty()) throw WorkspaceError("INVALID_REQUEST", "没有选择任何改动块。");
-    if (hunks.size() > 512) throw WorkspaceError("INVALID_REQUEST", "单次应用的改动块过多。");
-    const auto unified = diff(repo, path, staged);
-    const auto [header, available] = split_hunks(unified);
-    std::string patch = header;
-    for (const int wanted : hunks) {
-        if (wanted < 0 || static_cast<std::size_t>(wanted) >= available.size())
-            throw WorkspaceError("INVALID_REQUEST", "所选改动块不在当前差异中（差异可能已变化，请刷新）。");
-        patch += available[static_cast<std::size_t>(wanted)].header + available[static_cast<std::size_t>(wanted)].body;
-    }
-    // The patch is fed through a file inside .git so it never shows up as an
-    // untracked change in the very status this staging is about to affect.
-    const auto patch_file = repo / ".git" / "taocode-apply.patch";
-    {
-        std::ofstream stream(patch_file, std::ios::binary | std::ios::trunc);
-        if (!stream) throw WorkspaceError("IO_ERROR", "无法写入补丁临时文件。");
-        stream.write(patch.data(), static_cast<std::streamsize>(patch.size()));
-        if (!stream) throw WorkspaceError("IO_ERROR", "写入补丁临时文件失败。");
-    }
-    std::vector<std::wstring> arguments{L"apply", L"--cached", L"--recount"};
-    if (reverse) arguments.push_back(L"--reverse");
-    arguments.push_back(L".git/taocode-apply.patch");
-    const auto result = run(repo, arguments);
-    std::error_code ignored;
-    fs::remove(patch_file, ignored);
-    require_ok(result, reverse ? "按块取消暂存" : "按块暂存");
-}
+// 「按块暂存 / 按块取消暂存」一族（DiffHunk / split_hunks / diff_hunks / apply_hunks）2026-10-08
+// 整段搬进了 native/git_hunks.cpp —— 那一族只把 `git diff` 的 unified 文本按 "@@" 切成可选的
+// 块，再把选中的块拼成一个补丁喂给 `git apply --cached`，与留在本文件的分支 / 标签 / 暂存条目 /
+// 追溯视图不共一个职责域。搬动时实现一个字没改：`diff` 的声明在 git.hpp，run / require_ok 的
+// 实现仍只有本文件这一份（声明见 native/git_detail.hpp）。
 
 namespace detail {
 

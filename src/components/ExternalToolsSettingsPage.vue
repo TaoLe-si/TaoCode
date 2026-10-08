@@ -149,11 +149,10 @@ const unconsumedFields = computed(() => EXTERNAL_TOOL_FIELDS.filter(field => !fi
 
 <template>
   <h3>工具 › 外部工具</h3>
-  <p class="section-description">对应 IDEA Settings › Tools › External Tools（注册证据 <code>intellij.platform.lang.impl.xml:1013</code> 的 <code>preferences.externalTools</code>）。字段顺序照 <code>ToolEditorDialog.java:103-119</code>；这里定义的工具出现在「工具 › 外部工具」子菜单，运行时复用构建的同一条输出通道。</p>
 
   <div class="tools-list" role="list" aria-label="外部工具列表">
     <div v-for="(row, index) in rows" :key="index" class="tools-row" :class="{ 'tools-row-bad': !row.validation.valid, 'tools-row-selected': index === selected }" role="listitem">
-      <label class="tools-enable" :title="`启用（上游 BaseToolsPanel.java:248 的那个勾选框；停用的工具不进菜单，BaseToolManager.java:164）`">
+      <label class="tools-enable" title="停用的工具不进菜单">
         <input type="checkbox" :checked="records[index]?.enabled ?? true" :disabled="busy" :aria-label="`启用工具 ${row.tool.name}`" @change="patchDetail(index, { enabled: ($event.target as HTMLInputElement).checked })" />
       </label>
       <input
@@ -191,20 +190,20 @@ const unconsumedFields = computed(() => EXTERNAL_TOOL_FIELDS.filter(field => !fi
         >{{ macro.name }}</button>
       </div>
       <div class="tools-row-actions">
-        <button class="icon-button" type="button" :disabled="busy || index === 0" title="上移" aria-label="上移这条工具" @click="move(index, -1)"><ArrowUp :size="iconSize.dense" /></button>
-        <button class="icon-button" type="button" :disabled="busy || index === rows.length - 1" title="下移" aria-label="下移这条工具" @click="move(index, 1)"><ArrowDown :size="iconSize.dense" /></button>
-        <button class="icon-button" type="button" :disabled="busy" title="删除这条工具" aria-label="删除这条工具" @click="removeAt(index)"><Trash2 :size="iconSize.dense" /></button>
+        <button class="icon-button" type="button" :disabled="busy || index === 0" aria-label="上移这条工具" @click="move(index, -1)"><ArrowUp :size="iconSize.dense" /></button>
+        <button class="icon-button" type="button" :disabled="busy || index === rows.length - 1" aria-label="下移这条工具" @click="move(index, 1)"><ArrowDown :size="iconSize.dense" /></button>
+        <button class="icon-button" type="button" :disabled="busy" aria-label="删除这条工具" @click="removeAt(index)"><Trash2 :size="iconSize.dense" /></button>
       </div>
       <p v-if="row.validation.problems.length" class="tools-error" role="alert">{{ row.validation.problems.map(problem => problem.message).join(' ') }}</p>
       <p v-else-if="row.validation.unknownMacros.length" class="tools-warn" role="status">未知宏会按原文传给命令：{{ row.validation.unknownMacros.map(name => `$${name}$`).join('、') }}</p>
       <p v-else-if="row.validation.danglingDollars" class="tools-warn" role="status">命令里有 {{ row.validation.danglingDollars }} 个落单的 <code>$</code>（宏要写成 <code>$Name$</code> 成对形式）。</p>
       <p v-else-if="macroUses(row.tool.command).length" class="tools-hint">这条命令用到：{{ macroUses(row.tool.command).join('、') }}</p>
     </div>
-    <p v-if="!rows.length" class="tools-empty">还没有外部工具。工具是应用级的命令收藏，会出现在「工具 › 外部工具」子菜单里。</p>
+    <p v-if="!rows.length" class="tools-empty">还没有外部工具。</p>
   </div>
 
   <div class="tools-actions">
-    <button class="subtle-button" type="button" :disabled="busy" @click="addTool"><Plus :size="iconSize.menu" />新增工具</button>
+    <button class="subtle-button" type="button" :disabled="busy" @click="addTool"><Plus aria-hidden="true" :size="iconSize.menu" />新增工具</button>
     <span v-if="invalid" class="tools-warn" role="alert">{{ invalid }} 条工具还没填完，保存时会原样保留但不会出现在菜单标题里。</span>
   </div>
 
@@ -221,7 +220,6 @@ const unconsumedFields = computed(() => EXTERNAL_TOOL_FIELDS.filter(field => !fi
         <option v-for="name in existingGroups" :key="name" :value="name" />
       </datalist>
     </label>
-    <p class="tool-hint">分组决定这条工具落在「工具 › 外部工具」下的哪一层子菜单（<code>BaseToolManager.java:89-113</code>）。</p>
     <label class="tool-field">
       <span>程序：</span>
       <input :value="selectedRecord.program" :disabled="busy" spellcheck="false" maxlength="1000" :aria-label="`工具 ${selectedRecord.name} 的程序`" placeholder="clang-format" @input="patchDetail(selected, { program: ($event.target as HTMLInputElement).value })" />
@@ -230,21 +228,20 @@ const unconsumedFields = computed(() => EXTERNAL_TOOL_FIELDS.filter(field => !fi
       <span>参数：</span>
       <input :value="selectedRecord.parameters" :disabled="busy" spellcheck="false" maxlength="1000" :aria-label="`工具 ${selectedRecord.name} 的参数`" placeholder="-i $FilePath$" @input="patchDetail(selected, { parameters: ($event.target as HTMLInputElement).value })" />
     </label>
-    <p class="tool-hint">这两栏合成上面那条命令（<code>Tool.java:75-76</code> 的两个字段 → 本仓 <code>run.start</code> 的单条命令）。</p>
 
     <div class="tool-filters">
       <span>输出过滤：<code>$FILE_PATH$</code>、<code>$LINE$</code>、<code>$COLUMN$</code> 可用</span>
       <ul v-if="selectedRecord.outputFilters.length">
         <li v-for="(filter, at) in selectedRecord.outputFilters" :key="`${filter}-${at}`">
           <code :class="{ 'tool-filter-bad': outputFiltersMissingFilePathMacro([filter]).length }">{{ filter }}</code>
-          <button class="icon-button" type="button" :disabled="busy" :aria-label="`删除第 ${at + 1} 条过滤式`" title="删除这条过滤式" @click="removeFilter(at)"><Trash2 :size="iconSize.dense" /></button>
+          <button class="icon-button" type="button" :disabled="busy" :aria-label="`删除第 ${at + 1} 条过滤式`" @click="removeFilter(at)"><Trash2 :size="iconSize.dense" /></button>
         </li>
       </ul>
       <p v-else class="tool-hint">还没有过滤式。</p>
       <p v-if="badFilters.length" class="tools-error" role="alert">每条输出过滤式都必须含 <code>$FILE_PATH$</code>（<code>ToolEditorDialogPanel.kt:135</code>）。</p>
       <div class="tool-filter-add">
         <input v-model="filterDraft" :disabled="busy" spellcheck="false" maxlength="200" aria-label="新增输出过滤式" placeholder="^(.+):(\d+):(\d+): (.*)$" @keydown.enter="addFilter" />
-        <button class="subtle-button" type="button" :disabled="busy || !filterDraft.trim()" @click="addFilter"><Plus :size="iconSize.menu" />添加过滤式</button>
+        <button class="subtle-button" type="button" :disabled="busy || !filterDraft.trim()" @click="addFilter"><Plus aria-hidden="true" :size="iconSize.menu" />添加过滤式</button>
       </div>
     </div>
   </fieldset>

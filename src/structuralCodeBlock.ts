@@ -33,7 +33,7 @@
 // "列表变量写量词"（`src/components/SearchPanel.vue` 的那行模板说明）却一条结果都拿不到。
 // 本文件把它们从正则里搬到复核里，正则只留宿主支持的 `\b` 与前顾。
 //
-// ── B. 代码块导航用的那半（等 `src/editorCodeBlock.ts` 那一侧接）───────────────
+// ── B. 代码块导航用的那半（`src/editorCodeBlock.ts:169` 已经在消费）────────────
 // 判词点名的 `CodeBlockUtil.java:110`/`:178` 那两条 `CodeBlockSupportHandler.findCodeBlockRange`。
 // 上游这一条链是：
 //   · `platform/lang-impl/src/com/intellij/codeInsight/editorActions/CodeBlockUtil.java`
@@ -56,10 +56,20 @@
 //     标记区间 `compoundStatementKeywordRanges:119-122`、部件归属 `enclosingCompoundStatement:130-137`、
 //     同一条语句的部件收集 `compoundStatementKeywords:139-151`、三元/推导式关键字的忽略 `:84-86`。
 //
-// **为什么这一半还没接上**（不是"懒得接"）：它的合并点在
-// `src/editorCodeBlock.ts:147-150` 的 `codeBlockTarget(text, caret, forward)`、调用方
-// `src/editorCommands.ts:176`，两个文件都不在本域的可改面里 ⇒ 整段可照抄的替换代码与
-// import 语句写在 `docs/wiring-requests-2026-10-06-search2.md` W-1'。
+//   · 光标偏移的那一步 `TargetElementUtilBase.java:56-74`（`:58` 调进去）：`:60-62` 光标在文本长度之外
+//     ⇒ 先退到 `len-1`，`:63-65` 那一个字符不是标识符字符 ⇒ 再退一格，`:66-71` 退到的那个字符是
+//     `'` `"` `)` `]` 或标识符字符才真用退后的值 —— 这解释了两条边界：文档以 `else` 结尾时光标压在
+//     文件尾**仍算**压着关键字；文档以换行结尾时退后落到换行符上 ⇒ 回原 offset ⇒ `findElementAt(len) = null`
+//     ⇒ EMPTY_RANGE。词法层「物理续行属于同一条逻辑行」的凭证在
+//     `python/python-parser/src/com/jetbrains/python/lexer/Python.flex:73-75`（串内 `\\` + 换行不结束这条）与 `:175`。
+//
+// **接线现场**（判词更新，规约 §1 留痕）：本段原先写的「这一半还没接上」已经过期 ——
+// `src/editorCodeBlock.ts:169` 的 `codeBlockTarget` 现在就在问 `findCodeBlockRange` 并按
+// `mergeBlockEnd`/`mergeBlockStart` 合并（上一条 lane 落的）。但**生产里还问不到**：
+// 编辑器语言档的取值空间是 `src/languages.ts:8` 的 `EDITOR_LANGUAGES` = java/cpp/typescript/other，
+// `.py` 文件在本仓探测到的是 `language: 'other'`（`src/fileTypeDetection.ts:59`）⇒ Python 那条分支
+// 现在只有测试与「用户手改文件关联表」能走到。要让真文件走到，得把 python 加进那两张表并配一份
+// Python 词法层 —— 属宿主接线，写在 `docs/batch-2026-10-06-ss4.md` 的请求里，不在本域动。
 // A 那半有生产消费方（`src/structuralSearchModifiers.ts`），所以本文件不是零消费方模块。
 //
 // 判词留痕（规约 §1「要改别人的结论就留痕」）：`ss/matcher` 的判词把列表变量写成
@@ -215,7 +225,7 @@ export function listRunHolds(text: string, from: number, to: number): boolean {
   return listRunStartsHere(text, from, scan) && listRunEndsHere(text, from, to, scan)
 }
 
-// ── B. 代码块导航：Python 的一条复合语句（等 editorCodeBlock 那一侧接）─────
+// ── B. 代码块导航：Python 的一条复合语句（消费方 `src/editorCodeBlock.ts:169`）─────
 
 export interface BlockRange { from: number; to: number }
 
@@ -228,16 +238,34 @@ interface PyLine {
   start: number; end: number
   /** 前导空白数；-1 = 空行（缩进不参与判定）。 */
   indent: number
-  /** 行首的括号深度：>0 ⇒ 这是上一条逻辑行的续行，行首词不算语句关键字。 */
+  /** 行首的括号深度；续行（这一值 > 0 的那些物理行）已经并进上一条逻辑行，所以这里恒为 0 —— 留着是这条不变量的凭证。 */
   depth: number
   keyword: string | null
   keywordFrom: number
   keywordTo: number
 }
 
-const WORD = /[A-Za-z_][A-Za-z0-9_]*/
+/** 行首**第一个词**（锚在行首：`"""if a:"""` 这种裸文档字符串，第一个字符是引号，一个词都不算）。 */
+const WORD = /^[A-Za-z_][A-Za-z0-9_]*/
 
-/** 逐行扫一遍：字符串/注释/括号深度都算准，好让「行首的第一个词」这条判据不被字符串里的关键字骗到。 */
+/** 行尾是不是那条**显式续行**的反斜杠：奇数个才算（`x = 1 \\` 结尾那两个是转义出来的两个反斜杠本身）。 */
+function joinsNextLine(body: string): boolean {
+  let backslashes = 0
+  for (let i = body.length - 1; i >= 0 && body[i] === '\\'; --i) backslashes += 1
+  return backslashes % 2 === 1
+}
+
+/** 逐行扫一遍：字符串/注释/括号深度都算准，好让「行首的第一个词」这条判据不被字符串里的关键字骗到。
+ *
+ * **物理行 ≠ 逻辑行**：括号没关上、行尾反斜杠、三引号串跨行，都会让一条逻辑行占好几条物理行。
+ * 上游 PSI 把这些物理行全挂在同一个语句节点下（`AbstractCodeBlockSupportHandler.java:81` 取的
+ * `obj.getTextRange()` 因此一直覆盖到最后一行），所以这里把续行**并进上一条逻辑行**（只延长它的
+ * `end`，不另起一行）：另起一行时那一行的缩进会被拿去和部件关键字比列，于是
+ *   · 回顶到第 0 列的闭合括号（`x = foo(` 换行写参数、`)` 顶格）、
+ *   · 跨行的三引号串、
+ *   · CRLF 文件里那一行只剩 `\r` 的「空行」
+ * 都会把 if/elif/else 这一族的部件链从中间截断，块尾也跟着算早。
+ */
 function scanLines(text: string): PyLine[] {
   const lines: PyLine[] = []
   let quote = ''
@@ -246,40 +274,68 @@ function scanLines(text: string): PyLine[] {
   let depth = 0
   let start = 0
   let lineDepth = 0
+  // 这一行的第一个字符是不是落在一段**上一行还没闭合**的字符串里（三引号串的后半截）。
+  let inString = false
+  // 上一条物理行是不是以「显式续行」的反斜杠结尾。
+  let joined = false
   for (let i = 0; i <= text.length; ++i) {
     const ch = text[i]
     if (i === text.length || ch === '\n') {
-      const body = text.slice(start, i)
+      // CRLF：行尾那个 `\r` 属于换行符本身，不算正文（上游的 textRange 到语句最后一个 token 为止，
+      // 既不含 `\n` 也不含 `\r\n`），留着它还会让 CRLF 文件里的空行变成「第 0 列的一条语句」。
+      const cr = i > start && text[i - 1] === '\r'
+      const end = cr ? i - 1 : i
+      const body = text.slice(start, end)
       const lead = body.length - body.replace(/^[ \t\f]*/, '').length
       const content = body.slice(lead)
-      const blank = content === '' || content.startsWith('#')
-      let keyword: string | null = null
-      let keywordFrom = 0
-      let keywordTo = 0
-      if (lineDepth === 0 && !blank) {
-        const hit = WORD.exec(content)
-        if (hit) {
-          const word = hit[0]
-          if (PART_KEYWORDS.has(word)) {
-            keyword = word
-            keywordFrom = start + lead
-            keywordTo = keywordFrom + word.length
+      // 下一行接不接在这一行后面：注释里与串内的反斜杠都不算（串内那一段 `quote` 已经非空，
+      // 走 `inString` 那一档；被转义的那个换行在字符扫描时就整个跳过了，压根到不了这里）。
+      const nextJoined = i < text.length && !comment && quote === '' && joinsNextLine(body)
+      if (lines.length > 0 && (lineDepth > 0 || inString || joined)) {
+        // 续行：并进上一条逻辑行。空白结尾的那几行不往块尾带（上游到最后一个 token 为止），
+        // 但串内的空白是正文，得带上。
+        const previous = lines[lines.length - 1]!
+        if ((content.trim() !== '' || inString) && end > previous.end) previous.end = end
+      } else {
+        // 上游的 leaf 判定（`CodeBlockSupportHandler.java:59-60` 取叶子 + `PyControlFlowKeywordMatcher.kt:93`
+        // 的 `keywordGroup(leaf)` / `:126` 的 `!in COMPOUND_PART_KEYWORDS` 早退）意味着：
+        // **写在字符串字面量里的 `if` 永远不是关键字 token**，它只是文档字符串的一段文本
+        // （跨行的串在这里已经是上一条逻辑行的续行了）。
+        // 空行与整行注释同理不算语句，也不打断一条复合语句（`:139-151` 走的是 PSI 兄弟链）。
+        const trivia = content === '' || content.startsWith('#')
+        let keyword: string | null = null
+        let keywordFrom = 0
+        let keywordTo = 0
+        if (!trivia) {
+          const hit = WORD.exec(content)
+          if (hit) {
+            const word = hit[0]
+            if (PART_KEYWORDS.has(word)) {
+              keyword = word
+              keywordFrom = start + lead
+              keywordTo = keywordFrom + word.length
+            }
           }
         }
+        lines.push({ start, end, indent: trivia ? -1 : lead, depth: lineDepth, keyword, keywordFrom, keywordTo })
       }
-      lines.push({ start, end: i, indent: blank ? -1 : lead, depth: lineDepth, keyword, keywordFrom, keywordTo })
+      joined = nextJoined
       if (i === text.length) break
       start = i + 1
       lineDepth = depth
       comment = false
+      inString = quote !== ''
       continue
     }
     if (comment) continue
     if (quote) {
       if (ch === '\\') { i += 1; continue }
-      const pair = text.slice(i, i + 3)
-      if (triple && (pair === `'''` || pair === '"""')) { quote = ''; triple = false; i += 2; continue }
-      if (!triple && ch === quote) quote = ''
+      if (triple) {
+        // 闭合必须是**同一种**引号连成三个：`""" … ''' … """` 里那一串单引号只是文档字符串的正文
+        // （原来这里两种三引号都当闭合，于是提前把串关掉、把后面的 `"""` 又开成一个新串）。
+        if (ch === quote && text.startsWith(quote + quote + quote, i)) { quote = ''; triple = false; i += 2; continue }
+      }
+      else if (ch === quote) quote = ''
       continue
     }
     if (ch === '#') { comment = true; continue }
@@ -467,6 +523,11 @@ export function pythonCompoundKeywordRanges(text: string, caret: number): BlockR
  * `CodeBlockSupportHandler.java:57-66` 的 `findCodeBlockRange`。
  * 这份参考树里只有 Python 注册了这个 EP（`intellij.python.community.impl.xml:439`），
  * 其余语言 ⇒ null（上游的 EMPTY_RANGE，合并那一步因此只用括号扫描）。
+ *
+ * null 的那几档（与上游同形，逐条有判据）：语言档不是 `python`/`py`；空文本；光标在文本长度之外或
+ * 负数；文件只有注释/文档字符串；光标没压在**语句位置**的关键字上（三元 `if`、推导式 `for`、
+ * 块体里的任何一行、块首行行尾那个换行）；文件尾正好是换行时 `adjustOffset` 退到换行符上（`:66-73`）。
+ * 反过来，"当前代码块**里**"并不足以拿到区间 —— 上游问的是叶子是不是那一个关键字 token。
  */
 export function findCodeBlockRange(text: string, caret: number, language: string): BlockRange | null {
   if (language !== 'python' && language !== 'py') return null

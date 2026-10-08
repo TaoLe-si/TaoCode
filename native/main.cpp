@@ -20,11 +20,14 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <stop_token>
 #include "workspace.hpp"
+#include "workspace_search_file_task.hpp"
 #include "window_state.hpp"
 #include "projects.hpp"
 #include "git_clone.hpp"
 #include "git.hpp"
+#include "git_routes.hpp"
 #include "lsp_session.hpp"
 #include "lsp_recover.hpp"
 #include "lsp_worker.hpp"
@@ -38,6 +41,7 @@
 #include "search.hpp"
 #include "dap.hpp"
 #include "dap_routes.hpp"
+#include "dap_host.hpp"
 #include "terminal.hpp"
 #include "trusted_paths.hpp"
 #include "history.hpp"
@@ -53,8 +57,15 @@
 #include "dialogs.hpp"
 #include "gradle.hpp"
 #include "settings_transfer.hpp"
+#include "settings_schema.hpp"
 #include "export_file.hpp"
 #include "event_channel.hpp"
+#include "http_client.hpp"
+#include "embedded_browser_profile.hpp"
+#include "agent_skills.hpp"
+#include "agent_memory.hpp"
+#include "mcp_client.hpp"
+#include "system_date_format.hpp"
 
 namespace taocode {
 // 版本号与 package.json 的 version 一致（`app.info` 与日志启动行都用它）。
@@ -100,6 +111,8 @@ using taocode::wide;
 constexpr UINT git_event_message = WM_APP + 8;
 constexpr UINT watch_restart_message = WM_APP + 9;
 constexpr UINT gradle_event_message = WM_APP + 10;
+constexpr UINT agent_model_event_message = WM_APP + 11;
+constexpr UINT agent_mcp_event_message = WM_APP + 12;
 
 // utf8 / wide 已并入 native/text.hpp（与 watcher.cpp 的重复实现合并）；
 // base64 的编/解码都在 native/base64.hpp（三处重复实现合并成一份）。
@@ -111,7 +124,7 @@ void check(HRESULT result, const char* operation) {
     if (FAILED(result)) throw std::runtime_error(std::string(operation) + " failed (HRESULT " + std::to_string(static_cast<unsigned long>(result)) + ")");
 }
 
-struct App : taocode::dap::RouteHost {
+struct App {
     HWND window{};
     fs::path ui;
     fs::path profile;
@@ -120,6 +133,7 @@ struct App : taocode::dap::RouteHost {
     ComPtr<ICoreWebView2> webview;
     std::unique_ptr<taocode::Workspace> workspace = std::make_unique<taocode::Workspace>();
     std::unique_ptr<taocode::ProjectStore> projects;
+    taocode::EmbeddedBrowserProfile embedded_browser_profile;
     std::string current_root;
     std::string default_parent;
     bool dirty = false;
@@ -133,8 +147,42 @@ struct App : taocode::dap::RouteHost {
     std::unordered_map<std::string, RouteHandler> routes;
     void register_routes() {
         routes.emplace("dialog.pickDirectory", [this](const Json& params) {
-            return taocode::dialogs::select_directory(window, L"选择项目存放目录", params.value("initial", std::string()));
+            const auto title = wide(params.value("title", std::string("选择项目存放目录")));
+            return taocode::dialogs::select_directory(window, title.c_str(), params.value("initial", std::string()));
         });
+        routes.emplace("agent.skills.list", [](const Json& params) {
+            return taocode::agent_skills::list(params.value("workspacePath", std::string()));
+        });
+        routes.emplace("agent.skills.setEnabled", [](const Json& params) {
+            return taocode::agent_skills::set_enabled(params.value("workspacePath", std::string()),
+                                                       params.at("skillId").get<std::string>(),
+                                                       params.value("enabled", true));
+        });
+        routes.emplace("agent.skills.delete", [](const Json& params) {
+            return taocode::agent_skills::delete_skill(params.value("workspacePath", std::string()),
+                                                        params.at("skillId").get<std::string>());
+        });
+        routes.emplace("agent.skills.reveal", [](const Json& params) {
+            return taocode::agent_skills::reveal_skill(params.value("workspacePath", std::string()),
+                                                        params.at("skillId").get<std::string>());
+        });
+        routes.emplace("agent.skills.promptContext", [](const Json& params) {
+            return taocode::agent_skills::build_prompt_context(params.value("workspacePath", std::string()),
+                                                                params.value("prompt", std::string()));
+        });
+        routes.emplace("agent.memory.list", [](const Json&) {
+            return taocode::agent_memory::list_project_memories();
+        });
+        routes.emplace("agent.memory.read", [](const Json& params) {
+            return taocode::agent_memory::read_project_memory_file(
+                params.at("workspaceId").get<std::string>(), params.at("fileName").get<std::string>());
+        });
+        routes.emplace("agent.mcp.configure", [this](const Json& params) {
+            const auto root = params.value("workspacePath", current_root);
+            return agent_mcp.configure(params.value("settings", Json::object()), fs::path(wide(root)));
+        });
+        routes.emplace("agent.mcp.status", [this](const Json&) { return agent_mcp.snapshot(); });
+        routes.emplace("agent.mcp.call", [this](const Json& params) { return agent_mcp.call(params); });
         routes.emplace("dialog.pickImage", [this](const Json&) { return taocode::dialogs::pick_image(window); });
         routes.emplace("app.readImage", [this](const Json& params) {
             const auto path = params.at("path").get<std::string>();
@@ -156,9 +204,21 @@ struct App : taocode::dap::RouteHost {
     std::unique_ptr<taocode::run_host::Manager> runs;
     taocode::EventChannel run_events;
 
-    std::unique_ptr<taocode::dap::Client> dap;
-    taocode::EventChannel dap_events;
-    Json dap_config;  // optional TaoCode.dap.json: kind -> {command,args,program,cwd}
+    // 调试适配器那一整族（会话生命周期 / 两条反向请求 / TaoCode.dap.json / 事件通道）在
+    // native/dap_host.cpp —— main.cpp 贴着 2000 行硬上限，它是 `git.*` 之后第二大的一段。
+    // 这里只把宿主面接上：每一项都是本类已有的一行（终端仍是本类的 `terminals`，尺寸也仍由本类记着）。
+    std::unique_ptr<taocode::dap_host::Host> dap_host = std::make_unique<taocode::dap_host::Host>(
+        taocode::dap_host::Host::Ports{
+            .post = [this](const Json& payload) { post_json(payload); },
+            .window = [this] { return window; },
+            .ui = [this] { return ui; },
+            .root = [this] { return current_root; },
+            .general_settings = [this] { return general_settings(); },
+            .terminals = [this]() -> taocode::terminal::Manager& { return *terminals; },
+            .terminal_size = [this] { return std::pair<int, int>{terminal_cols, terminal_rows}; },
+            .terminal_event = [this](Json payload) { queue_term(std::move(payload)); },
+        },
+        dap_event_message);
 
     std::unique_ptr<taocode::terminal::Manager> terminals = std::make_unique<taocode::terminal::Manager>();
     taocode::EventChannel term_events;
@@ -167,16 +227,26 @@ struct App : taocode::dap::RouteHost {
     // instead of a constant.
     int terminal_cols = 120;
     int terminal_rows = 30;
-    // Console windows opened on an adapter's behalf (`runInTerminal` with kind
-    // "external") outlive the request: the Runner is kept here until it exits.
-    std::mutex external_mutex;
-    std::vector<std::unique_ptr<taocode::Runner>> external_runners;
 
     std::unique_ptr<taocode::history::History> history;  // per-project local history, recreated on open
     std::unique_ptr<taocode::session::SessionStore> sessions;  // crash-recovery drafts, per profile
     // Gradle 同步：独立于"运行控制台"的通道（IDEA 的 Gradle 同步也不占运行按钮）。
     std::unique_ptr<taocode::gradle::SyncSession> gradle_sync;
     taocode::EventChannel gradle_events;
+    taocode::EventChannel agent_model_events;
+    std::mutex agent_model_mutex;
+    std::thread agent_model_thread;
+    std::stop_source agent_model_stop;
+    std::uint64_t agent_model_request_id{};
+    bool agent_model_active{};
+
+    taocode::mcp_client::Manager agent_mcp;
+    std::atomic<bool> agent_mcp_cancel{false};
+    std::mutex agent_mcp_mutex;
+    std::deque<Json> agent_mcp_requests;
+    std::thread agent_mcp_thread;
+    bool agent_mcp_busy{};
+    taocode::EventChannel agent_mcp_replies;
 
     // IDE-03 file watching: one recursive ReadDirectoryChangesW thread per open
     // workspace; batches are debounced natively and forwarded as fs.changed.
@@ -196,19 +266,137 @@ struct App : taocode::dap::RouteHost {
     std::atomic<bool> search_busy{false};
     std::atomic<bool> search_cancel{false};
     taocode::EventChannel search_events;
+    taocode::WorkspaceSearchFileTask workspace_file_search;
 
-    // Every git.* command is a child process; they are drained by one worker so a
-    // slow push cannot queue up behind — or freeze — the UI thread.
-    std::thread git_thread;
-    std::atomic<bool> git_busy{false};
-    std::mutex git_mutex;
-    std::deque<Json> git_requests;
-    // 回复队列原本没有上限（一条回复对应一次请求，天然有界），所以 limit 传 0。
-    taocode::EventChannel git_replies;
+    // Every git.* command is a child process; its request queue, reply channel and the one worker
+    // thread live in native/git_routes.cpp so a slow push cannot queue up behind — or freeze — the
+    // UI thread. 这条通道是唯一一个在 App 里就地建起来、由本文件只读引用的成员：它的析构
+    // （native/git_routes.cpp 的 `~Worker`）只做"丢队列 + 等住当前那条命令"，不碰本文件的任何
+    // 东西，所以放在这里不需要额外的收尾顺序（真正会发事件的收尾仍是 `close_children` 的
+    // 「git 工作线程」那一步）。
+    std::unique_ptr<taocode::git_routes::Worker> git_host = std::make_unique<taocode::git_routes::Worker>(
+        [this](const Json& request) { run_request(request, true); },  // 工作线程上真正干活的那一步
+        [this] { return window; },                                   // 窗口在 App 构造之后才建，所以晚绑定
+        [this](Json payload) { post_json(payload); },                // UI 线程上发回 WebView2
+        git_event_message);
 
     void queue_search(Json payload) { search_events.push(std::move(payload), window, search_event_message); }
 
     void queue_gradle(Json payload) { gradle_events.push(std::move(payload), window, gradle_event_message); }
+
+    void queue_agent_model(Json payload) { agent_model_events.push(std::move(payload), window, agent_model_event_message, 0); }
+
+    void queue_agent_mcp_reply(Json payload) { agent_mcp_replies.push(std::move(payload), window, agent_mcp_event_message, 0); }
+
+    void drain_agent_mcp() {
+        if (webview) for (const auto& event : agent_mcp_replies.take()) post_json(event);
+    }
+
+    void queue_agent_mcp_request(const Json& request) {
+        bool launch = false;
+        {
+            std::lock_guard lock(agent_mcp_mutex);
+            agent_mcp_requests.push_back(request);
+            if (!agent_mcp_busy) { agent_mcp_busy = true; launch = true; }
+        }
+        if (!launch) return;
+        if (agent_mcp_thread.joinable()) agent_mcp_thread.join();
+        agent_mcp_cancel.store(false);
+        agent_mcp.set_cancel_flag(&agent_mcp_cancel);
+        agent_mcp_thread = std::thread([this] {
+            for (;;) {
+                Json queued;
+                {
+                    std::lock_guard lock(agent_mcp_mutex);
+                    if (agent_mcp_requests.empty()) { agent_mcp_busy = false; break; }
+                    queued = std::move(agent_mcp_requests.front());
+                    agent_mcp_requests.pop_front();
+                }
+                run_request(queued, true);
+            }
+        });
+    }
+
+    void stop_agent_mcp() noexcept {
+        {
+            std::lock_guard lock(agent_mcp_mutex);
+            agent_mcp_requests.clear();
+        }
+        agent_mcp_cancel.store(true);
+        if (agent_mcp_thread.joinable()) {
+            CancelSynchronousIo(agent_mcp_thread.native_handle());
+            agent_mcp_thread.join();
+        }
+        agent_mcp_busy = false;
+        agent_mcp.stop_all();
+        agent_mcp_replies.take();
+    }
+
+    void drain_agent_model() {
+        if (webview) for (const auto& event : agent_model_events.take()) post_json(event);
+    }
+
+    bool stop_agent_model(std::uint64_t request_id = 0, bool wait = true) {
+        bool stopped = false;
+        {
+            std::lock_guard lock(agent_model_mutex);
+            if (agent_model_active && request_id && request_id != agent_model_request_id) return false;
+            if (agent_model_active) { agent_model_stop.request_stop(); stopped = true; }
+        }
+        if (!wait) return stopped;
+        if (agent_model_thread.joinable()) agent_model_thread.join();
+        {
+            std::lock_guard lock(agent_model_mutex);
+            agent_model_active = false;
+            agent_model_request_id = 0;
+        }
+        return stopped;
+    }
+
+    void start_agent_model(const Json& request) {
+        {
+            std::lock_guard lock(agent_model_mutex);
+            if (agent_model_active) throw taocode::WorkspaceError("BUSY", "模型请求仍在运行。");
+        }
+        if (agent_model_thread.joinable()) agent_model_thread.join();
+        const auto request_id = request.at("id").get<std::uint64_t>();
+        const auto params = request.at("params");
+        taocode::HttpRequest http;
+        http.url = params.at("url").get<std::string>();
+        http.body = params.at("body").get<std::string>();
+        http.limit = params.value("limit", std::size_t{0});
+        http.timeout_ms = params.value("timeoutMs", std::size_t{0});
+        const auto& headers = params.at("headers");
+        if (!headers.is_object()) throw taocode::WorkspaceError("INVALID_REQUEST", "HTTP 请求头必须是对象。");
+        for (auto it = headers.begin(); it != headers.end(); ++it) {
+            if (!it.value().is_string()) throw taocode::WorkspaceError("INVALID_REQUEST", "HTTP 请求头的值必须是字符串。");
+            http.headers.emplace(it.key(), it.value().get<std::string>());
+        }
+        std::lock_guard lock(agent_model_mutex);
+        if (agent_model_active) throw taocode::WorkspaceError("BUSY", "模型请求仍在运行。");
+        agent_model_stop = std::stop_source{};
+        const auto token = agent_model_stop.get_token();
+        agent_model_active = true;
+        agent_model_request_id = request_id;
+        agent_model_thread = std::thread([this, request_id, http = std::move(http), token]() mutable {
+            Json reply{{"id", request_id}, {"ok", false}};
+            try {
+                auto result = taocode::http_post_stream(http, [this, request_id](std::string_view chunk) {
+                    queue_agent_model(Json{{"event", "agent.model.chunk"}, {"id", request_id},
+                                           {"chunkB64", taocode::base64_encode(chunk)}});
+                }, token);
+                reply["ok"] = true;
+                reply["result"] = std::move(result);
+            } catch (const taocode::WorkspaceError& error) {
+                reply["error"] = {{"code", error.code}, {"message", error.what()}};
+            } catch (const std::exception&) {
+                reply["error"] = {{"code", "NATIVE_ERROR"}, {"message", "模型 HTTP 请求失败。"}};
+            }
+            queue_agent_model(std::move(reply));
+            std::lock_guard done_lock(agent_model_mutex);
+            agent_model_active = false;
+        });
+    }
 
     void drain_gradle() {
         if (webview) for (const auto& event : gradle_events.take()) post_json(event);
@@ -314,34 +502,14 @@ struct App : taocode::dap::RouteHost {
 
     void stop_run() { runs->stop(0); }
 
-    // console flood guard：超过 2048 条时一条一条丢掉最旧的（保持原语义，所以 drop 传 1）。
-    void queue_dap(Json payload) { dap_events.push(std::move(payload), window, dap_event_message, 2048, 1); }
-
+    // 调试适配器的整族（会话生命周期 / 两条反向请求 / TaoCode.dap.json / 事件通道）都在
+    // native/dap_host.cpp —— main.cpp 贴着机检上限，它是 `git.*` 之后第二大的一段。
+    // 下面两行只是宿主面：`stop_dap` 的调用点在 `close_children` 与 `workspace.close`。
     void drain_dap() {
-        if (webview) for (const auto& event : dap_events.take()) post_json(event);
+        if (webview) dap_host->drain();
     }
 
-    // Replies from the DAP reader thread must not call post_json directly; funnel
-    // them through queue_dap so the WebView2 call stays on the UI thread.
-    void dap_reply(Json id, Json result, Json error) {
-        Json reply{{"id", id}, {"ok", error.is_null()}};
-        if (error.is_null()) reply["result"] = std::move(result);
-        else reply["error"] = {{"code", error.is_object() && error.contains("code") && error.at("code").is_string()
-                                    ? error.at("code").get<std::string>() : std::string("DAP_FAILED")},
-                               {"message", error.is_object() && error.contains("message") && error.at("message").is_string()
-                                    ? error.at("message").get<std::string>() : std::string("调试请求失败")}};
-        queue_dap(std::move(reply));
-    }
-
-    // Best-effort adapter registry beside the exe (mirrors configure_lsp): the UI
-    // sends only {kind, program, cwd} and the concrete adapter command/args come
-    // from the user's own TaoCode.dap.json. Nothing is bundled.
-    void load_dap_config() {
-        std::ifstream stream(ui.parent_path() / L"TaoCode.dap.json", std::ios::binary);
-        if (!stream) { dap_config = Json::object(); return; }
-        try { const Json parsed = Json::parse(stream); dap_config = parsed.is_object() ? parsed : Json::object(); }
-        catch (const Json::exception&) { dap_config = Json::object(); }
-    }
+    void stop_dap() noexcept { dap_host->stop(); }
 
     // 应用级设置里的 `general` 段（受信任清单就在里面）。每次现读：设置可能刚被前端改过，
     // 执行侧的判定必须用最新一份（`ProjectStore` 每次操作都在进程锁下重读状态文件）。
@@ -349,39 +517,6 @@ struct App : taocode::dap::RouteHost {
         Json state = projects->state();
         if (state.is_object() && state.contains("general") && state.at("general").is_object()) return state.at("general");
         return Json::object();
-    }
-
-    taocode::dap::Client& require_dap() {
-        if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-        // 调试会真的执行目标程序，所以未信任项目在这里就被拦住（上游对执行侧的统一做法）。
-        taocode::trusted::require_trusted(general_settings(), current_root, "调试");
-        if (!dap) {
-            load_dap_config();
-            dap = std::make_unique<taocode::dap::Client>();
-            // The adapter's own reverse requests. Both are process-wide hooks with a
-            // working default inside dap.cpp; installing them routes the request to
-            // the real terminal layer / a real nested session instead.
-            taocode::dap::Client::set_run_in_terminal_handler(
-                [this](const Json& args, std::string& error) { return run_in_terminal(args, error); });
-            taocode::dap::Client::set_start_debugging_handler(
-                [this](const Json& args, std::string& error) { return start_nested_debug(args, error); });
-        }
-        dap->set_root(fs::path(wide(current_root)));
-        return *dap;
-    }
-
-    // `dap.*` 一族的分派体在 native/dap_routes.cpp（main.cpp 贴着 2000 行硬上限）——
-    // 这里只把路由函数要的宿主面接上，逻辑仍是本类原有的那几个方法。
-    taocode::dap::Client& route_client() override { return require_dap(); }
-    Json route_registry() override { load_dap_config(); return dap_config; }
-    std::string route_root() const override { return current_root; }
-    void route_reply(Json id, Json result, Json error) override {
-        dap_reply(std::move(id), std::move(result), std::move(error));
-    }
-    void route_stop() noexcept override { stop_dap(); }
-    Json route_breakpoints() override { return dap ? dap->breakpoint_map() : Json::object(); }
-    taocode::dap::Client::EventCb route_event_sink() override {
-        return [this](Json event) { queue_dap({{"event", "dap.event"}, {"payload", std::move(event)}}); };
     }
 
     // NOTE: `workspace/applyEdit` is implemented inside taocode::lsp::Session
@@ -613,12 +748,13 @@ struct App : taocode::dap::RouteHost {
     // 关窗口收尾链：顺序照旧，但每步**先写"开始"再写"用时"** —— 卡住的那一步在日志里就是一条没有配对的行（2026-09-29 三次会话都只有启动行）。
     void close_children() {
         const std::pair<const char*, std::function<void()>> steps[] = {
-            {"查找线程", [this] { stop_search(); }}, {"语言服务线程", [this] { if (lsp_worker) lsp_worker->stop(); }},
+            {"模型请求", [this] { stop_agent_model(); }}, {"查找线程", [this] { workspace_file_search.stop(); stop_search(); }}, {"语言服务线程", [this] { if (lsp_worker) lsp_worker->stop(); }},
             {"语言服务子进程", [this] { stop_lsp_now(); }}, {"构建/运行进程", [this] { stop_run(); }}, {"调试适配器", [this] { stop_dap(); }},
-            {"目录监听", [this] { stop_watcher(); }}, {"git 工作线程", [this] { stop_git(); }}, {"终端", [this] { terminals->kill_all(); }},
+            {"目录监听", [this] { stop_watcher(); }}, {"git 工作线程", [this] { git_host->stop_git(); }}, {"MCP 工作线程", [this] { stop_agent_mcp(); }}, {"终端", [this] { terminals->kill_all(); }},
             {"Gradle 同步", [this] { if (gradle_sync) gradle_sync->cancel(); }},  // Gradle 也是子进程：实测 1m15s 的同步是**关窗之后**才写完 daemon 日志的，之前没有一步管它
         };
         for (const auto& step : steps) taocode::diagnostics::run_step(profile, step.first, step.second);
+        taocode::diagnostics::run_step(profile, "内置浏览器", [this] { embedded_browser_profile.close(); });
     }
     // 文件在工作区里被创建/改名/删除之后告诉语言服务器。对应 IDEA 的 VFS 事件 +
     // `RefactoringEventListener`：IDE 自己动了磁盘，服务器的索引必须跟上，否则改完名
@@ -674,6 +810,8 @@ struct App : taocode::dap::RouteHost {
     // 文件夹选择器与图片读取在 native/dialogs.cpp（拆出去后 main.cpp 回到机检上限内）。
 
     Json open_project(const fs::path& path) {
+        stop_agent_model();
+        workspace_file_search.stop();
         const auto settings = projects->project_settings(utf8(path.native()));
         auto candidate = std::make_unique<taocode::Workspace>();
         auto result = candidate->open(path, settings.at("excludedDirs").get<std::vector<std::string>>());
@@ -825,10 +963,39 @@ struct App : taocode::dap::RouteHost {
             const auto method = request.at("method").get<std::string>();
             const auto& params = request.at("params");
             if (!params.is_object()) throw taocode::WorkspaceError("INVALID_REQUEST", "参数必须为 JSON 对象");
+            Json result;
+            if (!on_worker && method == "browser.data.clear") {
+                const auto mode = params.at("mode").get<std::string>();
+                if (mode != "cache" && mode != "all")
+                    throw taocode::WorkspaceError("INVALID_REQUEST", "未知的浏览器数据清理模式。");
+                const HWND reply_window = window;
+                const Json request_id = request["id"];
+                embedded_browser_profile.clear_data(mode.c_str(), [reply_window, request_id, start](bool success) {
+                    if (!IsWindow(reply_window)) return;
+                    auto* target = reinterpret_cast<App*>(GetWindowLongPtrW(reply_window, GWLP_USERDATA));
+                    if (!target) return;
+                    target->post_json({{"id", request_id}, {"ok", true}, {"result", {{"success", success}}},
+                                       {"durationMs", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count()}});
+                });
+                return;
+            }
+            if (!on_worker && method == "agent.model.stream") { start_agent_model(request); return; }
+            if (!on_worker && method == "agent.model.cancel") {
+                result = {{"stopped", stop_agent_model(params.value("streamId", std::uint64_t{0}), false)}};
+                reply["ok"] = true;
+                reply["result"] = std::move(result);
+                reply["durationMs"] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+                post_json(reply);
+                return;
+            }
+            if (!on_worker && method.rfind("agent.mcp.", 0) == 0) {
+                queue_agent_mcp_request(request);
+                return;
+            }
             // git.* goes to the worker. One request at a time, in order: git itself
             // takes a lock on .git, so running two at once would only fight over it.
             if (!on_worker && method.rfind("git.", 0) == 0 && is_git_method(method)) {
-                queue_git_request(request);
+                git_host->queue_git_request(request);
                 return;  // answered by drain_git once the worker is done
             }
             // 带上 kind：`lsp.request` 的三十来个 kind 共用一条分派表，只记方法名分不出卡在哪一步。
@@ -837,9 +1004,8 @@ struct App : taocode::dap::RouteHost {
                 traced = method + (kind.empty() ? "" : ":" + kind);
                 taocode::trace::begin(profile, traced);
             }
-            if (clone_active && (method == "workspace.open" || method == "workspace.close" || method == "project.create" || method == "project.clone" || method == "project.settings.update" || method == "file.create" || method == "file.rename" || method == "file.delete"))
+            if (clone_active && (method == "workspace.open" || method == "workspace.close" || method == "project.create" || method == "project.clone" || method == "project.settings.update" || method == "file.create" || method == "file.writeNew" || method == "file.rename" || method == "file.delete"))
                 throw taocode::WorkspaceError("BUSY", "请先等待克隆完成或取消克隆。");
-            Json result;
             // `dap.*` 一族（含 loadedSources/modules 的按需重取、反向调试、内存/反汇编）在
             // native/dap_routes.cpp —— main.cpp 贴着 2000 行硬上限，新能力一律抽模块
             // （与 native/file_queries.cpp 同一种拆法；异步答复已由宿主回调送出，这里直接 return）。
@@ -854,6 +1020,7 @@ struct App : taocode::dap::RouteHost {
                 result = projects->state();
                 result["gitAvailable"] = !taocode::find_git_executable().empty();
                 result["defaultParent"] = default_parent;
+                result["systemDateTimeFormats"] = taocode::system_date_time_formats();
                 break;
             }
             case "workspace.open"_h: {
@@ -864,10 +1031,12 @@ struct App : taocode::dap::RouteHost {
                 break;
             }
             case "workspace.close"_h: {
+                stop_agent_model();
+                workspace_file_search.stop();
                 projects->closed();
                 stop_run();      // a build must not outlive its project
                 stop_search();
-                stop_git();
+                git_host->stop_git();
                 // Breakpoints belong to a project: leaving them behind would make the
                 // next debug session stop in files that are no longer open.
                 if (dap) dap->clear_breakpoints();
@@ -905,7 +1074,13 @@ struct App : taocode::dap::RouteHost {
             }
             case "settings.general.update"_h: {
                 // GeneralSettings (ide.general.xml): the System Settings page's backing state.
-                result = projects->update_general(params.at("general"));
+                const auto& patch = params.at("general");
+                taocode::validate_general_patch(patch);
+                if (patch.contains("embeddedBrowserAllowInsecureCertificates") &&
+                    !embedded_browser_profile.set_allow_insecure_certificates(
+                        patch.at("embeddedBrowserAllowInsecureCertificates").get<bool>()))
+                    throw taocode::WorkspaceError("BROWSER_PROFILE_NOT_READY", "内置浏览器尚未就绪。");
+                result = projects->update_general(patch);
                 break;
             }
             case "settings.update"_h: {
@@ -980,6 +1155,11 @@ struct App : taocode::dap::RouteHost {
                         queue_watch({{"event", "history.note"}, {"path", path}, {"message", std::string(error.what())}});
                     }
                 }
+                break;
+            }
+            case "file.writeNew"_h: {
+                result = workspace->write_new(params.at("path").get<std::string>(),
+                                              params.at("content").get<std::string>());
                 break;
             }
             case "file.create"_h: {
@@ -1121,176 +1301,62 @@ struct App : taocode::dap::RouteHost {
             case "run.stop"_h: result = runs->stop(params.value("instance", 0)); break;
             // IDEA 的 Run 工具窗口按"正在运行的实例"开标签，所以这条清单是它的输入。
             case "run.instances"_h: result = runs->instances(); break;
-            case "git.status"_h: {
-                if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-                const auto repository = fs::path(wide(current_root));
-                if (!taocode::git::available()) { result = {{"available", false}}; }
-                else {
-                    Json changes = Json::array();
-                    for (const auto& change : taocode::git::status(repository, params.value("ignored", false)))
-                        changes.push_back({{"path", change.path}, {"indexStatus", change.index_status}, {"workStatus", change.work_status},
-                                           {"staged", change.staged}, {"untracked", change.untracked},
-                                           {"ignored", change.ignored}, {"renameFrom", change.rename_from}});
-                    result = {{"available", true}, {"head", taocode::git::head(repository)},
-                              {"branches", taocode::git::branches(repository)}, {"changes", std::move(changes)}};
-                        }
-                break;
-            }
-            case "git.diff"_h: {
-                if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-                // context = diff 的上下文行数（前端从 generalSettings.diffContextLines 传入；0 = git 默认）。
-                result = {{"diff", taocode::git::diff(fs::path(wide(current_root)), params.at("path").get<std::string>(),
-                                                      params.value("staged", false), params.value("base", std::string()),
-                                                      params.value("context", 0), params.value("whole", false))}};
-                break;
-            }
-            case "git.patch"_h: {
-                // 本地更改的补丁（IDEA `CreatePatchFromChangesAction` 的输入）：`git diff HEAD`
-                // （暂存 + 未暂存）＋ 未跟踪文件按"新文件"接在后面。前端 `src/patchExport.ts` 用它。
-                if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-                result = {{"patch", taocode::git::patch(fs::path(wide(current_root)), params.value("includeUntracked", true))}};
-                break;
-            }
-            case "git.diffSides"_h: case "git.compare"_h: {
-                if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-                const auto repository = fs::path(wide(current_root));
-                if (method == "git.compare") result = taocode::git::compare(repository, params.at("base").get<std::string>());
-                else result = taocode::git::diff_sides(repository, params.at("path").get<std::string>(),
-                                                       params.value("staged", false), params.value("base", std::string()), params.value("context", 0));
-                break;
-            }
-            case "git.stage"_h: case "git.unstage"_h: {
-                const auto repository = fs::path(wide(require_repo_root()));
-                const auto path = params.at("path").get<std::string>();
-                if (method == "git.stage") taocode::git::stage(repository, path); else taocode::git::unstage(repository, path);
-                result = {{"ok", true}};
-                break;
-            }
-            case "git.commit"_h: {
-                // 「提交文件…」（CommonCheckinFilesAction.kt:37-53 → CheckinActionUtil.kt:104-106、:135-136）：
-                // 非空 = 只有这些路径进这次提交（git commit --only -- <paths>）；缺这个键就是整份暂存区。
-                taocode::git::commit(fs::path(wide(require_repo_root())), params.value("message", std::string()),
-                                     params.value("amend", false), params.value("signoff", false),
-                                     params.value("author", std::string()), params.value("authorEmail", std::string()),
-                                     params.value("paths", std::vector<std::string>()));
-                result = {{"ok", true}};
-                break;
-            }
-            case "git.checkout"_h: {
-                taocode::git::checkout(fs::path(wide(require_repo_root())), params.at("branch").get<std::string>());
-                result = {{"ok", true}};
-                break;
-            }
-            case "git.log"_h: {
-                result = taocode::git::log(fs::path(wide(require_repo_root())), params.value("path", std::string()), params.value("limit", 100));
-                break;
-            }
+            // `git.*` 一族的**实现体**（连同那条工作线程）在 native/git_routes.cpp：main.cpp 贴着
+            // tests/module-size.test.mjs 的 2000 行上限，而这一族是它里面最大的一段。`case` 标签留在
+            // 原处一个都没动 —— 那是 tests/routing-parity.test.mjs 数方法名的机检锚点，所以那边按
+            // "一个方法名一个同名函数"拆，不另开第二张分派表（方法名清单只此一份）。
+            // 还没打开项目时 `require_repo_root()` 先抛 NOT_OPEN，那个检查仍留在分派这一层。
+            case "git.status"_h: { result = taocode::git_routes::status(require_repo_root(), params); break; }
+            case "git.diff"_h: { result = taocode::git_routes::diff(require_repo_root(), params); break; }
+            case "git.patch"_h: { result = taocode::git_routes::patch(require_repo_root(), params); break; }
+            case "git.diffSides"_h: case "git.compare"_h: { result = taocode::git_routes::diff_sides(require_repo_root(), method, params); break; }
+            case "git.stage"_h: case "git.unstage"_h: { result = taocode::git_routes::stage(require_repo_root(), method, params); break; }
+            case "git.commit"_h: { result = taocode::git_routes::commit(require_repo_root(), params); break; }
+            case "git.checkout"_h: { result = taocode::git_routes::checkout(require_repo_root(), params); break; }
+            case "git.log"_h: { result = taocode::git_routes::log(require_repo_root(), params); break; }
             case "git.commitFileDiff"_h:
-            case "git.logFull"_h: case "git.commitDetails"_h: case "git.commitChanges"_h: {
-                result = taocode::git::log_request(fs::path(wide(require_repo_root())), method, params);
-                break;
-            }
-            case "git.pull"_h: { taocode::git::pull(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; } break;
-            case "git.fetch"_h: { taocode::git::fetch(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; } break;
-            case "git.push"_h: { taocode::git::push(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; } break;
-            case "git.rebase"_h: { taocode::git::rebase(fs::path(wide(require_repo_root())), params.value("branch", std::string())); result = {{"ok", true}}; } break;
-            case "git.cherryPick"_h: { taocode::git::cherry_pick(fs::path(wide(require_repo_root())), params.at("commit").get<std::string>()); result = {{"ok", true}}; } break;
-            case "git.stash"_h: {
-                result = taocode::git::stash_list(fs::path(wide(require_repo_root())));
-                break;
-            }
-            case "git.stash.save"_h: { taocode::git::stash_save(fs::path(wide(require_repo_root())), params.value("message", std::string())); result = {{"ok", true}}; } break;
-            case "git.stash.pop"_h: { taocode::git::stash_pop(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; } break;
-            case "git.branch.create"_h: { taocode::git::create_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("checkout", false)); result = {{"ok", true}}; } break;
-            case "git.branch.delete"_h: { taocode::git::delete_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; } break;
-            case "git.revert"_h: { taocode::git::revert(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; } break;
-            case "git.revertCommit"_h: { taocode::git::revert_commit(fs::path(wide(require_repo_root())), params.at("commit").get<std::string>()); result = {{"ok", true}}; } break;
-            case "git.reset"_h: {
-                result = taocode::git::reset(fs::path(wide(require_repo_root())), params.at("target").get<std::string>(), params.value("mode", std::string("mixed")));
-                break;
-            }
-            case "git.merge"_h: { taocode::git::merge(fs::path(wide(require_repo_root())), params.at("branch").get<std::string>()); result = {{"ok", true}}; } break;
-            case "git.tags"_h: {
-                result = taocode::git::tag_list(fs::path(wide(require_repo_root())));
-                break;
-            }
-            case "git.tag.create"_h: { taocode::git::tag_create(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("target", std::string())); result = {{"ok", true}}; } break;
-            case "git.tag.delete"_h: { taocode::git::tag_delete(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; } break;
-            case "git.ignore"_h: { taocode::git::ignore_path(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; } break;
+            case "git.logFull"_h: case "git.commitDetails"_h: case "git.commitChanges"_h: { result = taocode::git_routes::log_request(require_repo_root(), method, params); break; }
+            case "git.pull"_h: { result = taocode::git_routes::pull(require_repo_root()); } break;
+            case "git.fetch"_h: { result = taocode::git_routes::fetch(require_repo_root()); } break;
+            case "git.push"_h: { result = taocode::git_routes::push(require_repo_root()); } break;
+            case "git.rebase"_h: { result = taocode::git_routes::rebase(require_repo_root(), params); } break;
+            case "git.cherryPick"_h: { result = taocode::git_routes::cherry_pick(require_repo_root(), params); } break;
+            case "git.stash"_h: { result = taocode::git_routes::stash(require_repo_root()); break; }
+            case "git.stash.save"_h: { result = taocode::git_routes::stash_save(require_repo_root(), params); } break;
+            // 空 `ref` = 栈顶（原行为）；带 `stash@{n}` = 按序号取回某一条（搁架面板任意一行）。
+            case "git.stash.pop"_h: { result = taocode::git_routes::stash_pop(require_repo_root(), params); } break;
+            case "git.branch.create"_h: { result = taocode::git_routes::create_branch(require_repo_root(), params); } break;
+            case "git.branch.delete"_h: { result = taocode::git_routes::delete_branch(require_repo_root(), params); } break;
+            case "git.revert"_h: { result = taocode::git_routes::revert(require_repo_root(), params); } break;
+            case "git.revertCommit"_h: { result = taocode::git_routes::revert_commit(require_repo_root(), params); } break;
+            case "git.reset"_h: { result = taocode::git_routes::reset(require_repo_root(), params); break; }
+            case "git.merge"_h: { result = taocode::git_routes::merge(require_repo_root(), params); } break;
+            case "git.tags"_h: { result = taocode::git_routes::tags(require_repo_root()); break; }
+            case "git.tag.create"_h: { result = taocode::git_routes::tag_create(require_repo_root(), params); } break;
+            case "git.tag.delete"_h: { result = taocode::git_routes::tag_delete(require_repo_root(), params); } break;
+            case "git.ignore"_h: { result = taocode::git_routes::ignore(require_repo_root(), params); } break;
             // IDEA's CommitAuthorComponent reads the repository's configured author; the
             // same values are handed back to `git.commit` when the user overrides them.
-            case "git.user"_h: {
-                result = taocode::git::user(fs::path(wide(require_repo_root())));
-                break;
-            }
+            case "git.user"_h: { result = taocode::git_routes::user(require_repo_root()); break; }
             // ...and the *authors* completion list comes from the log users (GitCommitOptionsUi.kt:259).
-            case "git.authors"_h: {
-                result = taocode::git::authors(fs::path(wide(require_repo_root())));
-                break;
-            }
-            case "git.diffHunks"_h: {
-                result = taocode::git::diff_hunks(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(), params.value("staged", false));
-                break;
-            }
-            case "git.applyHunks"_h: {
-                taocode::git::apply_hunks(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(),
-                                          params.value("staged", false), params.at("hunks").get<std::vector<int>>(), params.value("reverse", false));
-                result = {{"ok", true}};
-                break;
-            }
-            case "git.aheadBehind"_h: {
-                result = taocode::git::ahead_behind(fs::path(wide(require_repo_root())));
-                break;
-            }
-            case "git.blame"_h: {
-                result = taocode::git::blame(fs::path(wide(require_repo_root())), params.at("path").get<std::string>());
-                break;
-            }
-            case "git.fileHistory"_h: {
-                result = taocode::git::file_history(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(), params.value("limit", 100));
-                break;
-            }
-            case "git.showCommit"_h: {
-                result = taocode::git::show_commit(fs::path(wide(require_repo_root())), params.at("revision").get<std::string>());
-                break;
-            }
-            case "git.worktree.list"_h: {
-                result = taocode::git::worktree_list(fs::path(wide(require_repo_root())));
-                break;
-            }
-            case "git.worktree.add"_h: {
-                const auto repository = fs::path(wide(require_repo_root()));
-                taocode::git::worktree_add(repository, params.at("path").get<std::string>(),
-                                           params.value("branch", std::string()), params.value("newBranch", false));
-                // Return the refreshed list so the UI cannot show a stale tree after a
-                // mutation it just performed.
-                result = taocode::git::worktree_list(repository);
-                break;
-            }
-            case "git.worktree.remove"_h: {
-                const auto repository = fs::path(wide(require_repo_root()));
-                taocode::git::worktree_remove(repository, params.at("path").get<std::string>(), params.value("force", false));
-                result = taocode::git::worktree_list(repository);
-                break;
-            }
-            case "git.submodules"_h: {
-                result = taocode::git::submodule_status(fs::path(wide(require_repo_root())));
-                break;
-            }
-            case "git.submodule.update"_h: {
-                const auto repository = fs::path(wide(require_repo_root()));
-                taocode::git::submodule_update(repository, params.value("init", true), params.value("recursive", false));
-                result = taocode::git::submodule_status(repository);
-                break;
-            }
+            case "git.authors"_h: { result = taocode::git_routes::authors(require_repo_root()); break; }
+            case "git.diffHunks"_h: { result = taocode::git_routes::diff_hunks(require_repo_root(), params); break; }
+            case "git.applyHunks"_h: { result = taocode::git_routes::apply_hunks(require_repo_root(), params); break; }
+            case "git.aheadBehind"_h: { result = taocode::git_routes::ahead_behind(require_repo_root()); break; }
+            case "git.blame"_h: { result = taocode::git_routes::blame(require_repo_root(), params); break; }
+            case "git.fileHistory"_h: { result = taocode::git_routes::file_history(require_repo_root(), params); break; }
+            case "git.showCommit"_h: { result = taocode::git_routes::show_commit(require_repo_root(), params); break; }
+            case "git.worktree.list"_h: { result = taocode::git_routes::worktree_list(require_repo_root()); break; }
+            case "git.worktree.add"_h: { result = taocode::git_routes::worktree_add(require_repo_root(), params); break; }
+            case "git.worktree.remove"_h: { result = taocode::git_routes::worktree_remove(require_repo_root(), params); break; }
+            case "git.submodules"_h: { result = taocode::git_routes::submodules(require_repo_root()); break; }
+            case "git.submodule.update"_h: { result = taocode::git_routes::submodule_update(require_repo_root(), params); break; }
             // Cancels the git command running on the worker right now. IDEAs
             // background-task rows carry a cancel button; git commands are the tasks
             // TaoCode runs in the background, so this is that button's backend.
-            case "git.cancel"_h: {
-                taocode::git::request_cancel();
-                result = {{"ok", true}};
-                break;
-            }
+            case "git.cancel"_h: { result = taocode::git_routes::cancel(); break; }
+            case "workspace.searchFiles"_h: { workspace_file_search.start(*workspace, request.at("id"), [this](Json reply) { queue_search(std::move(reply)); }); return; }
+            case "workspace.searchFiles.cancel"_h: { result = {{"requested", workspace_file_search.cancel()}}; break; }
             case "search.cancel"_h: { search_cancel.store(true); result = {{"ok", true}}; } break;
             // Find in Files walks up to 100k files, which is far too long to hold the
             // UI thread: it runs on its own thread and answers through the message
@@ -1469,10 +1535,20 @@ struct App : taocode::dap::RouteHost {
             // 文件 › 导出/导入设置（`ExportImportGroup`：ExportSettingsAction / ImportSettingsAction / 恢复默认）。
             // 归档是 native/settings_transfer.cpp 打的（一个 zip + 一份 JSON），校验在写盘**之前**做。
             case "app.exportSettings"_h: result = projects->export_settings(fs::path(wide(params.value("path", std::string())))); break;
-            case "app.importSettings"_h: result = projects->import_settings(fs::path(wide(params.value("path", std::string())))); break;
+            case "app.importSettings"_h: {
+                result = projects->import_settings(fs::path(wide(params.value("path", std::string()))));
+                const auto imported_general = result.value("general", Json::object());
+                embedded_browser_profile.set_allow_insecure_certificates(
+                    imported_general.value("embeddedBrowserAllowInsecureCertificates", false));
+                break;
+            }
             // 只读摘要（不写盘）：UI 要先把这个包里的内容说清楚，用户确认之后才导入。
             case "app.readSettingsArchive"_h: result = taocode::settings_transfer::read_archive_summary(fs::path(wide(params.value("path", std::string())))); break;
-            case "app.resetSettings"_h: result = projects->reset_settings(); break;
+            case "app.resetSettings"_h: {
+                result = projects->reset_settings();
+                embedded_browser_profile.set_allow_insecure_certificates(false);
+                break;
+            }
             // 通用文件对话框（IDEA `FileChooser`）：导入设置要用"打开文件"，导出要用"保存文件"。
             case "dialog.pickFile"_h: result = taocode::dialogs::pick_file(window, L"选择文件", params.value("filters", std::string()), params.value("initial", std::string())); break;
             case "dialog.saveFile"_h: result = taocode::dialogs::save_file(window, L"保存文件", params.value("filters", std::string()), params.value("name", std::string())); break;
@@ -1501,6 +1577,35 @@ struct App : taocode::dap::RouteHost {
             // `native/window_state.cpp`（宿主能力），这里一行转发就够。
             case "app.setFullScreen"_h: result = taocode::set_full_screen(params.value("fullScreen", true)); break;
             case "app.fullScreen"_h: result = taocode::full_screen_state(); break;
+            // HTTP GET 通道（`native/http_client.cpp`，WinHTTP）—— 前端 `index.html` 的 CSP 是
+            // `connect-src 'self' ws://127.0.0.1:5173`，WebView 里 `fetch("https://…")` 被直接拦掉，
+            // 所以「打开 http(s) 只读文件」「取远程插件清单」这类取数只能由宿主代做。
+            // 这里一行转发；协议白名单/大小上限/超时/参数校验都在 http_get 内部（抛 WorkspaceError）。
+            case "http.get"_h: {
+                taocode::HttpRequest request_params;
+                request_params.url = params.at("url").get<std::string>();
+                request_params.limit = params.value("limit", std::size_t{0});
+                request_params.timeout_ms = params.value("timeoutMs", std::size_t{0});
+                result = taocode::http_get(request_params);
+                break;
+            }
+            case "http.post"_h: {
+                taocode::HttpRequest request_params;
+                request_params.url = params.at("url").get<std::string>();
+                request_params.body = params.at("body").get<std::string>();
+                request_params.limit = params.value("limit", std::size_t{0});
+                request_params.timeout_ms = params.value("timeoutMs", std::size_t{0});
+                const auto& headers = params.at("headers");
+                if (!headers.is_object())
+                    throw taocode::WorkspaceError("INVALID_REQUEST", "HTTP 请求头必须是对象。");
+                for (auto it = headers.begin(); it != headers.end(); ++it) {
+                    if (!it.value().is_string())
+                        throw taocode::WorkspaceError("INVALID_REQUEST", "HTTP 请求头的值必须是字符串。");
+                    request_params.headers.emplace(it.key(), it.value().get<std::string>());
+                }
+                result = taocode::http_post(request_params);
+                break;
+            }
             default:
                 throw taocode::WorkspaceError("UNKNOWN_METHOD", "该原生方法未开放");
             }
@@ -1515,7 +1620,11 @@ struct App : taocode::dap::RouteHost {
         }
         reply["durationMs"] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         if (!traced.empty()) taocode::trace::end(profile, traced, reply["durationMs"].get<double>());
-        if (on_worker) queue_git_reply(std::move(reply));
+        if (on_worker) {
+            const auto method = request.value("method", std::string());
+            if (method.rfind("agent.mcp.", 0) == 0) queue_agent_mcp_reply(std::move(reply));
+            else git_host->queue_git_reply(std::move(reply));
+        }
         else post_json(reply);
     }
 
@@ -1537,87 +1646,6 @@ struct App : taocode::dap::RouteHost {
             "git.worktree.list", "git.worktree.add", "git.worktree.remove",
             "git.submodules", "git.submodule.update"};
         return methods.count(method) != 0;
-    }
-
-    void queue_git_reply(Json payload) { git_replies.push(std::move(payload), window, git_event_message, 0); }
-
-    void drain_git() {
-        if (!webview) return;
-        for (const auto& reply : git_replies.take()) post_json(reply);
-        // The queue emptied out: tell the UI there is no git work in flight, so the
-        // status-bar indicator settles even when the last reply was an error.
-        std::size_t queued = 0;
-        bool busy = false;
-        {
-            std::lock_guard lock(git_mutex);
-            queued = git_requests.size();
-            busy = git_busy.load();
-        }
-        if (!queued && !busy) post_json(Json{{"event", "git.progress"}, {"queued", 0}, {"running", false}});
-    }
-
-    void queue_git_request(const Json& request) {
-        bool inherited = false;
-        {
-            std::lock_guard lock(git_mutex);
-            git_requests.push_back(request);
-            if (git_busy.load()) inherited = true;  // the running worker will pick this up
-            else git_busy.store(true);
-        }
-        // Never under the lock: publish_git_progress() takes the same mutex.
-        publish_git_progress();
-        if (inherited) return;
-        if (git_thread.joinable()) git_thread.join();
-        git_thread = std::thread([this] { git_worker(); });
-    }
-
-    // IDEA's status bar shows the queue behind the running git command: "正在获取
-    // 变更…（还有 2 个操作）". The counts are real (deque sizes under the lock), so
-    // the indicator can never claim work that is not there.
-    void publish_git_progress() {
-        std::size_t queued = 0;
-        bool busy = false;
-        {
-            std::lock_guard lock(git_mutex);
-            queued = git_requests.size();
-            busy = git_busy.load();
-        }
-        Json event{{"event", "git.progress"}, {"queued", queued}, {"running", busy}};
-        queue_git_reply(std::move(event));
-    }
-
-    // Progress events ride the same WM_APP+8 marshalling as the git replies（就是同一条队列，
-    // 前端按有没有 `id` 分辨回复与事件），所以这里直接复用 queue_git_reply。
-
-    void git_worker() {
-        for (;;) {
-            Json request;
-            {
-                std::lock_guard lock(git_mutex);
-                if (git_requests.empty()) { git_busy.store(false); break; }
-                request = std::move(git_requests.front());
-                git_requests.pop_front();
-            }
-            run_request(request, true);
-        }
-        // Outside the lock, like every other publish.
-        publish_git_progress();
-    }
-
-    // Closing the project or the window drops queued work and waits for the one
-    // command already running. git.cpp bounds every child with a timeout, so this
-    // cannot hang on a hung remote — and a half-finished push must not keep running
-    // against a workspace the UI has already let go of.
-    void stop_git() {
-        {
-            std::lock_guard lock(git_mutex);
-            git_requests.clear();
-        }
-        taocode::git::request_cancel();
-        if (git_thread.joinable()) git_thread.join();
-        git_busy.store(false);
-        git_replies.take();  // 丢掉还没发出去的回复（窗口/项目已经放开了）
-        if (webview) post_json(Json{{"event", "git.progress"}, {"queued", 0}, {"running", false}});
     }
 
     void configure() {
@@ -1762,8 +1790,14 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
             app->drain_search();
             break;
         case git_event_message:
-            app->drain_git();
+            app->git_host->drain_git();
             break;
+        case agent_model_event_message:
+            app->drain_agent_model();
+            return 0;
+        case agent_mcp_event_message:
+            app->drain_agent_mcp();
+            return 0;
         case watch_restart_message:
             app->handle_watch_stopped();
             break;
@@ -1824,7 +1858,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             window_class.lpfnWndProc = window_proc;
             window_class.hInstance = instance;
             window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-            window_class.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+            // 窗口类图标必须取**自己 PE 里的那份**（native/app-icon.rc 的 IDI_TAOCODE），
+            // 不能用系统默认 IDI_APPLICATION —— 否则标题栏/任务栏显示的是通用 Windows 图标，
+            // 与资源管理器里 exe 的图标（同一份资源）对不上。第一参 hInstance 而非 nullptr：
+            // LoadIconW(nullptr, …) 只认系统 IDI_* 号段。hIconSm 也显式给上：不设的话 Windows
+            // 把大图标缩到 16 格，小档（16px）那档是生成器独立重采样的，缩放大图会糊。
+            window_class.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
+            window_class.hIconSm = LoadIconW(instance, MAKEINTRESOURCEW(1));
             window_class.lpszClassName = L"TaoCodeWindow";
             check(RegisterClassExW(&window_class) ? S_OK : HRESULT_FROM_WIN32(GetLastError()), "Register window");
             const auto window = CreateWindowExW(0, window_class.lpszClassName, L"欢迎使用 TaoCode", WS_OVERLAPPEDWINDOW,
@@ -1832,6 +1872,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             if (!window) throw std::runtime_error("无法创建 TaoCode 窗口");
             // 把窗口交给窗口态模块（全屏要用）—— 见 native/window_state.hpp。
             taocode::register_window(window);
+            const auto initial_state = app.projects->state();
+            const auto general = initial_state.value("general", Json::object());
+            app.embedded_browser_profile.start(
+                window, app.profile.parent_path() / L"TaoCode-embedded-browser",
+                general.value("embeddedBrowserAllowInsecureCertificates", false));
             ShowWindow(window, show);
             app.start();
             MSG message{};

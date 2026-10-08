@@ -33,6 +33,23 @@ import {
 // tags → 检查项身份的**唯一一份**判定（`LspDiagnosticsCustomizer.kt:93-96` 的等价物）：
 // 问题视图/配置面走同一个函数，见 src/inspectionIdentity.ts。
 import { KIND_INSPECTIONS, problemKindOf, type ProblemKind } from './inspectionIdentity.ts'
+// 三条 daemon 分析侧 EP 的消费面（`com.intellij.implicitUsageProvider` /
+// `com.intellij.contributedReferencesAnnotator` / `com.intellij.daemon.externalAnnotatorsFilter`）：
+// 显式 `.ts` 后缀 —— 这些是运行时导入，Node 直跑 .ts 时不做扩展名推断。
+import {
+  contributedReferenceAnnotations, isImplicitUsage, registerContributedReferencesAnnotator,
+  registerExternalAnnotatorsFilter, registerImplicitUsageProvider,
+} from './daemonAnalysisExtensionPoints.ts'
+// 「诊断指向的位置」→ `ImplicitUsageElement`（本仓没有 PSI 的替代形状）。
+import { implicitUsageElementOf } from './implicitUsageElement.ts'
+// JUnit 5 隐式使用判定的词法子集（上游 `JUnit5ImplicitUsageProvider.kt`）。
+import { junit5ImplicitUsageProvider } from './junitImplicitUsage.ts'
+// 注释里的文件路径链接（上游 `ContributedReferencesAnnotator` 那一族的 bundled 贡献）。
+import { commentFilePathLinks } from './commentFileLinks.ts'
+// 三条内建外部注解器过滤器各自判定的**单一来源**（判定不在这里重写）。
+import { LARGE_FILE_LIMIT } from './largeFileMode.ts'
+import { isAnalysisIgnored } from './analysisIgnore.ts'
+import { isFileTypeOverridden } from './fileTypeOverrides.ts'
 import type { LspDiagnostic } from './bridge'
 
 /**
@@ -94,6 +111,17 @@ export const unusedDeclarationAnnotator: Annotator = {
       if (!kind) continue
       // 增量拍只收落在脏行里的（`GeneralHighlightingPass` 的 myUpdateAll=false 那条路）。
       if (lines && !lines.some(range => range.start <= diagnostic.line && diagnostic.line <= range.end)) continue
+      // 隐式使用（`com.intellij.implicitUsageProvider` EP）：任一 provider 说这个符号是隐式使用的，
+      // 这条「未使用声明」就不报。上游口径逐字见 `RefUtil.isImplicitUsage`（`RefUtil.java:26`，
+      // 逐个 provider 问、任一为真即为真）；上游的抑制点在同族的 `HighlightInfoType.UNUSED_SYMBOL`
+      // 那一档，本仓落在这里（唯一产出 `kind: 'unusedSymbol'` 的地方）。
+      if (kind === 'unusedSymbol' && isImplicitUsage(implicitUsageElementOf({
+        path: input.path,
+        language: input.language ?? '',
+        text: input.text,
+        line: diagnostic.line,
+        column: Math.max(0, diagnostic.character),
+      }))) continue
       const start = offsetOfLine(input.text, diagnostic.line) + Math.max(0, diagnostic.character)
       const end = diagnostic.endLine !== undefined && diagnostic.endCharacter !== undefined
         ? offsetOfLine(input.text, diagnostic.endLine) + Math.max(0, diagnostic.endCharacter)
@@ -152,12 +180,31 @@ export const webLinkAnnotator: Annotator = {
     const strings = stringRanges(input.text)
     for (const comment of comments) {
       const body = input.text.slice(comment.from, comment.to)
+      const references: { from: number; to: number; target: string }[] = []
       for (const hit of webUrlsIn(body)) {
         const from = comment.from + hit.from
         const to = comment.from + hit.to
         // 字符串字面量（注释里也可能有引号片段）里出现的不是链接。
         if (strings.some(range => range.from < to && range.to > from)) continue
+        references.push({ from, to, target: hit.url })
         out.push({ from, to, severity: 'information', kind: 'hyperlink', target: hit.url, description: OPEN_URL_TOOLTIP })
+      }
+      // 贡献引用注解器（`com.intellij.contributedReferencesAnnotator` EP）：上游
+      // `HyperlinkAnnotator.annotateContributedReferences`（`:76-86`）在平台自己那条链接画完之后，
+      // 按文件语言取贡献者 `annotate(element, references, holder)`。宿主元素 = 这段注释（带引用的
+      // 宿主在本仓就是注释），`references` = 上面刚找到的那批网页链接（上游也是「平台先画、贡献者补漏」）。
+      for (const contributed of contributedReferenceAnnotations({
+        path: input.path, text: input.text, from: comment.from, to: comment.to,
+        language: input.language ?? '',
+      }, references)) {
+        out.push({
+          from: contributed.from,
+          to: contributed.to,
+          kind: 'hyperlink',
+          severity: contributed.severity ?? 'information',
+          ...(contributed.target === undefined ? {} : { target: contributed.target }),
+          ...(contributed.description === undefined ? {} : { description: contributed.description }),
+        })
       }
     }
     return out
@@ -180,6 +227,42 @@ export function webUrlsIn(body: string): { from: number; to: number; url: string
 export const annotatorRegistry = new AnnotatorRegistry()
 annotatorRegistry.register(unusedDeclarationAnnotator)
 annotatorRegistry.register(webLinkAnnotator)
+// 收编扩展点宿主（`com.intellij.annotator` EP）里已登记的注解器 —— 含第三方按同一个 id 挂进来的
+// （上游 `LanguageAnnotators` 在启动时把 plugin.xml 的 `<annotator>` 全注册进来）。
+annotatorRegistry.adoptFromExtensions()
+
+// ---------------------------------------------------------------- bundled：把本仓在跑的那几支挂进同名 EP
+//
+// 模块加载即注册（与 `src/problems.ts` 挂 `ProblemHighlightFilter` 同一口径）：消费方按 id 去 EP 里取，
+// 第三方按同一 id 挂自己的贡献就走同一条路。三条内建贡献的**判定函数各自只有一份**，这里只做接线。
+
+/**
+ * 外部注解器过滤器（`com.intellij.daemon.externalAnnotatorsFilter` EP，消费点
+ * `src/annotatorRegistry.ts` 的 `run()`）。上游的出厂过滤器是「大文件不跑外部注解器」
+ * 那一族（`platform/lang-impl` 的 `PsiLargeFileExternalAnnotatorsFilter`）；本仓把它落成
+ * **已经存在**的三条文件级门控，判定函数不在这里重写：
+ *   · 大文件模式（`src/largeFileMode.ts` 的 `LARGE_FILE_LIMIT`，与编辑器那一层同一个阈）；
+ *   · `.analysisignore` / 手动忽略（`src/analysisIgnore.ts` 的 `isAnalysisIgnored`）；
+ *   · 被覆盖成纯文本的文件（`src/fileTypeOverrides.ts` 的 `isFileTypeOverridden`）。
+ */
+registerExternalAnnotatorsFilter({
+  id: 'taocode.largeFile',
+  isProhibited: (_annotator, file) => file.text.length >= LARGE_FILE_LIMIT,
+})
+registerExternalAnnotatorsFilter({
+  id: 'taocode.analysisIgnore',
+  isProhibited: (_annotator, file) => isAnalysisIgnored(file.path),
+})
+registerExternalAnnotatorsFilter({
+  id: 'taocode.fileTypeOverride',
+  isProhibited: (_annotator, file) => isFileTypeOverridden(file.path),
+})
+
+/** 隐式使用提供者（`com.intellij.implicitUsageProvider` EP）：JUnit 5 的词法子集（见 `src/junitImplicitUsage.ts`）。 */
+registerImplicitUsageProvider(junit5ImplicitUsageProvider)
+
+/** 贡献引用注解器（`com.intellij.contributedReferencesAnnotator` EP）：注释里的文件路径链接。 */
+registerContributedReferencesAnnotator(commentFilePathLinks)
 
 export interface AnnotatorHighlightInput {
   path: string

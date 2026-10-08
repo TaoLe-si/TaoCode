@@ -6,7 +6,6 @@ import {
   commitNotificationLevel,
   commitNotificationRows,
   commitNotificationTitle,
-  countCommittedPaths,
 } from '../src/commitNotification.ts'
 
 const outcome = (committed, exceptions = 0, errors = 0) => ({ committed, exceptions, errors })
@@ -54,11 +53,11 @@ test('blank lines are dropped', () => {
   assert.deepEqual(commitNotificationRows('msg', [' ', 'x'], [' ', '']), ['msg', 'x'])
 })
 
-// countChangesIgnoringChangeLists (:128) — HashSet(changes).size
-test('the same path in two change lists is counted once', () => {
-  assert.equal(countCommittedPaths(['a', 'b', 'a']), 2)
-  assert.equal(countCommittedPaths([]), 0)
-})
+// 「同一条路径在两处出现只数一次」= 上游 `CountChangesIgnoringChangeLists`
+// （ShowNotificationCommitResultHandler.kt:128 的 `HashSet(changes).size`）。
+// 2026-10-06 partialcommit 收尾：这把尺子的生产落点不再是本文件（原来那个 `countCommittedPaths()`
+// 数的是路径，一次重命名两朵 pathspec 会被报成"2 个文件已提交"），改走
+// `src/commitScope.ts` 的 `committedChangeCount()` ⇒ 判据搬进 `tests/commit-scope.test.mjs`。
 
 // notifyMinorWarning(COMMIT_CANCELED, "", message("vcs.commit.canceled")) — empty content (:30)
 test('a cancelled commit is a content-free warning', () => {

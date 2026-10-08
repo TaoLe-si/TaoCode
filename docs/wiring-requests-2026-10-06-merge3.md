@@ -88,3 +88,14 @@ export interface ChangesMenuRow {
    本批**没有**擅自加这两个导出（加了就是零生产消费方的死导出，规约 §5 那条不允许我留）。
 2. **`Diff.ApplyNonConflicts` 的 Left / 无后缀 / Right 三变体**（`ApplyNonConflictsAction.kt:18`）要不要一并做：
    本仓只移植了无后缀那条（`src/mergeResolveHost.ts:43-45`）。另两条要先回答"朝哪一侧应用"在标记文本里是什么语义，属新功能。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- 目标 `src/changesMenuActions.ts`（本 lane 可改面）+ `src/components/SourceControl.vue`（VCS lane 独占）+ `src/mergeResolveHost.ts`（本 lane）。因 SourceControl 非本 lane，且请求原文自述「我这边等这条线定了再落」，登记为「需 VCS lane 同批」。
+
+结论：零接线（转 VCS lane）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（转 VCS lane）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

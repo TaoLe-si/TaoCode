@@ -12,19 +12,21 @@
 // TaoCode 只渲染**有真实落点**的三个开关（其余三个在源码里依赖命名书签列表 / 预览标签页 /
 // 书签类型，本仓没有这些概念，登记在 docs/class-parity-todo.md，不造假开关）。
 import { computed, nextTick, ref, watch } from 'vue'
-import { BookMarked, Bookmark, Check, ListTree, Pencil, Plus, Settings2, X } from 'lucide-vue-next'
+import { BookMarked, Bookmark, ListTree, Pencil, Plus, Settings2, X } from 'lucide-vue-next'
 import type { Bookmark as BookmarkEntry } from '../bridge'
 import { bookmarkDescription, bookmarkFontBold, bookmarkRemovable, bookmarkSpeedSearchText, isFileBookmark } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
 // 就地速度搜索（上游书签树的 `SpeedSearchBase`）：匹配规则复用文件树那套（`src/speedSearch.ts`），
 // 搜索框是现成的展示件（`SpeedSearchBar.vue`，宿主自持开关与查询串）。
-import { firstSpeedSearchHit, nextSpeedSearchHit, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
+import { speedSearchElement, speedSearchHitForStep, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
 import SpeedSearchBar from './SpeedSearchBar.vue'
 // 「按类型和名称对书签进行排序」（上游 `SortGroupBookmarksAction`）：文案取中文包。
 import { SORT_GROUP_LABEL } from '../bookmarks'
 import { ArrowDownUp } from 'lucide-vue-next'
 import { addBookmarkToNamedList, confirmDeleteList, listDialog, namedListNames, openCreateListDialog, panelLists, runWithChosenList } from '../bookmarkListActions.ts'
 import { iconSize } from '../uiIcons'
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 
 export interface PanelList { name: string; isDefault: boolean; entries: BookmarkEntry[] }
 const props = defineProps<{ entries: BookmarkEntry[]; activePath: string; settings: BookmarksViewSettings; lists?: PanelList[] }>()
@@ -118,12 +120,17 @@ function selectIndex(index: number) {
   cursor.value = bookmarkKey(target)
   void scrollIntoViewFor(target)
 }
-/** 输入变化后：从当前项继续找下一条命中（空串不移动，照 `firstSpeedSearchHit` 的空串语义）。 */
+/**
+ * 输入变化后：定位命中的那一行。上游打字走 `findElement`（`SpeedSearchBase.java:519-537`）——
+ * **从当前选中行（含它自己）**往后扫、走完再回绕；原来这里写的是"有当前行就先迈一步"
+ * （`nextSpeedSearchHit`），等于把上游的两条分支用错了一条：当前行自己命中时会被跳过。
+ * 空串不移动（`firstSpeedSearchHit`/`speedSearchElement` 的空串语义都是 -1）。
+ */
 function onSearchInput(value: string) {
   search.value = value
   const labels = searchLabels()
   const from = visible.value.findIndex(entry => bookmarkKey(entry) === cursor.value)
-  const hit = from >= 0 ? nextSpeedSearchHit(labels, value, from, 1) : firstSpeedSearchHit(labels, value)
+  const hit = speedSearchElement(labels, value, from)
   if (hit >= 0) selectIndex(hit)
 }
 function onSearchKeydown(event: KeyboardEvent) {
@@ -133,9 +140,7 @@ function onSearchKeydown(event: KeyboardEvent) {
     event.preventDefault()
     const labels = searchLabels()
     const from = visible.value.findIndex(entry => bookmarkKey(entry) === cursor.value)
-    const index = step.kind === 'first' ? firstSpeedSearchHit(labels, search.value)
-      : step.kind === 'last' ? nextSpeedSearchHit(labels, search.value, 0, -1)
-        : nextSpeedSearchHit(labels, search.value, from, step.kind === 'next' ? 1 : -1)
+    const index = speedSearchHitForStep(labels, search.value, from, step.kind)
     if (index >= 0) selectIndex(index)
     return
   }
@@ -194,20 +199,20 @@ function onKeydown(event: KeyboardEvent) {
       <button class="icon-button" :aria-expanded="gearOpen" aria-haspopup="menu" title="视图选项" aria-label="书签视图选项" @click.stop="gearOpen = !gearOpen"><Settings2 :size="iconSize.control" /></button>
       <div v-if="gearOpen" class="bookmark-gear" role="menu" aria-label="书签视图选项">
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.groupLineBookmarks" @click="toggle({ groupLineBookmarks: !settings.groupLineBookmarks })">
-          <span class="gear-check"><ListTree :size="iconSize.menu" /></span><span>按文件分组行书签</span><span v-if="settings.groupLineBookmarks" class="gear-on"><Check :size="iconSize.dense" /></span>
+          <span class="gear-check"><ListTree aria-hidden="true" :size="iconSize.menu" /></span><span>按文件分组行书签</span><span v-if="settings.groupLineBookmarks" class="gear-on"><IdeaCheckedIcon :size="iconSize.dense" /></span>
         </button>
         <button type="button" role="menuitemcheckbox" :aria-checked="!settings.rewriteBookmarkType" @click="toggle({ rewriteBookmarkType: !settings.rewriteBookmarkType })">
-          <span class="gear-check"><ListTree :size="iconSize.menu" /></span><span>重写助记键之前询问</span><span v-if="!settings.rewriteBookmarkType" class="gear-on"><Check :size="iconSize.dense" /></span>
+          <span class="gear-check"><ListTree aria-hidden="true" :size="iconSize.menu" /></span><span>重写助记键之前询问</span><span v-if="!settings.rewriteBookmarkType" class="gear-on"><IdeaCheckedIcon :size="iconSize.dense" /></span>
         </button>
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.askBeforeDeletingLists" @click="toggle({ askBeforeDeletingLists: !settings.askBeforeDeletingLists })">
-          <span class="gear-check"><ListTree :size="iconSize.menu" /></span><span>删除多个书签前询问</span><span v-if="settings.askBeforeDeletingLists" class="gear-on"><Check :size="iconSize.dense" /></span>
+          <span class="gear-check"><ListTree aria-hidden="true" :size="iconSize.menu" /></span><span>删除多个书签前询问</span><span v-if="settings.askBeforeDeletingLists" class="gear-on"><IdeaCheckedIcon :size="iconSize.dense" /></span>
         </button>
         <div class="gear-rule" role="separator" />
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.autoscrollToSource" @click="toggle({ autoscrollToSource: !settings.autoscrollToSource })">
-          <span class="gear-check" /><span>自动滚动到源代码</span><span v-if="settings.autoscrollToSource" class="gear-on"><Check :size="iconSize.dense" /></span>
+          <span class="gear-check" /><span>自动滚动到源代码</span><span v-if="settings.autoscrollToSource" class="gear-on"><IdeaCheckedIcon :size="iconSize.dense" /></span>
         </button>
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.autoscrollFromSource" @click="toggle({ autoscrollFromSource: !settings.autoscrollFromSource })">
-          <span class="gear-check" /><span>从源代码自动滚动</span><span v-if="settings.autoscrollFromSource" class="gear-on"><Check :size="iconSize.dense" /></span>
+          <span class="gear-check" /><span>从源代码自动滚动</span><span v-if="settings.autoscrollFromSource" class="gear-on"><IdeaCheckedIcon :size="iconSize.dense" /></span>
         </button>
       </div>
     </div>
@@ -285,46 +290,56 @@ function onKeydown(event: KeyboardEvent) {
 </template>
 
 <style scoped>
-.bookmark-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
-.bookmark-panel .panel-heading { position: relative; }
-.heading-count { margin-left: auto; color: var(--muted); font-size: 10px; }
-.bookmark-gear { position: absolute; top: 100%; right: 0; z-index: 30; display: flex; flex-direction: column; min-width: 200px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
-.bookmark-gear button { display: flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; }
+.bookmark-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--editor); color: var(--text); }
+.bookmark-panel .panel-heading { position: relative; background: var(--panel); color: var(--bright); }
+.heading-count { margin-left: auto; color: var(--secondary); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.bookmark-gear { position: absolute; top: 100%; right: 0; z-index: 30; display: flex; flex-direction: column; min-width: 200px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.bookmark-gear button { display: flex; align-items: center; gap: var(--space-1); min-height: var(--menu-row-height); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; }
 .bookmark-gear button:hover { background: var(--hover); }
+.bookmark-gear button:focus-visible, .bookmark-row-menu button:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .gear-check { width: 14px; display: inline-flex; justify-content: center; color: var(--secondary); }
 .gear-on { margin-left: auto; color: var(--accent); }
 .gear-rule { height: 1px; margin: 2px 0; background: var(--line); }
 .bookmark-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: var(--space-2); outline: none; }
-.bookmark-scroll:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.bookmark-scroll:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .bookmark-row-menu-backdrop { position: fixed; inset: 0; z-index: 60; }
-.bookmark-row-menu { position: absolute; display: flex; flex-direction: column; min-width: 160px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
-.bookmark-row-menu button { padding: 4px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; }
+.bookmark-row-menu { position: absolute; display: flex; flex-direction: column; min-width: 160px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.bookmark-row-menu button { min-height: var(--menu-row-height); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; }
 .bookmark-row-menu button:hover { background: var(--hover); }
-.bookmark-list-head { display: flex; align-items: baseline; gap: var(--space-2); padding: 5px var(--space-2) 3px; border-top: 1px solid var(--line); color: var(--bright); font-size: 11px; font-weight: 600; }
-.bookmark-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bookmark-list-default { padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); font-size: 9px; font-weight: 400; }
-.bookmark-list-count { margin-left: auto; color: var(--muted); font-size: 10px; font-weight: 400; }
-.bookmark-group-head { display: flex; align-items: baseline; gap: var(--space-2); padding: 4px var(--space-2) 2px; color: var(--secondary); font-size: 11px; }
-.bookmark-group-name { color: var(--bright); }
-.bookmark-group-folder { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
-.bookmark-group-count { color: var(--muted); font-size: 10px; }
-.bookmark-row { display: flex; align-items: center; gap: 2px; padding: 0 var(--space-1) 0 0; transition: background-color var(--dur-1) var(--ease); }
+.bookmark-list-head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--panel-heading-h); padding: 0 var(--space-3); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); background: var(--rail); color: var(--bright); font-size: 12px; font-weight: 600; }
+.bookmark-list-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bookmark-list-default { padding: 1px var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--panel); color: var(--secondary); font-size: 10px; font-weight: 400; }
+.bookmark-list-count { margin-left: auto; color: var(--secondary); font: 11px var(--font-mono); font-weight: 400; font-variant-numeric: tabular-nums; }
+.bookmark-group-head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--tree-row-h); padding: 0 var(--space-3); border-bottom: 1px solid var(--line); background: var(--panel); color: var(--secondary); font-size: 12px; }
+.bookmark-group-name { color: var(--bright); font-weight: 600; }
+.bookmark-file-open:hover { color: var(--accent); }
+.bookmark-group-folder { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 10px var(--font-mono); }
+.bookmark-group-count { color: var(--muted); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
+.bookmark-row { display: flex; align-items: center; gap: var(--space-1); min-height: var(--tree-row-h); padding-right: var(--space-1); transition: background-color var(--dur-1) var(--ease); }
 .bookmark-row:hover { background: var(--hover); }
-.bookmark-selected { background: var(--selected); }
-.bookmark-jump { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); width: 100%; padding: 3px 0 3px var(--space-3); border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; font-size: 12px; }
+.bookmark-selected { background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); }
+.bookmark-selected .bookmark-jump { color: var(--bright); }
+.bookmark-jump { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: var(--space-2); min-height: var(--tree-row-h); width: auto; padding: 0 0 0 var(--space-3); border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; font: 12px/1.4 var(--font-ui); }
+.bookmark-jump:focus-visible, .bookmark-file-open:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
+/* Group headers are the file nodes; their line bookmarks sit one tree level deeper. */
+.bookmark-group-head ~ .bookmark-row .bookmark-jump { padding-left: calc(var(--space-3) + var(--space-4)); }
+.bookmark-row > .icon-button { flex: 0 0 var(--ctrl-height-sm); width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); border-radius: var(--radius-xs); color: var(--muted); }
+.bookmark-row > .icon-button:hover { background: var(--error-bg); color: var(--error); }
 /* 右侧附件位（`updateAccessoryView` 把编号放在那）：`margin-left: auto` 顶到行尾，宽度按内容。 */
-.bookmark-digit { flex-shrink: 0; min-width: 11px; margin-left: auto; color: var(--accent); font: 10px var(--font-mono); text-align: right; }
+.bookmark-digit { flex-shrink: 0; min-width: 11px; margin-left: auto; color: var(--accent); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
 .bookmark-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 描述（那一行原文）：常规体、可省略号截断；`BookmarkNode.kt:80` 里它是唯一用 REGULAR_ATTRIBUTES 的段。 */
-.bookmark-detail { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bookmark-detail { min-width: 0; flex: 1; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 /* 有描述时文件名退成灰体（`BookmarkNode.kt:81` 的 GRAYED_ATTRIBUTES）。 */
 .bookmark-name-muted { color: var(--muted); }
-.bookmark-folder { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
+.bookmark-folder { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); font: 10px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .bookmark-line { flex-shrink: 0; color: var(--muted); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
 .bookmark-current .bookmark-name { color: var(--bright); }
 /* `Bookmark.getBookmarkFont`（`Bookmark.java:95`）：带助记键的书签用粗体（DEFAULT 的常规体）。 */
 .bookmark-bold { font-weight: 600; }
-.bookmark-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-5) var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; }
-.bookmark-empty p { margin: 0; color: var(--secondary); font-size: 12px; }
-.bookmark-empty span { max-width: 26em; }
+.bookmark-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-5) var(--space-3); color: var(--secondary); font-size: 11px; line-height: 1.6; }
+.bookmark-empty > svg { color: var(--accent); }
+.bookmark-empty p { margin: 0; color: var(--bright); font-size: 13px; font-weight: 600; }
+.bookmark-empty span { max-width: 26em; color: var(--muted); }
+.bookmark-empty > .subtle-button { border-radius: var(--radius-xs); background: var(--panel); }
 </style>

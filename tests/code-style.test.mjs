@@ -338,10 +338,43 @@ test('接线：runFormatting 把生效缩进当 FormattingOptions 发出去（Ls
   assert.equal(optionsLine.includes('trimTrailingWhitespace'), false)
 })
 
+// 后处理（`PostFormatProcessor` 那一环）挂在哪、拿的是哪一份文本 —— 这一条本轮**订正**过。
+//
+// 订正留痕（2026-10-06 refactorfix）：原判据钉的是
+//   `processLineCommentAddSpace(next, { start: 0, end: next.length }, postFormatSettings.value)`
+//   + `import { processLineCommentAddSpace } from './postFormatProcessors.ts'`
+// 即「调用点自己把整份文本交给单个处理器」。上游不是这个形状：
+//   · `platform/code-style-api/src/com/intellij/psi/impl/source/codeStyle/PostFormatProcessor.java`
+//     是**扩展点接口**（每个处理器一个 `processText(text, rangeToReformat, context)`，
+//     `CodeStyleSettings` 决定谁启用），调用方从不逐个挑处理器；
+//   · `platform/code-style-impl/src/com/intellij/psi/impl/source/codeStyle/CoreCodeStyleUtil.java:101-118`
+//     `postProcessRanges` 收的是**格式化区间**（`RangeFormatInfo` 重取到的改动后偏移），
+//     `:121-142` `postProcessText` 再把区间按 `FormatterTagHandler.getEnabledRanges` 切成启用段、
+//     逐段跑**整串**处理器并靠 `delta` 平移 —— 所以「整份文本 + 单个处理器」既越界又漏段。
+// 本仓的对齐形状是 `processFormattedText()`（一条链跑完所有已落地的处理器）+
+// `postFormatRegions()`（把请求侧区间换算到改动后坐标系）。判据改成钉这一件事，且仍是逐字符：
 test('接线：postFormatProcessor 挂在 runFormatting 套完编辑之后（PostFormatProcessor）', () => {
   const source = read('semanticActions.ts')
-  assert.match(source, /processLineCommentAddSpace\(next, \{ start: 0, end: next\.length \}, postFormatSettings\.value\)/)
-  assert.match(source, /import \{ processLineCommentAddSpace \} from '\.\/postFormatProcessors\.ts'/)
+  // ① 总入口与区间换算都从那个模块来（本仓不许有第二份后处理实现）。
+  assert.match(source, /import \{ postFormatRegions, processFormattedText \} from '\.\/postFormatProcessors\.ts'/)
+  assert.equal((source.match(/from '\.\/postFormatProcessors\.ts'/g) ?? []).length, 1,
+    '对那个模块只许一条 import（抄第二份入口就是两份规则）')
+  assert.equal(/import \{[^}]*processLineCommentAddSpace[^}]*from '\.\/postFormatProcessors\.ts'/.test(source), false,
+    '调用点不许再直接引单个处理器（那是上游扩展点自己该挑的事）')
+  // ② 设置来自代码风格那一层（`LINE_COMMENT_ADD_SPACE_ON_REFORMAT` / `KEEP_BLANK_LINES_IN_CODE`）。
+  assert.match(source, /postFormatSettings\.value/, '后处理读的是 codeStyleSettings 的那份生效设置')
+  // ③ 顺序才是这条判据的本体：后处理必须跑在**套完编辑之后**的那份文本上，且在写回缓冲区之前。
+  const applyAt = source.indexOf('const formatted = snapshot === undefined ? applyTextEdits(base, edits)')
+  const postAt = source.indexOf('processFormattedText(')
+  const setDraftAt = source.indexOf('editorFor(file.path)?.setDraft(next)')
+  assert.ok(applyAt > 0 && postAt > 0 && setDraftAt > 0, 'runFormatting 里找不到「套编辑 / 后处理 / 写回」这三步')
+  assert.ok(postAt > applyAt, '后处理必须在套用语言服务编辑**之后**（上游是格式化落文档之后才跑 PostFormatProcessor）')
+  assert.ok(postAt < setDraftAt, '后处理的结果必须写回缓冲区，不是算完就丢')
+  assert.match(source, /const processed = processFormattedText\(next, regions, postFormatSettings\.value, commentStyleFor\(undefined, file\.path\)\)/,
+    '后处理拿的是 `next`（改动后的文本）与换算后的 `regions`')
+  // ④ 区间口径：请求侧的区间按**已套用的编辑**换算到改动后坐标系；快照那一档（用户在格式化期间改过文档）
+  //    退回空区间 = 「整份文本 ∩ 启用段」，不假装换算准确 —— 两条一起钉在同一段正则里。
+  assert.match(source, /const regions = snapshot === undefined\s*\?\s*postFormatRegions\(base, edits, range \? \(subRanges\.length \? subRanges : \[range\]\) : \[\]\)\s*:\s*\[\]/)
 })
 
 test('接线：App.vue 把 editorSettings 传进 createSemanticActions（缩进起步值）', () => {

@@ -23,6 +23,9 @@
 import type { EditorActionBinding, KeyBinding, KeyBindingState } from './keymapBindings.ts'
 import { keymapKeys } from './keymapBindings.ts'
 import type { MenuRow } from './menus/types.ts'
+import { ACTION_EP, EXTENSIONS } from './extensionPoints.ts'
+import { runEditorActionHandler } from './editorActionHandlers.ts'
+import type { AddToGroupSpec } from './actionGroups.ts'
 
 /** 动作的来源（排查与断言用；与上游的 action 注册者不是同一概念）。 */
 export type ActionSource = 'menu' | 'keymap' | 'plugin' | 'toolbar' | 'other'
@@ -46,6 +49,12 @@ export interface ActionDescriptor {
   checked?: () => boolean
   /** 动作体（`AnAction.actionPerformed`）。 */
   run: () => void
+  /**
+   * `<add-to-group>`（上游 plugin.xml 的 `<actions><action>…<add-to-group group-id anchor
+   * relative-to-action>`）。带上它时，`src/actionGroups.ts` 的 `mergeGroupRows()` 会把这条动作
+   * 按锚并进对应菜单组；不带就只进注册表 / Find Action。
+   */
+  addToGroup?: AddToGroupSpec
   /** 注册来源（默认 other）。 */
   source?: ActionSource
 }
@@ -66,6 +75,11 @@ export class ActionRegistry {
   register(descriptor: ActionDescriptor): void {
     if (!descriptor.id) throw new Error('动作 id 不能为空。')
     this.descriptors.set(descriptor.id, { source: 'other', ...descriptor })
+    // 同时挂进**扩展点宿主**的 `com.intellij.action` EP（`src/extensionPoints.ts`）：
+    // 这样「这个 EP 现在有哪些动作」问宿主就有答案，第三方按同一个 id 挂进来的动作
+    // 与菜单/键位注册的走同一条路（上游是 plugin.xml 的 `<actions>` 块 + ActionManager 收编）。
+    if (EXTENSIONS.hasExtensionPoint(ACTION_EP))
+      EXTENSIONS.registerExtension(ACTION_EP, descriptor.id, descriptor, { source: 'user' })
     this.bumpPresentation()
   }
 
@@ -74,8 +88,27 @@ export class ActionRegistry {
 
   unregister(id: string): boolean {
     const removed = this.descriptors.delete(id)
-    if (removed) this.bumpPresentation()
+    if (removed) {
+      EXTENSIONS.unregisterExtension(ACTION_EP, id)
+      this.bumpPresentation()
+    }
     return removed
+  }
+
+  /**
+   * 从扩展点宿主**收编**动作（上游 `ActionManagerImpl` 在启动时把 plugin.xml 里的 `<actions>`
+   * 全注册进来）。返回收编的条数 —— 已在本注册表里的同 id 动作会被 EP 里的那条覆盖，
+   * 因为 EP 是"后来者"（与 `register` 的"最后写入赢"同一口径）。
+   */
+  adoptFromExtensions(): number {
+    let adopted = 0
+    for (const descriptor of EXTENSIONS.extensionsOf<ActionDescriptor>(ACTION_EP)) {
+      if (!descriptor?.id) continue
+      this.descriptors.set(descriptor.id, { source: 'plugin', ...descriptor })
+      adopted += 1
+    }
+    if (adopted) this.bumpPresentation()
+    return adopted
   }
 
   has(id: string): boolean { return this.descriptors.has(id) }
@@ -113,6 +146,10 @@ export class ActionRegistry {
     const descriptor = this.descriptors.get(id)
     if (!descriptor) return false
     if (descriptor.enabled && descriptor.enabled() === false) return false
+    // 先给 EP（`com.intellij.editorActionHandler`）挂上的处理器一次机会 —— 上游
+    // `EditorActionManagerImpl` 启动时用 EP 覆盖同名动作的 handler（见 `src/editorActionHandlers.ts`）。
+    // 它处理了就到此为止；返回 false（或压根没有处理器）照原路执行。
+    if (runEditorActionHandler(id)) return true
     descriptor.run()
     return true
   }

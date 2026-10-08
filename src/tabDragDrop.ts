@@ -11,6 +11,7 @@ import { ref } from 'vue'
 import { acceptDrop, beginDrag, dropActionForEvent } from './dndModel.ts'
 import { dropTabOnGroup, swapGroups, type Pane, type SplitModel } from './editorGroups.ts'
 import { dropSideFor, dropSidePutsNewGroupFirst, splitOrientationForSide, updateBoundsWithDropSide, type DropSide } from './tabDragSplit.ts'
+import { dropDetachesTab } from './editorWindows.ts'
 import type { EditorSettings } from './bridge'
 import type { Tab } from './editorTab'
 
@@ -21,10 +22,17 @@ export interface TabDragDropDeps {
   splitModel: SplitModel<any>
   /** 由分栏动作提供 —— 必须惰性调用。 */
   splitTabOut: (tab: Tab, orientation: 'horizontal' | 'vertical') => void
+  /**
+   * 「拖出成独立窗口」（上游 `DockableEditorTabbedContainer.kt:224-240` 的
+   * `dropIntoNewlyCreatedWindow` → 统计 id `OpenElementInNewWindow`，`:239`）：标签被拖到
+   * **编辑区之外**时摘成独立窗口/浮层，而不是分屏。宿主没注入时这一档不生效（退回"什么都不做"，
+   * 不编一个假动作）—— 与 `src/keymap.ts` 的 `runEditor` 缺省不注册同一纪律。
+   */
+  detachTabOut?: (pane: Pane, tab: Tab) => void
 }
 
 export function createTabDragDrop(deps: TabDragDropDeps) {
-  const { editorSettings, groups, splitModel, splitTabOut } = deps
+  const { editorSettings, groups, splitModel, splitTabOut, detachTabOut } = deps
 // IDEA's tab drag & drop: the strip itself is the drop target (reorder before the
 // tab under the pointer); dropping on the other group's strip moves the tab there.
 const dragTab = ref<{ pane: Pane; path: string } | null>(null)
@@ -76,6 +84,16 @@ function onStageDrop(pane: Pane, event: DragEvent) {
   event.preventDefault()
   const tab = groups[dragged.pane].tabs.find((item: any) => item.path === dragged.path)
   if (!tab) return
+  // 拖到**编辑区之外**：摘成独立窗口（上游 `dropIntoNewlyCreatedWindow`，统计 id
+  // `OpenElementInNewWindow`）。容器内的边缘落点仍走下面的分屏 —— 两者不抢同一落点。
+  const target = event.currentTarget as HTMLElement | null
+  if (detachTabOut && target) {
+    const box = target.getBoundingClientRect()
+    if (dropDetachesTab({ x: event.clientX, y: event.clientY }, { x: box.left, y: box.top, width: box.width, height: box.height })) {
+      detachTabOut(dragged.pane, tab)
+      return
+    }
+  }
   const side: DropSide = preview && preview.pane === pane ? preview.side : 'CENTER'
   const orientation = splitOrientationForSide(side)
   if (!orientation) {

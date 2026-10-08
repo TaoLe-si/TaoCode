@@ -25,8 +25,9 @@
 // **只渲染有真实供给者的 tab**（项目硬规则：没有真实消费链路的项不渲染）。本仓能接上的：
 //   · Classes           —— 同一批符号里只留语言服务标成类型的那些（`SeClassesTab`），
 //                          查 `Foo#bar` 时打开类的直接成员（`ClassSearchEverywhereNavigationHandler`）
-//   · Project           —— **本仓的合成档**，上游没有这一 tab（见上）。取 Files 那一档的位次，
-//                          收工作区文件清单（`workspace.files`，宿主）+ LSP `workspace/symbol`
+//   · Files             —— 上游 900 那一档（`SeFilesTab`）：**只吃文件供给者**（`workspace.files` 宿主）。
+//                          订正 2026-10-06（B12 lane C）：上一版把它与符号合成一个 "Project" 合成档；
+//                          按族判词「Files/Symbols 独立档」拆回上游的两档，Project 合成档随之删除。
 //   · Symbols           —— 上游 850 那一档，本仓就是 LSP `workspace/symbol` 那一批（含类）
 //   · Actions           —— 已有动作表（`menuUi` 的 actionList）
 //   · Run Configurations —— 用户配置 + 打开项目时自动发现的候选（`runConfigurations`）。上游这一档不是 tab：
@@ -50,8 +51,11 @@ import { classSearchPattern, isSearchEverywhereClass } from './searchEverywhereC
 // 本文件是它们的第一个消费者（配平在 `searchEverywhereResults` 里，Text 档在 tab 表里）。
 import { RESULTS_DIFFERENCE_LIMIT, balanceResults, type BalanceTier } from './searchEverywhereBalancer.ts'
 import { SE_TEXT_TAB_NAME, SE_TEXT_TAB_PRIORITY } from './searchEverywhereText.ts'
+// 结果去重 provider（EP `com.intellij.searchEverywhereResultsEqualityProvider`）：本文件是它的
+// **真实消费点**（`searchEverywhereResults` 里那一步）。没有 provider 时是恒等变换。
+import { dedupeSearchEverywhereItems } from './searchEverywhereEquality.ts'
 
-export type SearchEverywhereTab = 'all' | 'classes' | 'project' | 'symbols' | 'commands' | 'runConfigs' | 'text'
+export type SearchEverywhereTab = 'all' | 'classes' | 'files' | 'symbols' | 'commands' | 'runConfigs' | 'text'
 /** 一个供给者。`all` tab 是它们的并集。 */
 export type SearchEverywhereSource = 'project' | 'symbols' | 'commands' | 'runConfigs' | 'text'
 
@@ -120,16 +124,22 @@ export interface SearchEverywhereTabDef {
  * 有真实供给者的 tab，**顺序 = 上游 tab priority 降序**（`SeTabVm` 的排法）。
  * 每条后面注的是它对应的那一档上游 tab 与 priority，便于复核而不是凭记忆：
  *   All `SeAllTab.kt:89` MAX · Classes `SeClassesTab.kt:50` 950 · Files `SeFilesTab.kt:52` 900
- *   （本仓的 Project 合成档取这一位）· Symbols `SeSymbolsTab.kt:50` 850
+ *   · Symbols `SeSymbolsTab.kt:50` 850
  *   · Actions `SeActionsTab.kt:56` 800 ·（Run Configurations 350，`RunConfigurationsSEContributor.java:82`）
  */
+// **订正 2026-10-06（B12 lane C / se/ui）**：上一版把「项目里的文件 + 项目里的类/符号」合成一个
+// **Project** 合成档（注明"上游没有这一 tab"）。按族判词那条「Files/Symbols 独立档」补上 ——
+// 上游注册表里 **Files（900，只吃文件）** 与 **Symbols（850，只吃符号）** 是两档
+// （`frontend.xml:64-69` 的 `FileSearchEverywhereContributor` / `SymbolSearchEverywhereContributor`），
+// 本仓现在同样拆成两档：`files` 只收 `source==='project'` 的文件行，`symbols` 只收符号。
+// 于是 Project 合成档**不再需要**（它的两个来源各归其位），删掉它 = 与上游一致，不是功能缩水。
 export const SEARCH_EVERYWHERE_TABS: readonly SearchEverywhereTabDef[] = [
   { id: 'all', label: 'All', priority: Number.MAX_SAFE_INTEGER, sources: ['project', 'symbols', 'commands', 'runConfigs', 'text'] },
   // Classes：`SeClassesTab.kt:47` 的标题 = `GotoClassPresentationUpdater` 的复数标题，priority 950。
   { id: 'classes', label: 'Classes', priority: 950, sources: ['symbols'], classesOnly: true },
-  // Project：**上游没有这一 tab**（`frontend.xml:64-69` 只注册了 All/Classes/Files/Symbols/Actions/Text）。
-  // 本仓把「项目里的文件 + 项目里的类/符号」合成一档，取 Files(900) 的位次。
-  { id: 'project', label: 'Project', priority: 900, sources: ['project', 'symbols'] },
+  // Files：上游 900 那一档（`SeFilesTab.kt:52`），名字取 `IdeBundle.properties:1812`
+  // `search.everywhere.group.name.files` = Files。只吃文件供给者，**不含**符号。
+  { id: 'files', label: 'Files', priority: 900, sources: ['project'] },
   // Symbols：上游 850 那一档（`SeSymbolsTab.kt:47,50`），名字取 `IdeBundle.properties:1814`。
   { id: 'symbols', label: 'Symbols', priority: 850, sources: ['symbols'] },
   // Actions：新 SE 这一档叫 Actions（`SeActionsTab.kt:54` → `IdeBundle.properties:1811`），
@@ -284,7 +294,7 @@ export function searchEverywhereResults(
     && (item.source === 'commands' || item.source === 'runConfigs' || inScope(item))
     && inTypes(item))
   const needle = query.trim()
-  if (!needle) return scoped.slice(0, limit)
+  if (!needle) return dedupeSearchEverywhereItems(scoped).slice(0, limit)
   // `Foo#bar`：与符号名比对的是 `#` 前的类名那一段（`ClassSearchEverywhereContributor` 用去掉
   // member 的模式搜类；`#bar` 只在打开时用来定位成员，见 `searchEverywhereClasses.ts`）。
   const symbolNeedle = classSearchPattern(needle).owner || needle
@@ -295,7 +305,11 @@ export function searchEverywhereResults(
   })
   scored.sort((a, b) => b.weight - a.weight || a.index - b.index)
   const balanced = balanceAll && tab === 'all' ? balanceAcrossProviders(scored, limit) : scored
-  return balanced.slice(0, limit).map(entry => entry.item)
+  // 去重 provider（上游 `SEResultsEqualityProvider`，EP `com.intellij.searchEverywhereResultsEqualityProvider`）：
+  // 排在配额之后、切片之前 —— 上游也是"先收进列表再问 provider 要不要替换"（`MixedSearchListModel`）。
+  // 没有 provider 时这一句是恒等变换（判据 `tests/search-everywhere-equality.test.mjs`）。
+  const deduped = dedupeSearchEverywhereItems(balanced.map(entry => entry.item))
+  return deduped.slice(0, limit)
 }
 
 /** 有结果的 tab（空查询下恒为有结果 —— 那时列表来自各供给者的默认前 N 条）。 */

@@ -36,44 +36,10 @@ export interface CommentStyle {
   blockSpace?: boolean
 }
 
-/** 扩展名 → 注释标记（与 `src/fileTypes.ts` 的关联表无关的一张只读表；`language` 命中优先）。 */
-const BY_LANGUAGE: Record<string, CommentStyle> = {
-  java: { line: '//', block: ['/*', '*/'] },
-  cpp: { line: '//', block: ['/*', '*/'] },
-  typescript: { line: '//', block: ['/*', '*/'] },
-}
-
-const BY_EXTENSION: Record<string, CommentStyle> = {
-  java: { line: '//', block: ['/*', '*/'] },
-  c: { line: '//', block: ['/*', '*/'] }, h: { line: '//', block: ['/*', '*/'] },
-  cpp: { line: '//', block: ['/*', '*/'] }, cc: { line: '//', block: ['/*', '*/'] }, cxx: { line: '//', block: ['/*', '*/'] },
-  hpp: { line: '//', block: ['/*', '*/'] }, hh: { line: '//', block: ['/*', '*/'] },
-  cs: { line: '//', block: ['/*', '*/'] }, go: { line: '//', block: ['/*', '*/'] }, rs: { line: '//', block: ['/*', '*/'] },
-  kt: { line: '//', block: ['/*', '*/'] }, kts: { line: '//', block: ['/*', '*/'] }, scala: { line: '//', block: ['/*', '*/'] },
-  swift: { line: '//', block: ['/*', '*/'] }, dart: { line: '//', block: ['/*', '*/'] }, php: { line: '//', block: ['/*', '*/'] },
-  m: { line: '//', block: ['/*', '*/'] }, js: { line: '//', block: ['/*', '*/'] }, jsx: { line: '//', block: ['/*', '*/'] },
-  ts: { line: '//', block: ['/*', '*/'] }, tsx: { line: '//', block: ['/*', '*/'] }, css: { block: ['/*', '*/'] },
-  py: { line: '#' }, rb: { line: '#' }, pl: { line: '#' }, pm: { line: '#' }, sh: { line: '#' },
-  bash: { line: '#' }, zsh: { line: '#' }, fish: { line: '#' }, yml: { line: '#' }, yaml: { line: '#' },
-  toml: { line: '#' }, r: { line: '#' }, ps1: { line: '#' }, makefile: { line: '#' }, cmake: { line: '#' },
-  properties: { line: '#' }, conf: { line: '#' }, ini: { line: ';' }, el: { line: ';' },
-  lua: { line: '--', block: ['--[[', ']]'] }, sql: { line: '--', block: ['/*', '*/'] },
-  hs: { line: '--', block: ['{-', '-}'] }, adb: { line: '--' }, vhdl: { line: '--' },
-  tex: { line: '%' }, erl: { line: '%' }, ml: { block: ['(*', '*)'] },
-  html: { block: ['<!--', '-->'] }, htm: { block: ['<!--', '-->'] }, xml: { block: ['<!--', '-->'] },
-  svg: { block: ['<!--', '-->'] }, vue: { block: ['<!--', '-->'] }, md: { block: ['<!--', '-->'] },
-  markdown: { block: ['<!--', '-->'] },
-}
-
-/** 语言 id / 文件路径 → 注释标记；两者都认不出时返回 null（与没有 Commenter 同义）。 */
-export function commentStyleFor(language: string | undefined, path = ''): CommentStyle | null {
-  const byLanguage = language ? BY_LANGUAGE[language] : undefined
-  if (byLanguage) return byLanguage
-  const name = path.replace(/\\/g, '/').split('/').pop() ?? ''
-  const dot = name.lastIndexOf('.')
-  const extension = dot >= 0 ? name.slice(dot + 1).toLowerCase() : name.toLowerCase()
-  return BY_EXTENSION[extension] ?? null
-}
+// 扩展名/语言 id → 注释标记的只读表与 `commentStyleFor` 本体都在 `src/commentStyles.ts`（零 CodeMirror
+// 依赖，好让 live-template 的 comment 宏也能复用同一份表而不把 `@codemirror/state` 拽进 templates 的
+// 依赖图）。这里原样再导出，既有 consumer 的 `import { commentStyleFor } from './commentToggle.ts'` 不改。
+export { commentStyleFor } from './commentStyles.ts'
 
 export interface CommentEdit { from: number; to: number; insert: string }
 export interface CommentOutcome {

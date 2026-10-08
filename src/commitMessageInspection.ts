@@ -41,6 +41,13 @@ export const RIGHT_MARGIN_MAX = 10000
 
 export const COMMIT_MESSAGE_INSPECTION_STORAGE_KEY = 'taocode.commitMessageInspections'
 
+// 提交信息检查的 EP 宿主（上游 `com.intellij.vcs.commitMessageInspection`）：三条内建检查作为
+// bundled 贡献挂在它上面（见文件末尾的 `registerBuiltinInspections`），`inspectCommitMessage`
+// 是聚合消费点 —— 第三方插件按同一 id 挂一条即可加自己的检查。
+// 只 import 类型与注册函数：本模块与 `commitExtensionPoints.ts` 无运行时循环
+//（后者对 `CommitMessageInspectionSettings`/`CommitMessageProblem` 用的是 `import type`）。
+import { registerCommitMessageInspection, runCommitMessageInspections } from './commitExtensionPoints.ts'
+
 export interface CommitMessageInspectionSettings {
   /** `SubjectLimitInspection` enabled. */
   subjectLimit: boolean
@@ -150,65 +157,116 @@ function checkRightMargin(line: string, rightMargin: number): { start: number; e
 }
 
 /**
+ * `SubjectLimitInspection` alone (`:19,33-36`): line 0 must not exceed the subject margin.
+ * Split out so the same body is registered as a bundled EP contribution below (the EP host is
+ * `src/commitExtensionPoints.ts`, mirroring `com.intellij.vcs.commitMessageInspection`).
+ */
+export function subjectLimitProblems(
+  lines: readonly string[],
+  settings: CommitMessageInspectionSettings,
+): CommitMessageProblem[] {
+  const range = checkRightMargin(lines[0] ?? '', settings.subjectRightMargin)
+  if (!range) return []
+  return [{
+    kind: 'subject',
+    line: 0,
+    ...range,
+    message: SUBJECT_LIMIT_MESSAGE(settings.subjectRightMargin),
+    fixes: ['reformat'],
+  }]
+}
+
+/**
+ * `SubjectBodySeparationInspection.java:32-36` — `checkRightMargin(..., line = 1, rightMargin = 0)`,
+ * i.e. line 1 must be empty before the commit body starts.
+ */
+export function subjectBodySeparationProblems(
+  lines: readonly string[],
+  _settings: CommitMessageInspectionSettings,
+): CommitMessageProblem[] {
+  if (lines.length <= 1) return []
+  const range = checkRightMargin(lines[1] ?? '', 0)
+  if (!range) return []
+  return [{
+    kind: 'separation',
+    line: 1,
+    ...range,
+    message: MISSING_BLANK_LINE_MESSAGE,
+    fixes: ['blankLine', 'reformat'],
+  }]
+}
+
+/** `BodyLimitInspection.kt:51` — the body is `1 until document.getLineCount()`. */
+export function bodyLimitProblems(
+  lines: readonly string[],
+  settings: CommitMessageInspectionSettings,
+): CommitMessageProblem[] {
+  const problems: CommitMessageProblem[] = []
+  for (let line = 1; line < lines.length; line += 1) {
+    const range = checkRightMargin(lines[line] ?? '', settings.bodyRightMargin)
+    if (!range) continue
+    problems.push({
+      kind: 'body',
+      line,
+      ...range,
+      message: BODY_LIMIT_MESSAGE(settings.bodyRightMargin),
+      fixes: ['wrap', 'reformat'],
+    })
+  }
+  return problems
+}
+
+/**
  * Runs every enabled inspection over the message.
  *
- * IDEA's three inspections are independent tools and the profile does not fix an order between
- * them, so the output is ordered deterministically: by line, and within a line in the fixed
- * order subject → separation → body (both checks can fire on line 1).
+ * **Since 2026-10-06 the three built-ins are EP contributions** (`com.intellij.vcs.commitMessageInspection`,
+ * the same id IDEA uses; see `src/commitExtensionPoints.ts`) registered as bundled contributions just
+ * below, and this function is the aggregation call `runCommitMessageInspections` — so a third-party
+ * plugin that hangs an inspection on that EP gets picked up here. Registration order matches
+ * `VcsExtensions.xml:147-149` (separation → subject → body), and the output is then sorted by
+ * line, and within a line in the fixed order subject → separation → body (both checks can fire on
+ * line 1) — the deterministic order the previous hand-written version produced.
  */
 export function inspectCommitMessage(
   text: string,
   settings: CommitMessageInspectionSettings,
 ): CommitMessageProblem[] {
   const lines = messageLines(text)
-  const problems: CommitMessageProblem[] = []
-
-  if (settings.subjectLimit) {
-    const range = checkRightMargin(lines[0] ?? '', settings.subjectRightMargin)
-    if (range) {
-      problems.push({
-        kind: 'subject',
-        line: 0,
-        ...range,
-        message: SUBJECT_LIMIT_MESSAGE(settings.subjectRightMargin),
-        fixes: ['reformat'],
-      })
-    }
-  }
-
-  // SubjectBodySeparationInspection.java:32-36 — `checkRightMargin(..., line = 1, rightMargin = 0)`,
-  // i.e. line 1 must be empty before the commit body starts.
-  if (settings.subjectBodySeparation && lines.length > 1) {
-    const range = checkRightMargin(lines[1] ?? '', 0)
-    if (range) {
-      problems.push({
-        kind: 'separation',
-        line: 1,
-        ...range,
-        message: MISSING_BLANK_LINE_MESSAGE,
-        fixes: ['blankLine', 'reformat'],
-      })
-    }
-  }
-
-  // BodyLimitInspection.kt:51 — the body is `1 until document.getLineCount()`.
-  if (settings.bodyLimit) {
-    for (let line = 1; line < lines.length; line += 1) {
-      const range = checkRightMargin(lines[line] ?? '', settings.bodyRightMargin)
-      if (range) {
-        problems.push({
-          kind: 'body',
-          line,
-          ...range,
-          message: BODY_LIMIT_MESSAGE(settings.bodyRightMargin),
-          fixes: ['wrap', 'reformat'],
-        })
-      }
-    }
-  }
-
-  return problems
+  const problems = runCommitMessageInspections(lines, settings)
+  const rank: Record<CommitMessageProblemKind, number> = { subject: 0, separation: 1, body: 2 }
+  return problems.slice().sort((a, b) => a.line - b.line || rank[a.kind] - rank[b.kind])
 }
+
+/**
+ * The three built-ins as EP contributions, registered as **bundled** ones at module load —
+ * the same three `VcsExtensions.xml:147-149` registers upstream, with the same order
+ * (separation → subject → body). `id` values are the upstream implementation class names verbatim.
+ */
+export const BUILTIN_COMMIT_MESSAGE_INSPECTION_IDS = {
+  subjectBodySeparation: 'com.intellij.vcs.commit.message.SubjectBodySeparationInspection',
+  subjectLimit: 'com.intellij.vcs.commit.message.SubjectLimitInspection',
+  bodyLimit: 'com.intellij.vcs.commit.message.BodyLimitInspection',
+} as const
+
+function registerBuiltinInspections(): void {
+  registerCommitMessageInspection({
+    id: BUILTIN_COMMIT_MESSAGE_INSPECTION_IDS.subjectBodySeparation,
+    enabled: settings => settings.subjectBodySeparation,
+    run: subjectBodySeparationProblems,
+  }, { source: 'bundled' })
+  registerCommitMessageInspection({
+    id: BUILTIN_COMMIT_MESSAGE_INSPECTION_IDS.subjectLimit,
+    enabled: settings => settings.subjectLimit,
+    run: subjectLimitProblems,
+  }, { source: 'bundled' })
+  registerCommitMessageInspection({
+    id: BUILTIN_COMMIT_MESSAGE_INSPECTION_IDS.bodyLimit,
+    enabled: settings => settings.bodyLimit,
+    run: bodyLimitProblems,
+  }, { source: 'bundled' })
+}
+
+registerBuiltinInspections()
 
 /** The substring IDEA underlines (`TextRange(start + rightMargin, end)`, `:152`). */
 export function exceedingText(text: string, problem: CommitMessageProblem): string {

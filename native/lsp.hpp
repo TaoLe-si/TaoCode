@@ -149,6 +149,17 @@ private:
         std::chrono::steady_clock::time_point deadline;
     };
 
+    // 服务器**主动发起**、但不属于「我们发过的那条请求」的几支，就地答复（各自的取舍见 lsp.cpp 的注释）：
+    // 协议返回 void 的三条（register/unregisterCapability、workDoneProgress/create）、返回一份值表的
+    // `workspace/workspaceFolders`、以及 `workspace/applyEdit`。这几支**都必须回包**：服务器那头等的是
+    // 一个 future，客户端不回 = 它的调用一直挂着，后面所有依赖这条答案的动作都不会开始。
+    void answer_register_capability(const Json& id, const Json& params);
+    void answer_unregister_capability(const Json& id, const Json& params);
+    void answer_create_progress(const Json& id, const Json& params);
+    void answer_workspace_folders(const Json& id);
+    // 一条服务器请求的原样参数（补上 `method`）转给界面那条同一个出口：回包管协议，转出管「看得见」。
+    void forward_server_request(const Json& params, std::string_view method);
+
     mutable std::mutex mutex_;
     std::condition_variable due_;
     std::uint64_t wake_ = 0;   // bumped when a deadline is registered, so the
@@ -161,6 +172,10 @@ private:
     Notify progress_;
     Notify server_message_;
     Json configuration_ = Json::object();
+    // `initialize` 参数里那份 `workspaceFolders`（`Client::start` 存下来，`mutex_` 守卫）：
+    // 服务器之后用 `workspace/workspaceFolders` 来问时**原样**回它 —— 回两份不一样的工作区，
+    // 服务器就会按两份不同的根去建工程，比回一个错误更难查。没发过 = null（协议允许）。
+    Json workspace_folders_ = Json(nullptr);
     std::unordered_map<std::int64_t, Pending> pending_;
     std::unordered_map<std::string, std::string> synced_;  // uri -> last text sent
     DocumentEditor editor_;

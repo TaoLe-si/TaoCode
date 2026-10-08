@@ -135,3 +135,18 @@ R4 本批已落（`src/settingsModel.ts:462/464`，默认 true = `EditorSettings
 —— 本仓现状早做过（`native/settings_schema.cpp:286-300` 已有那几条分支、`settings_schema.hpp:124` 的注释写着
 「2026-10-06 放开」；`audioCuesMode` / `audioCuesDisabled` 已在 `src/settingsModel.ts:135/141` 与
 `settings_schema.hpp:111`）。留痕：判词说缺、实际已在。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **K-1 已接线**：`src/App.vue:1164` 已调 `transformOnSave`（见 saveops 处理结果）。
+- **K-2** —— 目标 `src/components/CodeEditor.vue`（禁改）。需 CodeEditor owner。
+- **K-3** —— `src/enterHandlers.ts`（本 lane 可改面），登记。
+- **K-4** —— `src/codeLensExtension.ts`（本 lane 可改面），登记。
+- **K-5** —— 快速文档两档写回/读回：`@policy-change` 已接（`App.vue:2478`），读回在 `workspaceLifecycle.ts:247`。`:can-toggle-hover` 未加（CodeEditor L1 未落地）。
+
+结论：K-1/K-5(部分) 已接线；K-2 转 owner，K-3/K-4 登记。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「K-1/K-5(部分) 已接线；K-2 转 owner，K-3/K-4 登记。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

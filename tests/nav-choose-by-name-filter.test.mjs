@@ -146,7 +146,7 @@ test('接线：导航菜单里那条过滤条真的驱动状态（不是只过�
   const nav = read('src/lspNavigation.ts')
   assert.match(nav, /from '\.\/navChooseByNameFilter\.ts'/, '值 import 必须带扩展名')
   assert.match(nav, /filterSymbols\(documentSymbolEntries\(/, '文件符号列表过这一档')
-  assert.match(nav, /mergeWorkspaceSymbols\(\[filterSymbols\(symbols, hiddenSymbolGroups\.value\)\]/, '工作区符号在合并前过这一档')
+  assert.match(nav, /mergeWorkspaceSymbols\(\[filterSymbols\(symbols, hiddenSymbolGroups\.value\), contributed\]/, '工作区符号在合并前过这一档')
   assert.match(nav, /watch\(hiddenSymbolGroups/, '开关一变就重算当前列表')
 })
 

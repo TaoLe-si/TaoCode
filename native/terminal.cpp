@@ -1,4 +1,5 @@
 #include "terminal.hpp"
+#include "terminal_bell.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -122,6 +123,7 @@ struct Manager::Session {
     bool closed = false;
     std::atomic<bool> exited{false};
     OutputCb on_output;
+    BellScanner bell_scanner;       // reader thread only, so it needs no lock
 
     ~Session() {
         close_input();
@@ -158,9 +160,32 @@ struct Manager::Session {
     }
 
     void emit(const char* bytes, DWORD size) {
-        const std::lock_guard lock(callback_mutex);
-        if (closed || !on_output) return;
-        on_output(id, {bytes, size});  // verbatim console bytes, ANSI intact
+        // A bell is observed, never consumed: the scanner only looks at the chunk this
+        // thread is about to hand on, and the bytes go out verbatim either way.
+        const bool rang = bell_scanner.feed({bytes, size});
+        {
+            const std::lock_guard lock(callback_mutex);
+            if (closed || !on_output) return;
+            on_output(id, {bytes, size});  // verbatim console bytes, ANSI intact
+        }
+        // Same lock order as report_exit(): manager mutex first, then this session's
+        // callback mutex, and the callback runs after both are released.
+        if (rang) report_bell();
+    }
+
+    // Hands one bell to the host (which turns it into a term.bell event). A terminal
+    // that was killed mid-chunk stays silent, same rule as the exit report.
+    void report_bell() {
+        Manager* manager = owner;
+        if (!manager) return;
+        BellCb callback;
+        {
+            const std::lock_guard lock(manager->mutex_);
+            const std::lock_guard guard(callback_mutex);
+            if (closed) return;
+            callback = manager->on_bell_;
+        }
+        if (callback) callback(id);
     }
 
     // One read at a time, parked on both the pipe and the shell process: whichever
@@ -478,6 +503,11 @@ std::vector<int> Manager::ids() const {
 void Manager::on_exit(ExitCb callback) {
     const std::lock_guard lock(mutex_);
     on_exit_ = std::move(callback);
+}
+
+void Manager::on_bell(BellCb callback) {
+    const std::lock_guard lock(mutex_);
+    on_bell_ = std::move(callback);
 }
 
 void Manager::kill_all() {

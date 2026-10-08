@@ -24,6 +24,18 @@ test('续行：正文比标记更靠右的注释行才并进来', () => {
     ['//    continuation one', '//    continuation two'])
 })
 
+// 标记列的**口径**（2026-10-06 todo2 读盘订正）：`SearchMatch.column` 是 1 基码点列
+// （native/search.cpp:698 `code_points(content, line_start, pos) + 1`；`SearchPanel.vue:736`
+// 也是直接当"行列"显示），而上游 `IndexPatternSearcher.java:285-287` 比的是匹配**起始偏移**（0 基）。
+// 本函数按上游取 0 基，换算在调用方。这一条钉的是"喂错口径真的有后果"：
+// 续行在标记列只有**一个**空格时，喂 1 基值会把整段续行丢掉。
+test('标记列取 0 基偏移：把桥接的 1 基值直接喂进来会少并一行', () => {
+  const lines = ['// TODO: aaa', '//  bbb', 'code()']
+  // `// TODO: aaa` 里 T 的 0 基列是 3，桥接给的是 4。
+  assert.deepEqual(todoContinuationLines(lines, 1, 3, patterns), ['//  bbb'])
+  assert.deepEqual(todoContinuationLines(lines, 1, 4, patterns), [])
+})
+
 test('续行不并代码行，也不并正文起得更早的注释行', () => {
   const stopAtCode = ['  // TODO: a', '  int x = 1;']
   assert.deepEqual(todoContinuationLines(stopAtCode, 1, 5, patterns), [])
@@ -69,6 +81,24 @@ test('标记词位置：默认不区分大小写，全出现都标', () => {
   assert.deepEqual(marked, [{ start: 3, length: 5 }])
 })
 
+// 订正（2026-10-06 todo2）：这一支以前把模式 `split('|')` 之后按**字面串** indexOf 找标记词，
+// 于是出厂表里的 `\btodo\b.*` 当作字面永远找不到 —— 预览里"标记词上色"对出厂模式从不生效。
+// 上游这一位是 `IndexPattern.getWordToHighlight()`（IndexPattern.java:61-65，字面词由
+// IndexPatternOptimizerImpl.java:22-24 从正则里抽出：内置两条短路成 `todo` / `fixme`），
+// 再由 `TodoHighlightVisitor.java:91-93` 在区间里定位；抽不出词（`:92` 拿到 null）就整条不画。
+test('标记词位置走正则：出厂的 \\btodo\\b.* 也定得到位', () => {
+  assert.deepEqual(todoMarkerRegions('// TODO: 出厂模式', [{ pattern: '\\btodo\\b.*' }]), [{ start: 3, length: 4 }])
+  assert.deepEqual(todoMarkerRegions('// fixme: 出厂模式', [{ pattern: '\\bfixme\\b.*' }]), [{ start: 3, length: 5 }])
+  // 带标点的标记只画词面部分（`TODO:` 上色 `TODO`），与上游取字面词一致。
+  assert.deepEqual(todoMarkerRegions('// TODO: 带冒号', [{ pattern: 'TODO:' }]), [{ start: 3, length: 4 }])
+  // 匹配串开头不是词字符 ⇒ 没有"标记词"可上色，整条不画（上游 :92 的 null 门）。
+  assert.deepEqual(todoMarkerRegions('// :TODO x', [{ pattern: ':TODO' }]), [])
+  // 区分大小写的模式按自己的档位找（上游同一份 Pattern）。
+  assert.deepEqual(todoMarkerRegions('// todo 与 TODO', [{ pattern: 'TODO', caseSensitive: true }]), [{ start: 10, length: 4 }])
+  // 坏正则退化为整条字面包含，不抛异常（与 markerMatches 同一容错口径）。
+  assert.deepEqual(todoMarkerRegions('a (b', [{ pattern: '(' }]), [{ start: 2, length: 1 }])
+})
+
 test('变更列表作用域：空集合什么都不留，路径按段归一', () => {
   const items = [{ path: 'src/a.ts' }, { path: 'src\\b.ts' }, { path: 'src/c.ts' }]
   assert.deepEqual(filterTodoItemsByPaths(items, ['src/a.ts', 'src/b.ts']).map(item => item.path), ['src/a.ts', 'src\\b.ts'])
@@ -86,7 +116,11 @@ test('作用域下拉里的「变更列表」走的是同一条过滤链', () =>
 test('面板真的接上了多行/变更列表/速度搜索（不是死代码）', () => {
   const panel = readFileSync('src/components/TodoPanel.vue', 'utf8')
   // 钉**挂点**而不是符号名：只 import 不用、或者只声明不绑定的假接线要能被照出来。
-  assert.match(panel, /item\.additional = todoContinuationLines\(lines, item\.line, item\.column/, '扫描后按文件补续行')
+  // 订正（2026-10-06 todo2）：这一条原来钉的是 `item.column` **原样**传进去，而 `SearchMatch.column`
+  // 其实是 1 基（native/search.cpp:698 的 `code_points(...) + 1`），上游比的是 0 基匹配起始偏移
+  // （IndexPatternSearcher.java:285-287）⇒ 断言改成钉"换算后的形状"，仍然精确到调用点。
+  assert.match(panel, /item\.additional = todoContinuationLines\(lines, item\.line, \(item\.column \?\? 1\) - 1/,
+    '扫描后按文件补续行（1 基列换算成 0 基偏移）')
   assert.match(panel, /v-model="multiLine"/, '分组方式弹层里有那一格')
   assert.match(panel, /cell\.display\?\.lines \?\? \[\]/, '续行渲染成自己的行')
   assert.match(panel, /:value="TODO_CHANGE_LIST_SCOPE"/, '作用域下拉里有「变更列表」')

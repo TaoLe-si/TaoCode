@@ -231,9 +231,11 @@ test('三把键与 LSP kind 的分组一一对应（kind 1 = Type，2 = Paramete
 })
 
 test('设置值 → 三档的折算：缺项/坏值都当全开（老 state 上不该整族不显示）', () => {
-  assert.deepEqual(inlayHintToggles(defaultEditorSettings), { type: true, parameter: true, other: true })
-  assert.deepEqual(inlayHintToggles(undefined), { type: true, parameter: true, other: true }, '老 state 没这三键 ⇒ 全开')
-  assert.deepEqual(inlayHintToggles({ showParameterInlayHints: false }), { type: true, parameter: false, other: true })
+  // 2026-10-06（inlayparams 批）：`inlayHintToggles` 多了一项 `parameterHintExcludeList`，
+  // 这里的期望跟着**变严**（原来只核三个布尔，现在连"缺键 ⇒ 默认空清单"一起核），不是放松。
+  assert.deepEqual(inlayHintToggles(defaultEditorSettings), { type: true, parameter: true, other: true, parameterHintExcludeList: [] })
+  assert.deepEqual(inlayHintToggles(undefined), { type: true, parameter: true, other: true, parameterHintExcludeList: [] }, '老 state 没这四键 ⇒ 全开 + 不排除')
+  assert.deepEqual(inlayHintToggles({ showParameterInlayHints: false }), { type: true, parameter: false, other: true, parameterHintExcludeList: [] })
   // watch 的比较键：三档拼成一行（数组当依赖会每拍都触发）。
   assert.equal(inlayHintTogglesKey(inlayHintToggles({})), 'true,true,true')
   assert.notEqual(inlayHintTogglesKey(inlayHintToggles({ showTypeInlayHints: false })), inlayHintTogglesKey(inlayHintToggles({})))
@@ -299,7 +301,7 @@ test('三格是真设置：模型 + native 键表/默认值 + 预览白名单都
     // ⑥ 这一格真的是**读口**：关掉它只有它自己掉，另两档照旧（键名由 INLAY_HINT_SETTING_KEYS 给）。
     assert.equal(Object.keys(INLAY_HINT_SETTING_KEYS).find(g => INLAY_HINT_SETTING_KEYS[g] === key.name), key.slot,
       `${key.name} 归属的内联提示槽位应是 ${key.slot}`)
-    const expectedToggles = { type: true, parameter: true, other: true }
+    const expectedToggles = { type: true, parameter: true, other: true, parameterHintExcludeList: [] }
     expectedToggles[key.slot] = false
     assert.deepEqual(inlayHintToggles({ [key.name]: false }), expectedToggles, `${key.name} 关掉后只该影响 ${key.slot} 一档`)
   }
@@ -310,9 +312,15 @@ test('消费链路：编辑器把三档交给提示控制器，按开关过滤�
   assert.match(editor, /createInlayHints\(\{[^}]*toggles: \(\) => inlayHintToggles\(props\.settings\)/, '编辑器没有把三档交给控制器')
   // 过滤发生在拉取那一拍（editorInlayHints.ts），不在渲染层。归位/过滤由 layoutInlayHints 一次做完
   // （开关 → 排序 → 同位置去重/优先级，见 src/inlayHintLayout.ts）。
+  // 订正留痕（lsfeat 批）：这一条原来钉的是 `layoutInlayHints(attempt.value.hints, toggles, …)`，
+  // 接上按文件结果缓存（`inlayHintCache`）之后，画面那份条目改从**缓存**里的那一份归位出来 ——
+  // 意图没变（渲染前用当前开关做一次过滤归位），所以这里把"喂给 layout 的是哪一份"钉成新形状，
+  // 而不是把断言放松成 includes：过滤仍然只能在 paint() 那一处、仍然带 toggles、仍然显式不设行内上限。
   const host = read('src/editorInlayHints.ts')
   assert.match(host, /const toggles = deps\.toggles\?\.\(\) \?\? DEFAULT_INLAY_HINT_TOGGLES/, '每次拉取都要重取开关')
-  assert.match(host, /layoutInlayHints\(result\.hints, toggles,/)
+  assert.match(host, /const layout = layoutInlayHints\(stored\.map\(item => item\.highlightingInfo\), toggles, \{ maxPerLine: NO_INLAY_HINT_LINE_LIMIT \}\)/,
+    '渲染前归位必须是「缓存里那份服务器原文 + 当前开关」这一种接法')
+  assert.match(host, /const stored = inlayHintCache\.highlightingsFor\(path\)/, '画的那一份必须来自结果缓存')
   // 改设置要能重画：关掉一档得把已经画出来的收走。
   assert.match(editor, /watch\(\(\) => inlayHintTogglesKey\(inlayHintToggles\(props\.settings\)\), \(\) => inlayHints\.schedule\(\)\)/)
 })
@@ -320,6 +328,9 @@ test('消费链路：编辑器把三档交给提示控制器，按开关过滤�
 test('页面：三个复选框挂在编辑器下，且不渲染上游那些本仓没有对应物的入口', () => {
   const page = read('src/components/InlayHintsSettingsPage.vue')
   assert.match(page, /:checked="settings\[INLAY_HINT_SETTING_KEYS\[group\.id\]\]"/, '复选框要绑到 INLAY_HINT_SETTING_KEYS 的那一格')
+  // T-1（threecells 实测出的盲区）：删掉这一行 ⇒ 全门族 0 新增红，三格点了不记账。
+  assert.match(page, /@change="toggle\(INLAY_HINT_SETTING_KEYS\[group\.id\], \(\$event\.target as HTMLInputElement\)\.checked\)"/,
+    '复选框的 change 必须把这一格写回同名设置键（键名取自 INLAY_HINT_SETTING_KEYS，不许在页面里现抄字符串）')
   assert.match(page, /function toggle\(key: InlayHintSettingKey, checked: boolean\)/)
   assert.match(page, /v-for="group in GROUPS"/)
   // 上游有、本仓没有：不渲染（按语言分组的清单节点 / 逐 case 明细 / 排除清单入口）。
@@ -330,4 +341,8 @@ test('页面：三个复选框挂在编辑器下，且不渲染上游那些本�
   const dialog = read('src/components/SettingsDialog.vue')
   assert.match(dialog, /<InlayHintsSettingsPage :settings="editor" :busy="busy" \/>/)
   assert.match(dialog, /data-page="inlay\.hints"/)
+  // T-2（threecells 实测出的第二个盲区）：把 `SettingsDialog.vue:302` 那句 emit 注掉 ⇒ 全门族 0 新增红，
+  // 于是"三格写了但对话框根本没把编辑器档发给宿主"这件事以前无人报警。
+  assert.match(dialog, /function applyEditor\(close = false\) \{[^\n]*\n\s*if \(!props\.busy && validEditor\.value && editorForm\.value\?\.reportValidity\(\)\) emit\('save', \{ \.\.\.editor\.value \}, close\)/,
+    '「应用」必须把整份编辑器档（含内联提示那三格）发给宿主 settings.update；载荷是整本账，不是挑三把键发')
 })

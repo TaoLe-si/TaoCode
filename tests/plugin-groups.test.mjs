@@ -244,3 +244,23 @@ test('接线：对话框按分组渲染，宿主侧批量启停走同一条 plug
   const extras = read('src/projectExtras.ts')
   assert.match(extras, /plugin\.setEnabled/)
 })
+
+// 清单字段 `<change-notes>` 的全链：原生解析 → JSON → 前端类型 → 详情面板。
+// 上游同一族字段：元素名 `PluginXmlConst.kt:42`、读取 `XmlReader.kt:193`、
+// getter `IdeaPluginDescriptorImpl.kt:195`、展示 `PluginDetailsPageComponent.kt:1394`
+// （那块面板 `:847-862` 建，内容为 null 就整块不可见 ⇒ 本仓「没写不渲染」不是自创）。
+// 这一条把五段各钉死：任何一段被删/改名，这里就红（原生侧的解析口径由 `native/plugins_test.cpp` 管）。
+test('接线：变更说明（changeNotes）从原生解析一路走到详情面板，且没写就不渲染', () => {
+  assert.match(read('native/plugins.hpp'), /^ {4}std::string change_notes;$/m, 'Plugin 结构里要有这一格，否则 JSON 无从填')
+  assert.match(read('native/plugins.cpp'),
+    /plugin\.change_notes = text_or\(document, "changeNotes", 1200\);/,
+    '清单里的键名固定是 changeNotes（本仓 manifest 用 camelCase，与 fileNames / optionalDepends 同形制）')
+  assert.match(read('native/plugins.cpp'), /\{"changeNotes", plugin\.change_notes\}/, 'to_json 要把它带给前端')
+  assert.match(read('src/pluginGroups.ts'), /^ {2}changeNotes\?: string$/m, '前端 PluginInfo 要带这个可选字段')
+  const dialog = read('src/components/PluginDialog.vue')
+  assert.match(dialog, /<p v-if="selected\.changeNotes" class="plugin-detail-desc">变更说明：\{\{ selected\.changeNotes \}\}<\/p>/,
+    '详情面板那一行只在清单真写了说明时出现（不放空控件）')
+  assert.match(read('native/plugins_test.cpp'),
+    /check\(find_plugin\(plugins, "long_notes"\)\.change_notes\.empty\(\)/,
+    '「超过 1200 字符 = 没写」这条口径要有原生判据守着')
+})

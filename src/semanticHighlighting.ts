@@ -294,10 +294,24 @@ export class SemanticHighlightingCache {
 
 // ———————————————————————————————— 按特性的缓存注册表（LspHighlightingCacheRegistry）
 
+/**
+ * 一条按特性的高亮缓存。上游那张表里每条都同时承担三件事
+ * （`LspHighlightingCacheRegistry.kt:42-56`）：`fileEdited` 扇给**所有**缓存（`:43`）、
+ * `clearCache` 整族清（`:47`）、`invalidatePulledResults` 只扇给 `supportsPull` 的那几条（`:55`）。
+ * 本仓目前实现了后两件；`fileEdited` 那一条的扇出点在
+ * `src/lspNavigation.ts` 的编辑回调里逐族调（诊断那一族已经调），
+ * 剩下几族要等各自的持有方登记进来 —— 见 docs/wiring-requests-2026-10-06-hlregistry.md R3。
+ */
 interface HighlightingFeature {
   id: string
   /** 这一条的 provider 名（取自 `src/lspFeatureMatrix.ts`，与原生 `provider_for` 同一套）。 */
   provider: string
+  /**
+   * 上游 `LspHighlightingCache.kt:55` 的 `supportsPull`：`false` = 这一族由服务端**推**
+   * （上游只有 `LspPublishDiagnosticsCache.kt:31` 这一条是 `false`，注册在注册表 `:26`），
+   * 作废它没有意义 —— 服务端自己会重发。注册表的那一条扇出必须按这一格过滤（`:54-56`）。
+   */
+  supportsPull: boolean
   cache: { clearCache(): void; invalidate(document: object): void }
 }
 
@@ -308,11 +322,25 @@ const highlightingFeatures = new Map<string, HighlightingFeature>()
  * **特性必须在能力表里登记过**才收：没登记 = 客户端没声明这条 capability = 这条链根本不该存在
  * （上游那时 `isSupportedForFile` 直接返回 false，请求不会发出去）。
  * 同一个 id 重复登记会顶掉旧的（本仓的实例都在模块顶层建一次，这里只兜住热重载）。
+ *
+ * 参数从 `SemanticHighlightingCache` 换成结构类型（2026-10-06 hlregistry）：上游那张表里
+ * 九条缓存是**九个不同的子类**，共同点只有 `LspHighlightingCache` 那三个方法；本仓的
+ * `HighlightingSnapshotCache`（`src/lspHighlightingCache.ts:199`，按 path 键）与
+ * `SemanticHighlightingCache`（按文档对象键）同样是两种键、同一套协议。钉死具体类就把
+ * 第二族永远挡在表外了 —— 现存的调用点（`:337` 与 `tests/semantic-highlighting.test.mjs:122`）
+ * 传的都是同一个形状，不需要改。
  */
-export function registerHighlightingFeature(cache: SemanticHighlightingCache): boolean {
+export function registerHighlightingFeature(cache: {
+  featureId: string
+  supportsPull?: boolean
+  clearCache(): void
+  invalidate(document: object): void
+}): boolean {
   const row = lspFeatureRow(cache.featureId)
   if (!row || row.provider === '') return false
-  highlightingFeatures.set(cache.featureId, { id: cache.featureId, provider: row.provider, cache })
+  highlightingFeatures.set(cache.featureId, {
+    id: cache.featureId, provider: row.provider, supportsPull: cache.supportsPull ?? true, cache,
+  })
   return true
 }
 
@@ -321,10 +349,20 @@ export function highlightingFeatureIds(): string[] {
   return [...highlightingFeatures.keys()]
 }
 
-/** 这份文档在每条按特性缓存里作废（上游 `invalidatePulledResults(file)`，`:54-56`）。 */
+/**
+ * 这份文档在每条按特性缓存里作废（上游 `invalidatePulledResults(file)`，`:54-56`）。
+ * 上游那一行是 `allCaches.forEach { if (it.supportsPull) it.forceFullRepull(file) }` ——
+ * **推的那一条要跳过**（它的陈旧由服务端重发来收），本轮把这一问补上：原来是无条件扇给表里每一条。
+ * 返回值也从「表里一共几条」改成「这一拍真的作废了几条」，判据才测得出过滤生效。
+ */
 export function invalidatePulledResults(document: object): number {
-  for (const feature of highlightingFeatures.values()) feature.cache.invalidate(document)
-  return highlightingFeatures.size
+  let invalidated = 0
+  for (const feature of highlightingFeatures.values()) {
+    if (!feature.supportsPull) continue
+    feature.cache.invalidate(document)
+    ++invalidated
+  }
+  return invalidated
 }
 
 /**

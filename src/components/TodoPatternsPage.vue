@@ -6,9 +6,15 @@
 //     id="preferences.toDoOptions" key="title.todo" bundle="messages.IdeBundle"/>`
 // —— groupId="editor"，所以这一页属于**编辑器**，不是项目结构（此前放在「项目结构」页里是本批修正的错位）。
 //
-// 模式表的每一行是 `模式 + 区分大小写 + 颜色`（`TodoPattern.java` / `TodoConfigurable` 的
-// PatternTable）。TaoCode 的 TODO 索引是 `src/todoTree.ts` 按正则扫描，`caseSensitive` 已全链路；
-// 颜色列需要颜色方案支持，登记在 docs/class-parity-todo.md（本仓没有色板页），不造假控件。
+// 模式表的每一行是 `模式 + 说明 + 颜色 + 区分大小写`（`TodoPattern.java` 的
+// `pattern` / `case-sensitive` 两个属性 + `PatternsTableModel.java:13` 的三列 Icon | Case Sensitive | Pattern；
+// 「说明」是本仓给标记起的名字，上游没有这一列）。
+// 2026-10-06 todo2 收回此前那句「`caseSensitive` 已全链路」的过头话：当时它只通到**存储**
+// （`native/settings_schema.cpp:558-565` 认这个键），面板扫描把这一位写死成 false ⇒ 那一列是假控件。
+// 现在命中这一档真的通到（`src/todoView.ts` 的 `keepPatternHits` + `TodoPanel.vue` 的扫描末尾），
+// **只剩**提交前 TODO 检查那一处还写死 false（`SourceControl.vue:487`，需要别人配合，
+// 见 docs/wiring-requests-2026-10-06-todo2.md 第 1 条）。颜色列需要颜色方案支持，
+// 登记在 docs/class-parity-todo.md（本仓没有色板页），不造假控件。
 import { computed, ref, watch } from 'vue'
 import { Plus, Trash2 } from 'lucide-vue-next'
 import type { TodoPattern } from '../bridge'
@@ -89,11 +95,7 @@ function restoreFilters() {
 
 <template>
   <div class="tp-panel">
-    <p class="section-description">
-      对应 IDEA Settings › Editor › TODO（<code>TodoConfigurable</code>）：这里定义的标记会出现在
-      「TODO」工具窗口、提交前 TODO 检查与搜索里。
-    </p>
-    <p v-if="!patterns" class="section-description">尚未打开项目。TODO 模式随项目保存，请先打开一个项目。</p>
+    <p v-if="!patterns" class="section-description">尚未打开项目。</p>
     <template v-else>
       <!-- IDEA 的 PatternTable：每行「模式 | 说明 | 颜色 | 区分大小写 | 删除」，下面是 Add / Remove。 -->
       <div class="tp-table" role="table" aria-label="TODO 模式">
@@ -120,18 +122,16 @@ function restoreFilters() {
         <p v-if="!draft.length" class="tp-empty">没有标记。</p>
       </div>
       <div class="tp-actions">
-        <button type="button" class="subtle-button" :disabled="busy || draft.length >= MAX_TODO_PATTERNS" @click="add"><Plus :size="iconSize.menu" /> 添加标记</button>
+        <button type="button" class="subtle-button" :disabled="busy || draft.length >= MAX_TODO_PATTERNS" @click="add"><Plus aria-hidden="true" :size="iconSize.menu" /> 添加标记</button>
         <button type="button" class="primary-button" :disabled="busy || !dirty" @click="save">保存 TODO 模式</button>
         <button type="button" class="subtle-button" :disabled="busy || !dirty" @click="fillFrom(props.patterns)">还原</button>
         <span class="tp-note">{{ note || (dirty ? '有未保存的改动' : '已与项目同步') }}</span>
       </div>
       <p v-if="duplicates.length" class="tp-error" role="alert">标记重复：{{ duplicates.join('、') }}</p>
-      <p class="field-hint">「区分大小写」对应 IDEA <code>TodoPattern.isCaseSensitive()</code>（模式表的对应列），关闭时按不区分大小写匹配。</p>
 
       <!-- IDEA 的过滤器表（TodoConfiguration 的 myTodoFilters + `FilterDialog`）：一个名字 + 一组标记。 -->
       <section class="tp-filters" aria-labelledby="tp-filters-title">
         <h3 id="tp-filters-title" class="tp-subhead">过滤器</h3>
-        <p class="field-hint">「TODO」工具窗口的过滤器下拉选中一个过滤器后，只留下属于它的标记（IDEA 的 <code>TodoFilter</code>）；过滤器是应用级设置，随本机保存。</p>
         <div v-for="(filter, index) in filterDraft" :key="index" class="tp-filter-row">
           <input v-model="filter.name" spellcheck="false" placeholder="过滤器名" :aria-label="`第 ${index + 1} 个过滤器名字`" />
           <div class="tp-filter-patterns" role="group" :aria-label="`第 ${index + 1} 个过滤器的标记`">
@@ -145,7 +145,7 @@ function restoreFilters() {
         </div>
         <p v-if="!filterDraft.length" class="tp-empty">没有过滤器。</p>
         <div class="tp-actions">
-          <button type="button" class="subtle-button" :disabled="busy || filterDraft.length >= MAX_TODO_FILTERS" @click="addFilter"><Plus :size="iconSize.menu" /> 添加过滤器</button>
+          <button type="button" class="subtle-button" :disabled="busy || filterDraft.length >= MAX_TODO_FILTERS" @click="addFilter"><Plus aria-hidden="true" :size="iconSize.menu" /> 添加过滤器</button>
           <button type="button" class="primary-button" :disabled="busy || !filterDirty" @click="saveFilters">保存过滤器</button>
           <button type="button" class="subtle-button" :disabled="busy || !filterDirty" @click="restoreFilters">还原</button>
           <span class="tp-note">{{ filterNote || (filterDirty ? '有未保存的改动' : '已保存') }}</span>

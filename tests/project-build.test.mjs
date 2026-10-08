@@ -12,6 +12,7 @@ import {
   GRADLE_FORCE_REBUILD_FLAG,
   MAVEN_COMPILE_GOAL,
   buildPlan,
+  compileFilesPlan,
   defaultJavaOutputPath,
   gradleBuildCommand,
   javacArgFile,
@@ -206,4 +207,42 @@ test('projectKindOf：委托参数只影响 Gradle 那一档', () => {
   assert.equal(projectKindOf(layout({ gradle: true, cmake: true }), false), 'cmake')
   assert.equal(projectKindOf(layout({ gradle: true }), false), '', '不委托、又没有 Java 源 → 交给项目配置的命令')
   assert.equal(projectKindOf(layout({ maven: true }), false), 'maven', '委托参数不影响 Maven（本仓还没做 Maven 的委托设置）')
+})
+
+// 「编译当前文件」（上游 `CompileAction.java:56-59` 的 `compile(files)` 那一支；
+// `getCompilableFiles`（`:178-208`）只收源码内容里的可编译类型 = 本仓的 .java）。
+test('compileFilesPlan：javac 项目只编选中的 .java（逐文件）', () => {
+  const plan = compileFilesPlan(request_({
+    layout: layout({ java: true }), gradleDelegated: false, sources: ['src/Main.java', 'src/Other.java'],
+  }), ['src/Main.java', String.raw`src\Util.java`, 'README.md'])
+  assert.equal(plan.kind, 'javac')
+  assert.ok(plan.command.includes('javac'), plan.command)
+  // argfile 只含两个 .java（README.md 被过滤），且反斜杠路径归一成 `/`。
+  assert.equal(plan.argFile, '"src/Main.java"\r\n"src/Util.java"')
+  assert.match(plan.reason, /2 个 Java 源文件/)
+})
+
+test('compileFilesPlan：没有可编译文件时不产出命令（不臆造）', () => {
+  const plan = compileFilesPlan(request_({ layout: layout({ java: true }), gradleDelegated: false, sources: ['src/Main.java'] }), ['notes.txt'])
+  assert.equal(plan.command, '')
+  assert.match(plan.reason, /没有可编译的 Java 源文件/)
+})
+
+test('compileFilesPlan：Gradle/Maven 没有「只编文件」的粒度 ⇒ 退回整模块构建并说明', () => {
+  const gradle = compileFilesPlan(request_({ layout: layout({ gradle: true, java: true }) }), ['src/Main.java'])
+  assert.equal(gradle.kind, 'gradle')
+  assert.match(gradle.reason, /没有“只编选中文件”的粒度/)
+  assert.match(gradle.command, new RegExp(GRADLE_BUILD_TASKS))
+  const maven = compileFilesPlan(request_({ layout: layout({ maven: true }) }), ['src/Main.java'])
+  assert.equal(maven.kind, 'maven')
+  assert.match(maven.reason, /退回整模块构建/)
+})
+
+test('接线：构建菜单有「编译当前文件」，startBuild 收第二个参数', () => {
+  const menu = read('src/menus/buildMenu.ts')
+  assert.match(menu, /id: 'build\.file'/)
+  assert.match(menu, /ctx\.startBuild\(false, true\)/, '那一行要传 filesOnly')
+  const actions = read('src/runActions.ts')
+  assert.match(actions, /async function startBuild\(rebuild: boolean, filesOnly = false\)/)
+  assert.match(actions, /compileFilesPlan\(request, \[activeFile\]\)/)
 })

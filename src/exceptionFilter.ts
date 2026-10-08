@@ -175,14 +175,15 @@ export function parseStackFrame(text: string): StackFrameParts | null {
   return { method: match[1]!, file: match[2]!, line: match[3] ? Number(match[3]) : 0 }
 }
 
-const FRAME_LINE = /^\s*at\s+[\w$.<>]+\(.*\)\s*$/
+const FRAME_LINE = /^\tat .*$|^\t\.\.\. \d+ more$/
+const ASYNC_STACK_TRACE_PREFIX = '\tat --- Async.Stack.Trace --- '
 
 export interface StackFoldableLine { text: string }
 
 /**
- * Java 栈帧折叠（上游控制台对 `at ...` 连排的折叠行为）。
- * 连续的栈帧超过 `keep + 1` 行时，只保留前 `keep` 行与最后一行，中间的行丢弃并在
- * 保留的最后一行上标注 `foldedFrames`（渲染成「… 其余 N 行栈帧」）。`expanded` 为 true 时原样返回。
+ * Java 栈帧折叠（`StackTraceFolding.shouldFoldLine`）：以 Tab + `at ` 开头的行与格式为 Tab + `... N more` 的行属于连续栈帧，其他行会重置计数。
+ * 阈值后的帧并为独立占位行；async sentinel 位于被折叠段时使用上游异步占位文案。
+ * `expanded` 为 true 时原样返回。
  */
 export function foldJavaStackFrames<T extends StackFoldableLine>(
   lines: readonly T[], expanded: boolean, keep = 2,
@@ -196,10 +197,15 @@ export function foldJavaStackFrames<T extends StackFoldableLine>(
     let end = index
     while (end < lines.length && FRAME_LINE.test(lines[end]!.text)) end++
     const run = lines.slice(index, end)
-    if (run.length <= keep + 1) { for (const entry of run) out.push({ ...entry }); index = end; continue }
+    if (run.length <= keep) { for (const entry of run) out.push({ ...entry }); index = end; continue }
     for (let i = 0; i < keep; i++) out.push({ ...run[i]! })
-    const last = run[run.length - 1]!
-    out.push({ ...last, foldedFrames: run.length - keep - 1 })
+    const folded = run.slice(keep)
+    const foldedFrames = folded.length
+    const includesAsync = folded.some(entry => entry.text.startsWith(ASYNC_STACK_TRACE_PREFIX))
+    const text = includesAsync
+      ? `\t<${foldedFrames} 个折叠帧(包括异步堆栈跟踪)>`
+      : `\t<${foldedFrames} 个折叠帧>`
+    out.push({ ...folded[0]!, text, foldedFrames })
     index = end
   }
   return out

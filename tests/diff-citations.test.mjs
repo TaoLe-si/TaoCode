@@ -64,6 +64,40 @@ export const ANCHORS = [
   { cite: 'UnifiedFragmentBuilder.kt:80-92', path: 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedFragmentBuilder.kt', from: 80, to: 92, must: /appendText\(Side\.LEFT[\s\S]*appendText\(Side\.RIGHT/, why: '一个改动块在统一文档里**先出删除行、再出新增行**的次序（diff-unified 第一条断言的依据）' },
   { cite: 'UnifiedFoldingModel.java:36', path: 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedFoldingModel.java', from: 36, to: 36, must: /settings\.range == -1/, why: '上下文范围 = 禁用时统一视图同样整份不建折叠（与并排视图同一档）' },
   { cite: 'LineNumberConvertor.java:121-123', path: 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/LineNumberConvertor.java', from: 121, to: 123, must: /myFragments\.put\(masterStart, new Data\(masterLength, slaveStart, slaveLength\)\)/, why: '统一行号 ↔ 两侧行号的映射表本体（本仓换算不到落 null 的那一侧由此而来）' },
+  // —— 补丁块头「声明行数 = 正文行数」这一族（patch3 本轮的承重坐标，逐条 sed 打开核过）——
+  { cite: 'UnifiedDiffWriter.java:220-225', path: 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/UnifiedDiffWriter.java', from: 220, to: 225, must: /@@ -%s,%s \+%s,%s @@/, why: '写头：那两个「行数」= 尾下标减头下标（`src/diffText.ts` 的生成侧照它）' },
+  { cite: 'PatchReader.java:357-359', path: 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/PatchReader.java', from: 357, to: 359, must: /linesBeforeText == null \? 1/, why: '省略第二个数就是 1（`parseHunkHeader` 同款缺省）' },
+  { cite: 'PatchReader.java:363-364', path: 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/PatchReader.java', from: 363, to: 364, must: /new PatchHunk\(startLineBefore - 1, startLineBefore \+ linesBefore - 1/, why: '声明跨度 = 这个区间；`-l,0` 时上游给出反向区间 ⇒ `patchHunkStartIndex` 按 git 的 `@@ -l,s` 语义另算' },
+  { cite: 'PatchHunkUtil.kt:10-24', path: 'platform/vcs-api/vcs-api-core/src/com/intellij/openapi/diff/impl/patch/PatchHunkUtil.kt', from: 10, to: 24, must: /PatchLine\.Type\.CONTEXT -> \{[\s\S]*end1\+\+[\s\S]*end2\+\+/, why: '数行：REMOVE 只加 before、ADD 只加 after、CONTEXT 两侧都加（`countsOfSide` 就是它）' },
+  { cite: 'PlainSimplePatchApplier.java:114-121', path: 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/apply/PlainSimplePatchApplier.java', from: 114, to: 121, must: /baseCount != baseEnd - baseStart[\s\S]*patchedCount != patchedEnd - patchedStart/, why: '应用侧的账目核对：块头声明与正文实际不符 ⇒ PatchApplyException（`hunkCountsMismatch` 的依据）' },
+  { cite: 'VcsBundle.properties:444-445', path: 'platform/vcs-api/vcs-api-core/resources/messages/VcsBundle.properties', from: 444, to: 445, must: /patch\.simple\.apply\.hunk\.base\.body\.error[\s\S]*patched\.body\.error/, why: '那两条失败文案的真身（期望 - 实际）' },
+  { cite: 'LineTokenizer.kt:27', path: 'platform/util/base/multiplatform/src/com/intellij/openapi/util/text/LineTokenizer.kt', from: 27, to: 27, must: /fun advance\(\)/, why: '`\\r`、`\\n`、`\\r\\n` 三种都算行分隔符（`splitPatchLines` 的口径）' },
+  { cite: 'LineTokenizer.kt:81-85', path: 'platform/util/base/multiplatform/src/com/intellij/openapi/util/text/LineTokenizer.kt', from: 81, to: 85, must: /if \(includeSeparators\)/, why: 'false 那一支：分隔符不进 row 内容 ⇒ CRLF 文件的行不带 `\\r`' },
+  { cite: 'LineTokenizer.kt:91', path: 'platform/util/base/multiplatform/src/com/intellij/openapi/util/text/LineTokenizer.kt', from: 91, to: 91, must: /if \(!skipLastEmptyLine && stringEndsWithSeparator\(tokenizer\)\) lines\.add\(""\)/, why: '结尾那个空元素默认**不**保留；本仓保留（`splitPatchLines` 的注释写明这条差别）' },
+  { cite: 'PatchReader.java:66', path: 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/PatchReader.java', from: 66, to: 66, must: /LineTokenizer\.tokenizeIntoList\(patchContent, false\)/, why: '读补丁一侧的切行' },
+  { cite: 'GenericPatchApplier.java:64', path: 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/apply/GenericPatchApplier.java', from: 64, to: 64, must: /LineTokenizer\.tokenize\(text, false\)/, why: '切目标文件一侧用的是同一个切法 ⇒ 两侧行尾口径必须一致' },
+  { cite: 'LineOffsetsUtil.java:13', path: 'platform/diff-impl/src/com/intellij/diff/tools/util/text/LineOffsetsUtil.java', from: 13, to: 13, must: /Does not support CRLF separators/, why: '上游明写：用之前先 convertLineSeparators（本仓 `applyHunksToText` 的 separator 由此来）' },
+  { cite: 'BaseRevisionTextPatchEP.java:99', path: 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/BaseRevisionTextPatchEP.java', from: 99, to: 99, must: /return StringUtil\.convertLineSeparators\(content\)/, why: '基线内容进补丁链之前先归一行尾' },
+  // —— 第一百零七批（mergeverdict lane）新增的两族：Myers→Patience 退路、公平迭代器校验 ——
+  // 这 14 条都是本 lane 自己在参考树 `find -name` + 逐行打开核过的（2026-10-06），
+  // 记账见 `docs/batch-2026-10-06-mergeverdict.md` §B2/§D/§E（§E 里同时记了 `Diff.kt`/`MyersLCS.kt`
+  // 一族在本仓旧注释里的**行号漂移**：阈值公式在 `:76-78` 而不是 `:64-70`，抛出点在 `:190` 而不是 `:186-188`）。
+  { cite: 'Diff.kt:88-97', path: 'platform/util/diff/src/com/intellij/util/diff/Diff.kt', from: 88, to: 97, must: /catch \(_: FilesTooBigForDiffException\)[\s\S]*execute\(true\)/, why: 'Myers 超阈值 ⇒ 改用 Patience 的那条退路本体（`src/diffAlign.ts` 的 `alignLines` 照它）' },
+  { cite: 'MyersLCS.kt:76-78', path: 'platform/util/diff/src/com/intellij/util/diff/MyersLCS.kt', from: 76, to: 78, must: /executeWithThreshold[\s\S]*20000 \+ 10 \* sqrt/, why: '阈值公式：`tests/diff-patience.test.mjs` 的触发条件就按它复算' },
+  { cite: 'MyersLCS.kt:188-190', path: 'platform/util/diff/src/com/intellij/util/diff/MyersLCS.kt', from: 188, to: 190, must: /throw FilesTooBigForDiffException\(\)/, why: '跑不完的出口（本仓 `MyersAligner.run` 在这里返回 false）' },
+  { cite: 'MyersLCS.kt:56', path: 'platform/util/diff/src/com/intellij/util/diff/MyersLCS.kt', from: 56, to: 56, must: /fun executeLinear\(\)/, why: 'Patience 内层用的**不限阈值**那一档' },
+  { cite: 'PatienceIntLCS.kt:32-34', path: 'platform/util/diff/src/com/intellij/util/diff/PatienceIntLCS.kt', from: 32, to: 34, must: /failOnSmallReduction[\s\S]*if \(failOnSmallReduction\) 2 else -1/, why: '退路带 `execute(true)` ⇒ 阈值计数器取 2 的次序' },
+  { cite: 'PatienceIntLCS.kt:73-76', path: 'platform/util/diff/src/com/intellij/util/diff/PatienceIntLCS.kt', from: 73, to: 76, must: /if \(matching == null\)[\s\S]*executeLinear/, why: '没有唯一锚点时交给不限阈值的 Myers' },
+  { cite: 'PatienceIntLCS.kt:153-157', path: 'platform/util/diff/src/com/intellij/util/diff/PatienceIntLCS.kt', from: 153, to: 157, must: /private fun checkReduction/, why: '子问题没把任一侧减半就再抛（本仓最后一级仍是粗退路）' },
+  { cite: 'UniqueLCS.kt:36-39', path: 'platform/util/diff/src/com/intellij/util/diff/UniqueLCS.kt', from: 36, to: 39, must: /map\.put\(first\[index\], -1\)/, why: '出现第二次的行**不**当锚点（`uniqueLcs` 的唯一性判定）' },
+  { cite: 'UniqueLCS.kt:59-61', path: 'platform/util/diff/src/com/intellij/util/diff/UniqueLCS.kt', from: 59, to: 61, must: /return null/, why: '一个锚点都没有 ⇒ null ⇒ 退回 Myers' },
+  { cite: 'UniqueLCS.kt:101-105', path: 'platform/util/diff/src/com/intellij/util/diff/UniqueLCS.kt', from: 101, to: 105, must: /private fun binarySearch/, why: 'LIS 的二分查找 + `check(i < 0)`（本仓 `insertionPoint` 的同一条前提）' },
+  { cite: 'Reindexer.kt:15', path: 'platform/util/diff/src/com/intellij/util/diff/Reindexer.kt', from: 15, to: 15, must: /fun discardUnique/, why: '上游在 Myers 前先摘掉单侧唯一行 —— 本仓没做这一道，差别写在 `src/diffAlign.ts` 头注' },
+  { cite: 'DiffIterableUtil.kt:146-150', path: 'platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffIterableUtil.kt', from: 146, to: 150, must: /fun setVerifyEnabled/, why: '`@TestOnly` 的校验开关 ⇒ 默认关，生产行为一字不变' },
+  { cite: 'DiffIterableUtil.kt:168-176', path: 'platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffIterableUtil.kt', from: 168, to: 176, must: /fun verifyFair[\s\S]*check\(range\.end1 - range\.start1 == range\.end2 - range\.start2\)/, why: 'fair 的定义 = 未更改段两侧等长（`verifyFairSpans` 那条判据）' },
+  { cite: 'DiffIterableUtil.kt:187-207', path: 'platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffIterableUtil.kt', from: 187, to: 207, must: /private fun verifyFullCover[\s\S]*check\(last1 == range\.start1\)/, why: '铺满 + 首尾衔接 + 等/不等交替（本仓四条 check 的出处）' },
+  { cite: 'FairDiffIterable.kt:12', path: 'platform/util/diff/src/com/intellij/diff/comparison/iterables/FairDiffIterable.kt', from: 12, to: 12, must: /verifyFair/, why: '这套校验就是 `FairDiffIterable` 的名片（§B1 原话"没有那套可校验契约"的所在）' },
+  { cite: 'ChunkOptimizer.kt:174-261', path: 'platform/util/diff/src/com/intellij/diff/comparison/ChunkOptimizer.kt', from: 174, to: 261, must: /class LineChunkOptimizer/, why: '空行边界那一档（`src/diffSmartLines.ts` 的 `lineShift`）—— §B8 判词"没做"的订正依据' },
 ]
 
 /** 本域出现过的裸文件名 → 参考树里的唯一路径（`find -name` 逐条解析过；两份同名的已选生产那一份）。 */
@@ -125,6 +159,40 @@ export const BARE_NAMES = {
   'MergedMainMenu.kt': null,
   'ApplyPatchAction.kt': null,
   'ApplyPatchFromClipboardAction.kt': null,
+  // 补丁块头账目与行尾一族（patch3 本轮 `find -name` 逐条解析：下面 8 个名字在参考树里都只有唯一一份，
+  // 其中 LineTokenizer 另有 `platform/diff-api/src/com/intellij/openapi/diff/LineTokenizer.java` 那份是 **.java**，
+  // 与本处 **.kt** 不是同一个文件（`PatchReader.java:7` 的 import 走的是 .kt 那个包名）。
+  'PatchHunkUtil.kt': 'platform/vcs-api/vcs-api-core/src/com/intellij/openapi/diff/impl/patch/PatchHunkUtil.kt',
+  'LineTokenizer.kt': 'platform/util/base/multiplatform/src/com/intellij/openapi/util/text/LineTokenizer.kt',
+  'LineOffsetsUtil.java': 'platform/diff-impl/src/com/intellij/diff/tools/util/text/LineOffsetsUtil.java',
+  'BaseRevisionTextPatchEP.java': 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/BaseRevisionTextPatchEP.java',
+  'VcsBundle.properties': 'platform/vcs-api/vcs-api-core/resources/messages/VcsBundle.properties',
+  'CreatePatchFromChangesAction.java': 'platform/vcs-impl/src/com/intellij/openapi/vcs/changes/actions/CreatePatchFromChangesAction.java',
+  'CreatePatchCommitExecutor.java': 'platform/vcs-impl/src/com/intellij/openapi/vcs/changes/patch/CreatePatchCommitExecutor.java',
+  'PatchWriter.java': 'platform/vcs-impl/src/com/intellij/openapi/vcs/changes/patch/PatchWriter.java',
+  // —— mergeverdict lane 新增（第一百零七批）：`find -name` 在参考树逐条解析过，每个名字都只有唯一一份 ——
+  'PatienceIntLCS.kt': 'platform/util/diff/src/com/intellij/util/diff/PatienceIntLCS.kt',
+  'UniqueLCS.kt': 'platform/util/diff/src/com/intellij/util/diff/UniqueLCS.kt',
+  'Reindexer.kt': 'platform/util/diff/src/com/intellij/util/diff/Reindexer.kt',
+  'FilesTooBigForDiffException.kt': 'platform/util/diff/src/com/intellij/util/diff/FilesTooBigForDiffException.kt',
+  'FairDiffIterable.kt': 'platform/util/diff/src/com/intellij/diff/comparison/iterables/FairDiffIterable.kt',
+  // —— merge 启用判据一族（2026-10-06 红测巡检补登记）：`src/mergeResolve.ts` / `src/mergeResolveHost.ts`
+  // 引的上游三个类。`find -name` 逐条在参考树解析过，每个名字都只有唯一一份；引到的行也已实读核对：
+  // `MergeConflictModel.kt:146-152` = `hasNonConflictedChanges` / `hasAutoResolvableConflictedChanges`，
+  // `MagicResolvedConflictsAction.kt:17` 与 `ApplyNonConflictsAction.kt:31` 都是 `setEnabled(…)`。
+  'MergeConflictModel.kt': 'platform/diff-impl/src/com/intellij/diff/merge/MergeConflictModel.kt',
+  'MagicResolvedConflictsAction.kt': 'platform/diff-impl/src/com/intellij/diff/merge/MagicResolvedConflictsAction.kt',
+  'ApplyNonConflictsAction.kt': 'platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt',
+  // —— 合成差异视图一族（2026-10-06 红测巡检补登记）：`src/diffCombined.ts` 引的上游类。
+  // `find -name CombinedDiffViewer.kt` 在参考树里唯一命中；引到的两段已实读核对：
+  // `:314-341` = `canGoNextDiff`/`goNextDiff`/`canGoPrevDiff`/`goPrevDiff`，
+  // `:346-362` = `goNextBlock`/`goPrevBlock`（先滚到块边界再选块）。
+  'CombinedDiffViewer.kt': 'platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffViewer.kt',
+  // `tests/diff-combined.test.mjs` 引的两个：`find -name` 各唯一命中，引到的行已实读核对 ——
+  // `CombinedDiffActions.kt:29-82` = `CombinedNextBlockAction` 一族，`$default.xml:609-614` =
+  // `Diff.PrevChange`/`Diff.NextChange` 的 `alt shift LEFT/RIGHT` 键位。
+  'CombinedDiffActions.kt': 'platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffActions.kt',
+  '$default.xml': 'platform/platform-resources/src/keymaps/$default.xml',
 }
 
 const CITE = /(?:^|[^A-Za-z0-9_./$-])([A-Za-z0-9_.$]+)\.(kt|java|xml|properties)(?::(\d+)(?:-(\d+))?)?/g

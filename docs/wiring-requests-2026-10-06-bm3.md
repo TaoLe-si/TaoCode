@@ -272,3 +272,15 @@
 
 - `docs/wiring-requests-2026-10-06-bookmarks.md` 的 W-3 **仍然有效**（未闭环），本文件 R-1/R-2 是它的可粘贴版；
   原文件那份给的片段与现文件逐字一致（本轮核对过），主代理二选一即可，**别两处都改**。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+**真接了 3 条（R-1 / R-2 / R-4），跳过 2 条给别的 owner。**
+
+- **R-1 已接线** `src/components/TabContextMenu.vue:68-70`：三行顺序改成上游组内顺序（添加另一书签… / 编辑描述 / Toggle），可见性条件逐字未动。
+- **R-2 已接线** `src/App.vue:2511-2512`：项目视图右键那三行同序（`addFileBookmarkToAnotherList` + `editBookmarkAt` 合并在 :2511，Toggle 移到 :2512），两个 `@click` 表达式逐字保留。
+- **R-4 已接线**：① `src/menus/navigateMenu.ts:27` `NavigateContext` 补 `cycleBookmarkInEditor: any`；② 同文件 `:184-185` 在 `navigate.bookmarkPrevious` 之后补两行 `navigate.bookmarkNextInEditor` / `navigate.bookmarkPreviousInEditor`（不写 `keys`，`enabled: ctx.hasEditor`）；③ `src/App.vue:1325` 解构补 `cycleBookmarkInEditor`、`:1591` `navigateMenuContext` 补该键。上游 `intellij.platform.bookmarks.xml:74-79`，模型侧 `src/bookmarkActions.ts:327` 已在 `:375` 的 return 里。
+- **R-3 跳过** —— 目标 `src/toolViewContext.ts` **不在本 lane 名下**（lane 所有权只有 `src/App.vue` / `src/components/**`（除四文件）/ `src/menus/**`）。需 `src/toolViewContext.ts` 的 owner 处理：把 `bookmarkLists` 那段 `.filter(!isDefault)` 换成 `panelSections(...)` + 顶部 `import { panelSections } from './bookmarkLists.ts'`。
+- **R-5 跳过** —— 核心挂点是 `src/keymap.ts`（F11 四态 + `alt 2`）与 `src/menus/navigateMenu.ts:183` 的 `keys`，`src/keymap.ts` **不在本 lane 名下**。`src/components/BookmarksPopup.vue` 虽属本 lane 可建，但请求原文自己写明「组件出现之后再动键位，否则 Shift+F11 会退化成什么都不做，比现状更差」；在拿不到 `keymap.ts` 的前提下建它 = 零消费组件。需 `src/keymap.ts` 的 owner 处理（键位 + `openBookmarksPopup('line'|'type')`），之后本 lane 可补组件。
+
+App.vue 行数：2677 → 2677（R-2 是同块内换序、R-4 是同行内加词，净 0）。

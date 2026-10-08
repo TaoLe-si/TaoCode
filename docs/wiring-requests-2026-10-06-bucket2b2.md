@@ -44,3 +44,10 @@
 - `relatedInformation` / `codeDescription` 透传：**没有提**，因为这两个字段在这棵上游基准树里搜不到任何引用点
   （`grep -rn codeDescription platform/lsp` 无命中），属"无法核实"，按规约不能拿它当依据要求宿主改动
   （详见报告 §5.4）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R1（选中行 Alt+Enter 开操作菜单）** —— 组件侧入口**已就绪**：`src/components/ProblemsPanel.vue:307-325` 有 `openMenuForSelected()` 并 `defineExpose`。但键位/动作注册落在 `src/keymapBindings.ts` + `src/actionRegistry.ts`（保留文件，非本 lane 可改面）⇒ **需 action/keymap owner** 注册 `problems.view.quickFixes`（键位取 `ShowIntentionActions`）并在 App.vue 挂载处给它一个调用点。
+- **R2（状态栏焦点态）** —— 可选；`focusChange` 事件**已就绪**（`ProblemsPanel.vue:101/:143`），宿主只需在状态栏显示「只看：〈组名〉」。本 lane 不新增（请求原文自述「不做也不影响四环」）。
+
+结论：零待接（组件侧已备好），键位/状态栏那半转给对应 owner。

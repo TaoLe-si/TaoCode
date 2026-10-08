@@ -185,3 +185,17 @@ export const INLINE_COMPLETION_DEFAULTS: InlineCompletionSettings = { enabled: t
    本轮自己也踩过同一条（凭记忆写路径 ⇒ 门当场报红 ⇒ 改正复绿），过程记在 `docs/batch-2026-10-06-completion2.md` §4。
 2. 一条**在途瞬态**的观察（不作为请求，只留痕）：本轮收尾期间 `tests/problems-panel.test.mjs` 曾以 `SyntaxError: Unexpected token '}'`（`src/problems.ts`）整文件加载失败，
    随后再跑该路径已是「文件不存在」⇒ 判定为 `problems` 域正在重写/拆分该文件的过程态，本面一行没动、也不据此提请求。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **C1（Code 菜单补全动作走同一入口）** —— 目标 `src/components/CodeEditor.vue:711`（禁改）+ `src/menus/codeMenu.ts`（本 lane）。复核 `src/editorKeymap.ts:85` 仍是 `completion: startCompletion`（未换 `startCompletionAs`）。需 CodeEditor owner（单改菜单 = 假控件）。
+- **C2** —— 不建议现在做。**C3（行内补全 provider 开关）** —— `src/settingsModel.ts`（保留）+ `SettingsDialog.vue`（本 lane）。需 settings owner 先落键。
+- **C4（ProblemsPanel 逐行抑制）** —— 属桶 2 半区，需 ProblemsPanel owner。
+- **C5 / C6** —— 裁定/现状项。S-1..S-4 —— 判据/红名单。
+
+结论：零接线（C1 转 CodeEditor owner，C3/C4 转 owner）。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「零接线（C1 转 CodeEditor owner，C3/C4 转 owner）。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

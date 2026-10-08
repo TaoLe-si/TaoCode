@@ -16,8 +16,11 @@ import { copyToClipboard } from './clipboard.ts'
 import { createHoverCache } from './hoverDocumentation.ts'
 import { createQuickDocHost } from './quickDocHost.ts'
 import { errorMessage } from './errors.ts'
+// 程序改正文（缩进转换）也要给那一篇换一个新修订号 —— 见 src/documentRevisions.ts 的三条口径。
+import { bumpDocumentRevision } from './documentRevisions.ts'
 import { makeEditorConfigReader } from './codeStyleSettings.ts'
 import { applySaveTextTransforms, offsetInText, saveTrimOptionsFor } from './editorSaveTransforms.ts'
+import { bomAfterEncodingSwitch } from './fileEncodingRules.ts'
 import type { EditorHandle, Tab } from './editorTab'
 
 export interface EditorFileOpsDeps {
@@ -73,6 +76,9 @@ async function resolveConflictReload() {
     const doc = await request<DocumentData>('file.read', { path: tab.path, encoding: tab.encoding })
     Object.assign(tab, { content: doc.content, version: doc.version, encoding: doc.encoding, bom: doc.bom, dirty: false })
     editorFor(tab.path)?.setDraft(doc.content)
+    // 「重新载入磁盘版本」把正文换掉 = 上游 documentChanged（程序性改写照样换号，
+    // `DocumentImpl.java:171` 每次 replaceString 领一个新号）⇒ 提交检查的指纹要跟着变。
+    bumpDocumentRevision(tab.path)
     if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: doc.content }).catch(() => undefined)
     notify(`已重新载入磁盘上的 ${tab.path}`)
   } catch (error) { notify(errorMessage(error), true) }
@@ -163,10 +169,14 @@ function convertIndents(mode: 'spaces' | 'tabs') {
   if (converted === text) { notify(mode === 'tabs' ? '缩进已经是制表符，无需转换。' : '缩进已经是空格，无需转换。'); return }
   editor.setDraft(converted)
   tab.dirty = true
+  // `setDraft` 走的是"程序替换整份正文"那一档（CodeEditor.vue:468 的 `replacing = true`），
+  // 它**不**发 `@change` ⇒ 上面那个每次键入换号的入口够不到这里。正文确实变了，号就得换
+  // （上游 `documentChanged` 对程序性改动同样作废，`NonModalCommitWorkflowHandler.kt:215-226`）。
+  bumpDocumentRevision(tab.path)
   if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: converted }).catch(() => undefined)
   notify(mode === 'tabs' ? '已将缩进转换为制表符（未保存），检查后按 Ctrl+S 保存。' : '已将缩进转换为空格（未保存），检查后按 Ctrl+S 保存。')
 }
-async function convertLineSeparators(separator: 'crlf' | 'lf', target?: Tab) {
+async function convertLineSeparators(separator: 'crlf' | 'lf' | 'cr', target?: Tab) {
   const tab = target ?? active.value
   if (!tab) { notify('请先打开一个文件。', true); return }
   menu.value = null
@@ -176,27 +186,32 @@ async function convertLineSeparators(separator: 'crlf' | 'lf', target?: Tab) {
   try {
     const result = await request<{ path: string; version: string; changed: boolean }>('file.lineSeparators',
       { path: tab.path, separator, content: editorFor(tab.path)?.text() ?? tab.content, expectedVersion: tab.version })
-    if (!result.changed) { notify(`${tab.path} 已经全部是${separator === 'crlf' ? ' Windows (CRLF)' : ' Unix (LF)'}行尾，无需转换。`); return }
+    const unchangedName = separator === 'crlf' ? ' Windows (CRLF)' : separator === 'cr' ? ' Classic Mac OS (CR)' : ' Unix (LF)'
+    if (!result.changed) { notify(`${tab.path} 已经全部是${unchangedName}行尾，无需转换。`); return }
     // Reload from disk so the buffer carries the file's own separators — CodeMirror
-    // splits with EditorState.lineSeparator and would otherwise re-save LF.
+    // splits with EditorState.lineSeparator and would otherwise keep the previous separator.
     const doc = await request<DocumentData>('file.read', { path: tab.path, encoding: tab.encoding })
     Object.assign(tab, { content: doc.content, version: doc.version, readOnly: doc.readOnly })
     // CodeMirror splits the document with EditorState.lineSeparator only at state
-    // creation, so a separator-only change needs one remount to show CRLF again.
+    // creation, so a separator-only change needs one remount to show the new separator.
     bufferEpoch.value++
     if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: doc.content }).catch(() => undefined)
-    notify(`已将 ${tab.path} 转换为${separator === 'crlf' ? ' Windows (CRLF)' : ' Unix and macOS (LF)'}行尾`)
+    const convertedName = separator === 'crlf' ? ' Windows (CRLF)' : separator === 'cr' ? ' Classic Mac OS (CR)' : ' Unix and macOS (LF)'
+    notify(`已将 ${tab.path} 转换为${convertedName}行尾`)
   } catch (error) { notify(errorMessage(error), true) }
 }
 // IDEA's two encoding actions: re-read the same bytes under another code page (writes
 // nothing), or keep the buffer text and rewrite the file in another encoding.
+// BOM 状态由 src/fileEncodingRules.ts 按上游 `VirtualFile.setCharset:507-511` 派生：
+// gbk/cp1252/system 这一类编码根本没有 BOM（`CharsetToolkit.java:579` `getPossibleBom` 为 null），
+// 而 `src/App.vue:2407` 只把复选框**置灰**、不清值 —— 不派生就会留下「状态说带 BOM、字节里没有」的谎。
 const encodingPrompt = ref<{ encoding: EncodingKey; bom: boolean } | null>(null)
 const encodingSelect = ref<HTMLSelectElement>()
 function openEncoding() {
   const tab = active.value
   if (!tab) { notify('请先打开一个文件。', true); return }
   menu.value = null
-  encodingPrompt.value = { encoding: tab.encoding, bom: tab.bom }
+  encodingPrompt.value = { encoding: tab.encoding, bom: bomAfterEncodingSwitch(tab.encoding, tab.bom) }
   void nextTick(() => encodingSelect.value?.focus())
 }
 async function reloadWithEncoding() {
@@ -208,6 +223,8 @@ async function reloadWithEncoding() {
     Object.assign(tab, { content: doc.content, version: doc.version, encoding: doc.encoding, bom: doc.bom, readOnly: doc.readOnly, dirty: false })
     editorFor(tab.path)?.setReadOnly(Boolean(doc.readOnly))
     editorFor(tab.path)?.setDraft(doc.content)
+    // 换编码 = 把整篇正文按另一种编码重读一遍塞回编辑器 ⇒ 正文确实变过一版，要换号（同上）。
+    bumpDocumentRevision(tab.path)
     if (isDesktop) void request('lsp.change', { path: tab.path, text: doc.content }).catch(() => undefined)
     encodingPrompt.value = null
     notify(`已按 ${encodingLabels[doc.encoding]} 重新读取 ${tab.path}`)
@@ -216,13 +233,17 @@ async function reloadWithEncoding() {
 function applyEncodingChoice() {
   const tab = active.value, choice = encodingPrompt.value
   if (!tab || !choice) return
+  const wantedBom = choice.bom
+  const bom = bomAfterEncodingSwitch(choice.encoding, wantedBom)
   tab.encoding = choice.encoding
-  tab.bom = choice.bom
+  tab.bom = bom
   // The text is unchanged; marking the buffer dirty is what makes the next save write
   // the same characters back as new bytes.
   tab.dirty = true
   encodingPrompt.value = null
-  notify(`已切换为 ${encodingLabels[choice.encoding]}${choice.bom ? '（带 BOM）' : ''}，保存时按该编码写入 ${tab.path}`)
+  // 勾选被置灰挡不住残留的 `true`：那时无效的「带 BOM」不能说出口，要说的是**为什么没有**。
+  notify(`已切换为 ${encodingLabels[choice.encoding]}${bom ? '（带 BOM）' : ''}，保存时按该编码写入 ${tab.path}`
+    + (wantedBom && !bom ? `；${encodingLabels[choice.encoding]} 没有字节顺序标记，磁盘上不会写 BOM` : ''))
 }
 // ---------------------------------------------------------------- 保存前的两条纯文本 pass
 //

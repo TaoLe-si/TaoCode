@@ -129,8 +129,8 @@ function toggleSearch(event: Event) {
         <p v-if="model.showSearchInComments" class="refactor-preview-option-note">{{ model.searchInCommentsSummary }}</p>
         <p v-if="model.conflictText" class="refactor-preview-conflict" role="alert">{{ model.conflictText }}</p>
         <div class="dialog-actions">
-          <button class="subtle-button" @click="emit('cancel')">取消</button>
           <button class="primary-button" :disabled="!canRefactor" @click="emit('refactor', model.searchInComments)">重构</button>
+          <button class="subtle-button" @click="emit('cancel')">取消</button>
         </div>
       </footer>
     </section>

@@ -445,7 +445,7 @@ void Session::dispatch_semantic_kind(const std::string& kind, const std::string&
                         // "这个文件没诊断"与"沿用上一份"是两件事。
                         if (shaped.at("kind").get<std::string>() == "full")
                             shaped["diagnostics"] = item.contains("items")
-                                                        ? shape_diagnostics(item.at("items")) : Json::array();
+                                                        ? shape_diagnostics(item.at("items"), relative) : Json::array();
                         reports.push_back(std::move(shaped));
                     }
                 on_result({{"available", true}, {"items", std::move(reports)}}, Json(nullptr));
@@ -636,7 +636,7 @@ void Session::dispatch_semantic_kind(const std::string& kind, const std::string&
         const auto previous = string_at(args, "previousResultId");
         if (!previous.empty()) arguments["previousResultId"] = previous;
         host->request("textDocument/diagnostic", std::move(arguments),
-            [on_result = std::move(on_result)](Json result, Json error) {
+            [on_result = std::move(on_result), relative](Json result, Json error) {
                 if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
                 if (!result.is_object()) { on_result({{"available", false}, {"supported", true}}, Json(nullptr)); return; }
                 const auto result_kind = string_at(result, "kind");
@@ -645,7 +645,7 @@ void Session::dispatch_semantic_kind(const std::string& kind, const std::string&
                 const auto result_id = string_at(result, "resultId");
                 if (!result_id.empty()) payload["resultId"] = result_id;
                 if (payload.at("kind").get<std::string>() == "full")
-                    payload["items"] = result.contains("items") ? shape_diagnostics(result.at("items")) : Json::array();
+                    payload["items"] = result.contains("items") ? shape_diagnostics(result.at("items"), relative) : Json::array();
                 on_result(std::move(payload), Json(nullptr));
             });
         return;

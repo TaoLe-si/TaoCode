@@ -126,3 +126,15 @@
   ⇒ 建议这一行改成 `[x]`、落点写 `src/searchEverywhereHost.ts:373-387`，并把 `:215` 那句"唯一缺口"改掉。
   ⚠ 改档位会牵动 `tests/b1-verdict.test.mjs`（它按这份表数 `[x]`/`[~]` 的条数），改的时候要同时数一次。
 - **为什么本批不自己改**：`docs/inventory/*.md` 是派单点名的保留文件。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **R-1 已接线**：`src/App.vue:2253` 的底部齿轮已是 `<ToolWindowGear :tool-window-id="bottomTab" :rows="bottomGearRows" …>`；判据 `tests/tool-window-gear.test.mjs:109` 已按新形状钉住。
+- **R-2 / R-3** —— 保留文件/判词，非本 lane。
+
+结论：R-1 已接线。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「R-1 已接线。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

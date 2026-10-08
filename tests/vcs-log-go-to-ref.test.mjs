@@ -148,7 +148,11 @@ test('「转到」那一半认的是两批合起来的候选集（jumpToRefOrHas
 
 test('接线：来源走 git.status 的分支与 git.tags，缓存随仓库根与打标签作废', () => {
   const data = read('src/vcsLogData.ts')
-  assert.match(data, /const data = await request<GitStatus>\('git\.status', \{\}\)[\s\S]*const names = data\.branches \?\? \[\]/,
+  // 原写「loadBranchNames 里直接 `await request<GitStatus>('git.status')`」：这一批把 status 收成一处
+  // `loadGitStatus()` 内存快照（首屏/刷新时读，`currentBranch` / `isOnBranch` / 分支列表共用同一份），
+  // 判据按不变量改写 —— 分支来源仍然是 `git.status` 的 `branches` 字段，只是那一份现在经 loadGitStatus 拿。
+  assert.match(data, /request<GitStatus>\('git\.status', \{\}\)/, '分支来源真的打 git.status')
+  assert.match(data, /const data = await loadGitStatus\(\)[\s\S]*const names = data\.branches \?\? \[\]/,
     '分支 = git.status 的 branches（native/main.cpp:1135 那句 taocode::git::branches）')
   assert.match(data, /const data = await request<GitTags>\('git\.tags', \{\}\)[\s\S]*const names = data\.tags \?\? \[\]/,
     '标签 = git.tags（native/git.hpp:102）')
@@ -160,13 +164,14 @@ test('接线：来源走 git.status 的分支与 git.tags，缓存随仓库根�
     '刚打的标签下一次补全就该出现')
   assert.match(data, /await request\('git\.tag\.delete', \{ name \}\)\s*forgetRefCompletionCache\(\)/,
     '刚删的标签不该还在补全里')
-  assert.match(data, /return \{[\s\S]*loadBranchNames, loadTagNames \}/, '两条来源要真的交出去')
+  assert.match(data, /return \{[\s\S]*loadBranchNames, loadTagNames/, '两条来源要真的交出去（同一个 return 对象）')
 })
 
 test('接线：日志窗口把两条来源交给查找框，查找框用令牌跑两批', () => {
   const log = read('src/components/VcsLog.vue')
   assert.match(log, /<VcsLogGoToRef :commits="commits" :navigating="navigating" :load-branches="loadBranchNames" :load-tags="loadTagNames" @go-to="jump" \/>/)
-  assert.match(log, /resetTo, uncommit, createTagOn, deleteTag, loadBranchNames, loadTagNames, scope \} =/)
+  assert.match(log, /resetTo, uncommit, createTagOn, deleteTag, loadBranchNames, loadTagNames,[\s\S]*\} =\s*\n\s*useVcsLogData\(/,
+    '两条来源是从数据层解构出来的（同一个 useVcsLogData），不是组件里另编一份')
   const popup = read('src/components/VcsLogGoToRef.vue')
   assert.match(popup, /loadBranches\?: \(\) => Promise<readonly string\[\]>\n\s*loadTags\?: \(\) => Promise<readonly string\[\]>/,
     '两条都是**可选** prop：宿主没接就退回已加载页那一份，不编来源')

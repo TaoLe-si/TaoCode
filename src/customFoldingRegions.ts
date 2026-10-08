@@ -72,15 +72,30 @@ export function regionLabel(line: string): string {
  * 出栈条件比的是**区域**（开始标记 → 结束标记）的末尾（`:73`，区域的构造见
  * `CustomFoldingBuilder.java:85-87`）。混用会把相邻的兄弟区域算成嵌套。
  * 行偏移按 `\n` 切，与 `localRegionFolds` 一致（上游的偏移来自 PSI，本仓用行 + 行内累加）。
+ *
+ * **偏移的坐标系 = CodeMirror 文档的坐标系**（这些值最终进 `regionNavigateSpec` 的 `selection`，
+ * 而那份规格落的是 `view.state.doc`）：CM 建 `Text` 时把换行**归一成一个 `\n`**
+ * （实测 `EditorState.create({doc:'a\r\nb'})` ⇒ `doc.length === 3`、`line(1).text === 'a'`，
+ * `\r` 不进文档），所以**每条换行一律记 1 个字符**，行文本与 `lines[]`（`split(/\r?\n/)` 剥掉了 `\r`）
+ * 长度相等，`from`/`to`/`rangeEnd` 与 `doc.line(n).from/.to` 逐条对得上。
+ * 上一版在这里写的是「按真正的换行符个数推进，CRLF 记 2」 —— 两处都不成立：
+ *   · 判据 `text.startsWith('\r\n', at)` 量的是**行首**，而 CRLF 的 `\r` 在**行尾** ⇒ 非空行永远判 false，
+ *     空行判 true ⇒ 同一份文本里既 +1 又 +2，两条区域落在两个不同的坐标系上；
+ *   · 就算判对了行尾，CM 那份文档也没有 `\r` 可跳过 —— 记 2 会让偏移越过行首。
+ * 实测（量具 = `EditorState`，判据见 `tests/custom-folding-regions.test.mjs`）：偏差只在**它前面出现过空行**
+ * 时累加（空行处判得出 `\r\n` ⇒ 多记 1），所以纯 LF、以及没有空行的 CRLF 文档都是对的，
+ * 一旦 CRLF 文件里有空行就逐条越跳越远 —— 三条区域的 `from` 新值 / 旧值 / CM 真值 =
+ * `0 / 0 / 0`、`35 / 37 / 35`、`46 / 49 / 46`；标记前面有 10 条 CRLF 空行时是 `10 / 20 / 10`，
+ * 也就是光标被放到整条标记**之后**（正好这一行行尾，再偏就落到下一行）。
+ * 可见后果：从列表挑一条以后 `moveToOffset`（`CustomFoldingRegionsPopup.java:84`）
+ * 落不到开始标记的行首，与上游「跳到那一行」的观感不一致。
  */
 export function regionEntries(text: string): CustomRegion[] {
   const lines = text.split(/\r?\n/)
-  // 逐行起始偏移：按真正的换行符个数推进，CRLF 不会把后面的行全部推歪一格
-  // （`navigateTo` 用的就是这个偏移，偏一格光标就落在上一行）。
   const lineStart: number[] = []
   for (let at = 0, index = 0; index < lines.length; ++index) {
     lineStart.push(at)
-    at += lines[index]!.length + (text.startsWith('\r\n', at) ? 2 : 1)
+    at += lines[index]!.length + 1
   }
   const endOf = (line: number): number => lineStart[line]! + lines[line]!.length
   const stack: (CustomRegion & { marker: RegionMarker })[] = []

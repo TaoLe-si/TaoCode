@@ -441,6 +441,25 @@ export function resolveConflictsInText(content: string, onlyNonConflicts = false
   return { text: out.join('\n'), resolved, remaining: conflicts.length - resolved }
 }
 
+/**
+ * 「解决简单的冲突」的**启用判据**（上游 `MergeConflictModel.kt:150-152` 的
+ * `hasAutoResolvableConflictedChanges` = 任一改动 `canResolveChangeAutomatically(index, ThreeSide.BASE)`）。
+ * 本仓没有三栏窗口，粒度落到"标记块"上：任一标记块能自动合就为真。
+ * `MagicResolvedConflictsAction.kt:17` 用这个谓词做 `setEnabled` —— 没有能自动合的块时那颗按钮是**灰的**。
+ */
+export function hasAutoResolvableBlock(content: string, policy: ComparisonPolicy = 'default'): boolean {
+  return resolveConflictsInText(content, false, policy).resolved > 0
+}
+
+/**
+ * 「应用所有不冲突的更改」的**启用判据**（上游 `MergeConflictModel.kt:146-148` 的
+ * `hasNonConflictedChanges` = 任一**非冲突**改动能自动合，`ApplyNonConflictsAction.kt:31` 的 `setEnabled`）。
+ * 本仓粒度同上：任一标记块属于"两侧没同时改成不一样"那一类就为真。
+ */
+export function hasNonConflictingBlock(content: string, policy: ComparisonPolicy = 'default'): boolean {
+  return resolveConflictsInText(content, true, policy).resolved > 0
+}
+
 // —— 文案（中文取随 IDE 发货的 `localization-zh.jar` 的 `messages/ActionsBundle.properties`，
 //    英文取上游 `platform-resources-en/.../ActionsBundle.properties:1678-1681`）——
 

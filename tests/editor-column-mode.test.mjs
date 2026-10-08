@@ -74,13 +74,18 @@ test('空光标且不在行尾 ⇒ 向后删一个字符（交回原 handler 的
 })
 
 test('接线：Delete 绑在这条命令上，并且**只有** Delete（上游只注册了 EditorDelete）', () => {
-  const view = readFileSync(new URL('../src/components/CodeEditor.vue', import.meta.url), 'utf8')
-  assert.match(view, /\{ key: 'Delete', preventDefault: true, run: columnSelection\.deleteForward \}/,
+  // 常驻 keymap 那一张表 2026-10-06 搬进 src/editorKeymap.ts（CodeEditor.vue 贴着机检上限，
+  // 拆一次降一次）：键位本体在模块里，宿主注入 `columnSelection.deleteForward` 并整表装机。
+  const keymap = readFileSync(new URL('../src/editorKeymap.ts', import.meta.url), 'utf8')
+  assert.match(keymap, /\{ key: 'Delete', preventDefault: true, run: columnDelete \}/,
     '列模式的 Delete 那一档没绑键 ⇒ 命令是死代码')
-  assert.ok(view.indexOf(`{ key: 'Delete'`) < view.indexOf('basicSetup,'),
-    'Delete 排在 basicSetup 之后 ⇒ 默认档先赢，这一档永远问不到')
-  assert.doesNotMatch(view, /key: 'Backspace'[^}]*deleteForward/,
+  assert.doesNotMatch(keymap, /key: 'Backspace'[^}]*deleteForward/,
     '上游没有给 Backspace 包这一档（ide.impl.xml:1084 只有 EditorDelete）⇒ 不许顺手加')
+  const view = readFileSync(new URL('../src/components/CodeEditor.vue', import.meta.url), 'utf8')
+  assert.match(view, /columnDelete: columnSelection\.deleteForward/,
+    '宿主没把列模式的 Delete 命令注入常驻 keymap ⇒ 模块里那条键位是死的')
+  assert.ok(view.indexOf('keymap.of(editorKeymap)') < view.indexOf('basicSetup,'),
+    'Delete 排在 basicSetup 之后 ⇒ 默认档先赢，这一档永远问不到')
   // 模式位与 rectangularSelection 挂在同一个 Compartment 里，命令才问得到。
   assert.match(view, /import \{ splitLineCommand \} from '\.\.\/editorSplitLine'; import \{ createColumnSelection \} from '\.\.\/editorColumnMode'/)
   assert.match(view, /const columnSelection = createColumnSelection\(\(\) => view, active => emit\('columnMode', active\)\)/)

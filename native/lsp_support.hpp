@@ -13,6 +13,7 @@
 #include "lsp.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <utility>
 
@@ -33,7 +34,28 @@ bool bool_at(const Json& object, const char* key, bool fallback);
 int int_or(const Json& object, const char* key, int fallback);
 std::string string_at(const Json& object, const char* key);
 Json text_edits(const Json& array);
-Json shape_diagnostics(const Json& array);
+// 整形一条诊断数组。`fold_uri` 是 uri → 工作区相对路径的折法（宿主把 `file://…` 折成面板用的
+// 相对路径）；给了它才会带出 `relatedInformation`（折成 `{path,line,character,message}`），
+// 没给就整格不写（行为与旧版一致，老调用点与单测不受影响）。
+// 上游 `Diagnostic.relatedInformation` 由 LSP 宿主原样保留（`LspDiagnosticAndLazyQuickFixes.kt:42`）。
+Json shape_diagnostics(const Json& array,
+                       const std::function<std::string(const std::string&)>& fold_uri = {});
+// LSP `textDocument/publishDiagnostics` 的**整批**整形：条目数组 + 这一批的 `version`。
+// `version` 是 `PublishDiagnosticsParams` 上的兄弟字段
+// （`PublishDiagnosticsParams { uri, diagnostics, version?: integer }`），**不是**每条
+// `Diagnostic` 的字段 —— 所以 `shape_diagnostics(array)` 那一层结构上拿不到它（那边收到的
+// 已经是 `params.diagnostics`）。宿主事件要的是整批的号，故单独成一条整形。
+// `version` 用 `Json(nullptr)` 表示「服务器没声明」而不是 -1：LSP 里 version 是任意整数、
+// 0 是合法值，拿 -1 当哨兵会把「第 0 版」读成「没有版本」。
+struct PublishedBatch {
+    Json items;    // = shape_diagnostics(params.diagnostics)，缺 diagnostics 时是空数组
+    Json version;  // 整数；params 不是对象 / 没带 version / version 不是整数时是 null
+};
+// 不判新旧、不记账、不去重：上游的分工是「客户端传输原样转发，显示缓存按版本拒收」
+// （`platform/lsp-impl/src/impl/features/highlighting/LspPublishDiagnosticsCache.kt:56-66`），
+// 拒收那一道在本仓是 `src/lspHighlightingCache.ts` 的 `acceptsPublishedVersion()`。
+PublishedBatch shape_publish_params(const Json& params,
+                                    const std::function<std::string(const std::string&)>& fold_uri = {});
 void collect_symbols(const Json& nodes, Json& out);
 Json invalid(const std::string& code, const std::string& message);
 Json file_operation_filters();
@@ -48,6 +70,18 @@ Json format_shape(const Json& result, std::string path);
 Json argument_range(const Json& args, int line, int character);
 Json argument_diagnostics(const Json& args);
 Json format_options(const Json& args);
+// LSP `CompletionList.itemDefaults`（`LspCompletionUtil.kt:47-63` 的 `applyItemDefaults`）：
+// 列表级的缺省值逐项回填 —— `commitCharacters`/`insertTextFormat`/`insertTextMode`/`data`
+// 只在条目自己**没有**该键时才取列表级的；`editRange` 更绕：条目没有 `textEdit` 时，
+// 用 `itemDefaults.editRange` + （`item.textEditText` 或 `label`）合成一条 `textEdit`
+// （左支 = `TextEdit(range, text)`、右支 = `InsertReplaceEdit`，本仓前端只认左支的 range 形状，
+// 所以右支取 `insert` 那一段）。服务器把 `itemDefaults` 用得很普遍（JDT LS 就靠它省带宽），
+// 不回填 = 补全条目的 `additionalTextEdits`/snippet 格式与默认编辑区间全部丢失。
+Json apply_item_defaults(const Json& item, const Json& defaults);
+// 补全列表的**整体整形**：`CompletionList | CompletionItem[]` 两种入参形态 → 本仓的条目数组。
+// 列表级缺省（`itemDefaults`）在这一层回填，`raw` 存的是**已回填**的原始项
+// （`completionItem/resolve` 要求原样发回，服务器靠 `data` 找回条目）。
+Json shape_completion_items(const Json& result);
 
 template <class ToPath>
 Json edit_groups(const Json& result, ToPath&& to_path) {

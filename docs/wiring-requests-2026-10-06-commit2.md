@@ -243,3 +243,17 @@ vcs2 W2 要的是**一个全局计数**（`editorEpoch`）；R2 这一批改问�
   再顺带 `editorEpoch.value++`（两档共存，模块侧指纹已经是"全局段在前、按篇段在后"的形状，互不遮挡）。
 - W1b（「提交文件…」的用户入口 / 勾清单弹层）本批没有新增要求：C1 通了之后 `commitPaths` 才有意义，
   入口那一段仍按 vcs2 W1b 的建议落（新组件 + `src/App.vue`），不重复登记。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **C1（`native/main.cpp` 透传 `paths`）已接线**：`native/main.cpp:1169-1175` 已含 `params.value("paths", std::vector<std::string>())`（`:1171` 注释）。
+- **C1b（native 测试）** —— `native/git_test.cpp`，非本 lane。需 native owner。
+- **C2（`SourceControl.vue` 三个新入参）** —— `src/components/SourceControl.vue` 属 VCS lane 独占。跳过。
+- **C3（`documentRevisions` 三段透传）已接线（形状升级）**：`src/App.vue:74` import `bumpDocumentRevision`（`src/documentRevisions.ts` 的按篇号账本，取代了 C3 手写的 `documentRevisions` ref）；生产侧 `src/diskSync.ts:15` / `src/editorFileOps.ts:20` 也已接。消费侧见 `commitfpclose`。
+
+结论：C1/C3 已接线；C1b/C2 转给 native/VCS owner。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「C1/C3 已接线；C1b/C2 转给 native/VCS owner。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。

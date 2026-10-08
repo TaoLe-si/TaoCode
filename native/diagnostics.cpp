@@ -1,6 +1,7 @@
 // 诊断支持实现（见 diagnostics.hpp 的源码对照）。
 #include "diagnostics.hpp"
 #include "crash_log.hpp"
+#include "thread_dump.hpp"
 
 #include <utility>
 #include <vector>
@@ -12,6 +13,8 @@
 #include <psapi.h>  // PROCESS_MEMORY_COUNTERS / K32GetProcessMemoryInfo（排障信息要报内存）
 #include <shlobj.h>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <ctime>
 #include <fstream>
@@ -27,6 +30,32 @@ namespace {
 std::mutex& log_mutex() {
     static std::mutex mutex;
     return mutex;
+}
+
+// 当前最低日志级别（`LogLevelConfigurationManager` 的进程内影子）。`init()` 与
+// `set_log_level()` 会更新它，`event()` 按它过滤。默认 INFO：DEBUG 只在用户显式打开后落盘。
+std::string& min_level() {
+    static std::string level = "INFO";
+    return level;
+}
+
+/** 级别名 -> 序号（DEBUG=0 … ERROR=3）；认不出返回 -1。 */
+int level_rank(const std::string& level) {
+    if (level == "DEBUG") return 0;
+    if (level == "INFO") return 1;
+    if (level == "WARN") return 2;
+    if (level == "ERROR") return 3;
+    return -1;
+}
+
+/** 级别名规范化（大小写不敏感），认不出返回空串。 */
+std::string normalize_level(std::string level) {
+    for (auto& character : level) character = static_cast<char>(std::toupper(static_cast<unsigned char>(character)));
+    return level_rank(level) >= 0 ? level : std::string();
+}
+
+std::filesystem::path level_file(const std::filesystem::path& profile) {
+    return profile / L"log-level.txt";
 }
 
 // `idea.log` 的行格式是「时间 级别 - 消息」；这里保持同样的顺序，便于肉眼比对。
@@ -83,6 +112,15 @@ void init(const std::filesystem::path& profile, const std::string& version, cons
     // 崩溃现场记录：装钩子本身不写盘，只有真崩了才会往 taocode.log 追一行（见 crash_log.hpp）。
     install_crash_log(profile);
     std::lock_guard guard(log_mutex());
+    // 读回用户上次设的最低日志级别（读不到就用默认 INFO）。要在写"启动"行之前，
+    // 否则那条行本身不受过滤影响（它是 INFO，默认级别下总会写）。
+    {
+        std::ifstream in(level_file(profile), std::ios::binary);
+        std::string stored;
+        if (in) std::getline(in, stored);
+        const auto normalized = normalize_level(stored);
+        if (!normalized.empty()) min_level() = normalized;
+    }
     std::error_code error;
     std::filesystem::create_directories(log_dir(profile), error);
     const auto file = log_file(profile);
@@ -95,6 +133,13 @@ void init(const std::filesystem::path& profile, const std::string& version, cons
 void event(const std::filesystem::path& profile, const std::string& level, const std::string& message,
            std::size_t rotate_bytes) {
     if (profile.empty() || message.empty()) return;
+    // 级别过滤（`LogLevelConfigurationManager` 的进程内等价物）：比当前最低级别更低的
+    // 那些不落盘。认不出的级别名当 INFO（宁可多写一条，也不要把日志悄悄丢掉）。
+    const auto requested = level_rank(level) >= 0 ? level_rank(level) : level_rank("INFO");
+    {
+        std::lock_guard guard(log_mutex());
+        if (requested < level_rank(min_level())) return;
+    }
     std::lock_guard guard(log_mutex());
     std::error_code error;
     std::filesystem::create_directories(log_dir(profile), error);
@@ -231,7 +276,21 @@ Json troubleshooting(const std::filesystem::path& profile, const std::filesystem
         text << "  - " << item.at("label").get<std::string>() << "：" << item.at("path").get<std::string>()
              << (item.at("exists").get<bool>() ? "" : "（不存在）") << "\n";
     }
-    return {{"text", text.str()}};
+    // 低内存一节（`LowMemoryNotifier` 的宿主等价物）：系统可用物理内存 + 进程工作集。
+    const auto memory = low_memory();
+    text << "内存：" << (memory.at("low").get<bool>() ? "偏低" : "正常") << "（可用 "
+         << memory.at("availableMb").get<std::uint64_t>() << " MB / 共 "
+         << memory.at("totalMb").get<std::uint64_t>() << " MB，占用 "
+         << memory.at("loadPercent").get<std::uint64_t>() << "%，本进程工作集 "
+         << memory.at("workingSetMb").get<std::uint64_t>() << " MB）\n";
+    // 日志级别一行（`LogLevelConfigurationManager`）。
+    text << "日志级别：" << log_level(profile) << "\n";
+    Json result{{"text", text.str()}, {"lowMemory", memory}, {"logLevel", log_level(profile)}};
+    // 线程转储（`ThreadDumpService` 的宿主等价物，StackWalk64）：结构化字段带全部线程的栈；
+    // 排障文本里只放一行摘要（完整栈太大，交给专门的动作/文件）。
+    const auto dump = write_thread_dump(profile);
+    result["threadDump"] = {{"path", dump.path}, {"threads", dump.threads}};
+    return result;
 }
 
 Json app_info(const std::filesystem::path& profile, const std::string& browser_version, const std::string& version) {
@@ -248,6 +307,61 @@ Json app_info(const std::filesystem::path& profile, const std::string& browser_v
             {"profile", profile.string()},
             {"jdk", std::move(jdk_value)},
             {"jdks", std::move(counts)}};
+}
+
+Json low_memory(std::uint64_t available_threshold_mb, std::uint64_t working_set_threshold_mb) {
+    MEMORYSTATUSEX status{};
+    status.dwLength = sizeof(status);
+    std::uint64_t available_mb = 0;
+    std::uint64_t total_mb = 0;
+    std::uint64_t load_percent = 0;
+    if (GlobalMemoryStatusEx(&status)) {
+        available_mb = status.ullAvailPhys / (1024 * 1024);
+        total_mb = status.ullTotalPhys / (1024 * 1024);
+        load_percent = status.dwMemoryLoad;
+    }
+    PROCESS_MEMORY_COUNTERS counters{};
+    std::uint64_t working_mb = 0;
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)))
+        working_mb = counters.WorkingSetSize / (1024 * 1024);
+    // 两个条件是"或"：系统快没内存了、或本进程自己长得太大 —— 两种都该提示。
+    const bool low = (available_mb > 0 && available_mb < available_threshold_mb) ||
+                     (working_mb > 0 && working_mb > working_set_threshold_mb);
+    return {{"low", low},
+            {"availableMb", available_mb},
+            {"totalMb", total_mb},
+            {"workingSetMb", working_mb},
+            {"loadPercent", load_percent},
+            {"thresholdMb", available_threshold_mb}};
+}
+
+std::string log_level(const std::filesystem::path& profile) {
+    std::lock_guard guard(log_mutex());
+    if (!profile.empty()) {
+        std::ifstream in(level_file(profile), std::ios::binary);
+        std::string stored;
+        if (in) std::getline(in, stored);
+        const auto normalized = normalize_level(stored);
+        if (!normalized.empty()) min_level() = normalized;
+    }
+    return min_level();
+}
+
+bool set_log_level(const std::filesystem::path& profile, const std::string& level) {
+    const auto normalized = normalize_level(level);
+    if (normalized.empty()) return false;  // 不把设置写成一个认不出的值
+    {
+        std::lock_guard guard(log_mutex());
+        min_level() = normalized;
+    }
+    if (profile.empty()) return true;
+    std::error_code error;
+    std::filesystem::create_directories(profile, error);
+    std::ofstream out(level_file(profile), std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    out << normalized << '\n';
+    out.flush();
+    return static_cast<bool>(out);
 }
 
 }  // namespace diagnostics

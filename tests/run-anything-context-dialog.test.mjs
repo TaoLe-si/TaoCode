@@ -25,7 +25,8 @@ import { loadSetup, loadSfc } from './vue-sfc-loader.mjs'
 const DIALOG = 'src/components/RunAnythingDialog.vue'
 const source = readFileSync(new URL(`../src/components/RunAnythingDialog.vue`, import.meta.url), 'utf8')
 const runActionsSource = readFileSync(new URL('../src/runActions.ts', import.meta.url), 'utf8')
-const { CONTEXT_POPUP_TITLE, CONTEXT_TOOLTIP, allRunAnythingContexts, contextPath } =
+const appSource = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
+const { CONTEXT_POPUP_TITLE, CONTEXT_TOOLTIP, allRunAnythingContexts, contextPath, gradleSubprojectRoots } =
   await import('../src/runAnythingContext.ts')
 
 /** `loadSetup` 里 `onMounted` 没有组件实例，Vue 会打一条 dev 警告 —— 与本判据无关，消音。 */
@@ -92,7 +93,7 @@ test('那一格的标题/aria 都取 CONTEXT_POPUP_TITLE，组件里没有另抄
 test('moduleRoots 为空/缺省/只有一条时那一格整个不渲染', async () => {
   const component = loadSfc(DIALOG).component
   const cases = [
-    ['prop 缺省（宿主还没接线，App.vue:2635 现在就是这样）', { configs: [] }],
+    ['prop 缺省（宿主没给表 = 与空表同一档）', { configs: [] }],
     ['空表', { configs: [], moduleRoots: {} }],
     ['只有一条（上游 :247「模块只有一个就整组不列」）', { configs: [], moduleRoots: { only: 'only' } }],
   ]
@@ -169,4 +170,32 @@ test('runCommand 的 emit 形状是 { command: string; cwd?: string | null }', (
   assert.match(source, /emit\('runCommand', cwd \? \{ command: row\.name, cwd \} : \{ command: row\.name \}\)/,
     'pick() 命令行那一支按 contextPath(context, moduleRoots) 传目录')
   assert.match(source, /const cwd = context\.value \? contextPath\(context\.value, moduleRoots\.value\) : null/)
+})
+
+// ── 判据 10：宿主（src/App.vue）真的把表与 cwd 接上 ─────────────────────────────
+// prop 是可选的 ⇒ 漏接 `vue-tsc` 不会报（接线请求 docs/wiring-requests-2026-10-06-runctx.md §请求1 明示的那风险），
+// 所以这一条钉的是**宿主那两半**：表要传进去，payload.cwd 要透传给 runExternalTool（第三个实参）。
+test('宿主把模块根表传给弹层并把 payload.cwd 透传给 runExternalTool', () => {
+  assert.match(appSource, /:module-roots="runAnythingModuleRoots"/,
+    '弹层拿不到表 ⇒ 那一格永远不出现（模块侧判据全绿也白搭）')
+  assert.match(appSource, /void runExternalTool\(payload\.command, payload\.command, payload\.cwd\)/,
+    'cwd 必须透传；默认目录只在 runActions 一处决定，宿主不再算一遍')
+  assert.match(appSource, /const runAnythingModuleRoots = computed\(\(\) => gradleSubprojectRoots\(gradleHost\.projects\.value, workspace\.value\?\.root \?\? ''\)\)/,
+    '宿主只做一次投影：折算规则在模块里（也是惰性 computed —— watch 的源 getter 会在注册期求值，撞上 gradleHost 的 TDZ ⇒ 首屏白窗）')
+})
+
+// 折算规则本身（模块侧）：这是「选了子项目 ⇒ 进程在哪个目录起」的唯一真源。
+test('gradleSubprojectRoots：一个 Gradle 子项目一个模块根，根项目不列，链接在项目子目录时补前缀', () => {
+  const linked = (directory, projects) => ({ directory, result: { projects } })
+  assert.deepEqual(
+    gradleSubprojectRoots([linked('D:/ws', [{ path: ':', name: 'root' }, { path: ':app:core', name: 'core' }, { path: ':app', name: 'app' }])], 'D:/ws'),
+    { core: 'app/core', app: 'app' },
+    '`:app:core` → app/core；`:` 是工作区根 = 上游 ProjectContext，不重复列一档')
+  assert.deepEqual(
+    gradleSubprojectRoots([linked('D:\\ws\\sub', [{ path: ':x', name: 'x' }])], 'D:/ws'),
+    { x: 'sub/x' },
+    '链接的项目在工作区子目录里 ⇒ 那一层前缀要带上（原生给的是反斜杠路径，不归一就永远拼不上前缀 = 跑错目录）')
+  assert.deepEqual(gradleSubprojectRoots([linked('E:/other', [{ path: ':x', name: 'x' }])], 'D:/ws'), { x: 'x' },
+    '工作区之外的链接项目不硬造前缀（拿不到相对路径就按名字给，宿主那一侧仍只有这一档）')
+  assert.deepEqual(gradleSubprojectRoots([], 'D:/ws'), {}, '非 Gradle / 还没同步 ⇒ 空表（弹层那一格据此不渲染）')
 })

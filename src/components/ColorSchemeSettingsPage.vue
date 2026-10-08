@@ -183,11 +183,6 @@ onMounted(() => {
 <template>
   <div class="color-scheme-page">
     <h3>编辑器 › 配色方案</h3>
-    <p class="section-description">
-      对应 IDEA Settings › Editor › Color Scheme（注册 id
-      <code>reference.settingsdialog.IDE.editor.colors</code>）。每一行都写进方案覆盖表并即时作用于编辑器；
-      上游本行的粗体/斜体/效果档在本仓没有生效通道，故不渲染（理由见文件头）。
-    </p>
 
     <fieldset class="scheme-bar" :disabled="busy">
       <label class="scheme-select">
@@ -256,10 +251,6 @@ onMounted(() => {
 <span class="tok-operator">}</span></pre>
     </section>
 
-    <p class="field-hint">
-      颜色值写进用户级方案表并即时回灌编辑器；上游的行级字体样式与彩虹括号档位覆盖需要
-      把 <code>src/editorTheme.ts</code> / <code>src/editorBrackets.ts</code> 的字面量改成变量通道（接线请求里已列）。
-    </p>
 
     <ColorChooserDialog
       v-if="chooser" :initial="chooser.initial" :enable-opacity="false"
@@ -270,27 +261,27 @@ onMounted(() => {
 
 <style scoped>
 .color-scheme-page { display: flex; flex-direction: column; gap: 10px; }
-.scheme-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); }
+.scheme-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: 0; padding: var(--space-2) 10px; border: 1px solid var(--line); }
 .scheme-select { display: inline-flex; align-items: center; gap: 6px; }
 .scheme-select select { min-width: 220px; }
 .scheme-inherit { margin: 0; color: var(--secondary); font-size: 12px; }
 .scheme-toolbar { display: inline-flex; align-items: center; gap: 2px; }
-.scheme-toolbar > button { display: inline-flex; align-items: center; padding: 4px; border: 0; background: transparent; color: inherit; cursor: pointer; }
-.scheme-toolbar .copy-xml { padding: 4px 8px; color: var(--accent); }
+.scheme-toolbar > button { display: inline-flex; align-items: center; padding: var(--space-1); border: 0; background: transparent; color: inherit; cursor: pointer; }
+.scheme-toolbar .copy-xml { padding: var(--space-1) var(--space-2); color: var(--accent); }
 button:disabled { opacity: .45; cursor: default; }
 .scheme-search input { min-width: 240px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .attribute-list { display: flex; flex-direction: column; max-height: 44vh; overflow: auto; border: 1px solid var(--line); }
 .attribute-group { display: flex; flex-direction: column; }
 .attribute-group h4 { margin: 0; padding: 6px 10px; font-size: 12px; color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; }
-.attribute-row { display: grid; grid-template-columns: 22px minmax(120px, 1fr) auto auto 26px; align-items: center; gap: 8px; padding: 3px 10px; border-bottom: 1px solid var(--line); }
+.attribute-row { display: grid; grid-template-columns: 22px minmax(120px, 1fr) auto auto 26px; align-items: center; gap: var(--space-2); padding: 3px 10px; border-bottom: 1px solid var(--line); }
 .attribute-row .swatch { width: 18px; height: 18px; padding: 0; border: 1px solid var(--line-strong); cursor: pointer; }
 .attribute-name { color: var(--text); }
 .attribute-key { color: var(--muted); font-size: 11px; }
 .attribute-flag { color: var(--accent); font-size: 11px; }
 .attribute-inherit { color: var(--muted); font-size: 11px; }
 .attribute-revert { display: inline-flex; justify-content: center; padding: 3px; border: 0; background: transparent; color: var(--secondary); cursor: pointer; }
-.scheme-preview { border: 1px solid var(--line); background: var(--editor); padding: 8px 10px; }
+.scheme-preview { border: 1px solid var(--line); background: var(--editor); padding: var(--space-2) 10px; }
 .preview-code { margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--text); }
 .tok-comment { color: var(--syntax-comment); }
 .tok-keyword { color: var(--syntax-keyword); }
@@ -302,5 +293,5 @@ button:disabled { opacity: .45; cursor: default; }
 .tok-property { color: var(--syntax-property); }
 .tok-parameter { color: var(--syntax-property); }
 .tok-operator { color: var(--syntax-operator); }
-.field-hint { margin: 0; color: var(--muted); font-size: 12px; }
+.field-hint { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 </style>

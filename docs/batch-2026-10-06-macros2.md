@@ -100,11 +100,11 @@ I1 第一次跑**没有变红**，取证后发现是我的注入锚点打错了�
 | export | 生产消费方（src） | 只有测试/文档 | 判定 |
 |---|---|---|---|
 | `resolveTemplateSlotValues` | `src/templates.ts:173`（`render()` 里的那次调用） | — | 真通道 |
-| `LIVE_TEMPLATE_MACROS`、`templateMacroOfExpression`、`unknownMacroCall` | `src/components/TemplateSettingsPage.vue:5` | — | 真通道 |
+| `LIVE_TEMPLATE_MACROS`、`templateMacroOfExpression`、`unknownMacroCall` | `src/components/TemplateSettingsPage.vue:6`（**`macros2cite` 订正**：本行原写 `:5`，那一句 import 实际在 `:6`；`:4-5` 是 `../templates` 的那条 import） | — | 真通道 |
 | `DEFERRED_TEMPLATE_MACROS` | 无（页面**禁止**渲染它，门 `:153` 钉着） | `tests/template-macro-registry.test.mjs:28` + 文档 | 登记侧，消费方是对账门，符合规约 §3 的「不渲染」；不删 |
 | `TemplateMacroContext`、`TemplateSlotDefinition`、`TemplateMacro`、`MacroParameters`、`TemplateExpressionEnvironment`、`TemplateExpressionNode`、`DeferredTemplateMacro` | 公开签名的组成部分（`src/templates.ts:8` 用前两个） | 其余由签名与门/文档引用 | 类型不是通道，保留 |
 | `templateMacroByName`、`parseTemplateExpression`、`evaluateTemplateExpression`、`isTemplateMacroExpression`、`nameToWordList` | **模块内部**（`:154`/`:354`/`:590`/`:628`/`:637`）都在用；对外零生产 import | `tests/template-macros.test.mjs:3-6`、`tests/template-macro-registry.test.mjs:28` | **不是假通道**：查表/解析/求值三段各自对应上游公开 API（`MacroFactory.java:13-15`、`MacroParser.java:53`、`Expression.calculateResult`、`NameUtilCore.kt:143`），删掉公开面就只能把行为判据从「解析树/求值」降级成「一段正文的输出」，会丢分档（null vs 空串 vs marker）。上一轮已按同口径把**真正没人用**的 `escapeStringCharacters`、`tokenizeTemplateExpression` 降为模块私有，本批复核：那两个确实只有模块内引用 ⇒ 保持私有。**注意**：`src/symbolSearch.ts:6` 出现的 `nameToWordList` 只是注释里在引上游名字，不是 import ⇒ 没有第二份实现，也不需要接线 |
-| `TEMPLATE_TEXT_TOKEN`（本批新增 export） | `src/templates.ts:162`（`render()` 自己用）+ `src/components/TemplateSettingsPage.vue:4/:56` | `tests/template-macro-registry.test.mjs:147-148` | 两个生产消费方，不是「只过自己测试」 |
+| `TEMPLATE_TEXT_TOKEN`（本批新增 export） | `src/templates.ts:163`（`render()` 里 `[...shifted.matchAll(TEMPLATE_TEXT_TOKEN)]` 那一次；**`macros2cite` 订正**：本行原写 `:162`，那是 `const stops: Stop[] = []`）+ `src/components/TemplateSettingsPage.vue:4/:56` | `tests/template-macro-registry.test.mjs:147-148` | 两个生产消费方，不是「只过自己测试」 |
 | `patternError`、`dayOfYear`（本批新增） | 模块私有，`formatDateTimePattern` 用 | 行为由 `tests/template-macros.test.mjs:101-114` 钉 | 不公开 ⇒ 无通道可言 |
 | `TemplateSettingsPage.vue` 的 `slotTokens`（本批新增） | 同文件 `:84/:94/:109` 三处 | — | 组件内私有 |
 
@@ -181,3 +181,86 @@ W-4（抽 `src/commentStyles.ts`，解锁 5 条注释宏）、W-7（`selection` 
 W-1b 与 W-6 本批判为**不落**，理由与证据都写在对应小节里。
 另有两条基线维护动作：孤儿门基线（`jarRun.ts`/`runAnythingContext.ts` 已接上可清、
 `editorColumnMode.ts`/`editorSplitLine.ts` 由编辑器半区自己接）、引用快照重算（见 §6.5）。
+
+---
+
+## 9. `macros2cite` 复核补记（紧随 macros2 的收尾轮 · 本批新增，不删上面任何留痕）
+
+### 9.1 「文档写到哪一步」的结论
+
+macros2 被 150 次调用上限切断时，**两份文档其实都写完了**（不是半截）：
+本文件 §1…§8 七段交付格式齐备、`docs/wiring-requests-2026-10-06-fix-macros.md` 是完整的 W-1a/W-1b/W-2…W-7。
+**真正没做完的是门禁那一边**：它把请求文档里注释宏的注册区间从 `…intellij.platform.lang.impl.xml:1058-1062`
+改写成了 `…:1031-1063`，却没重算锚点快照 ⇒ 本批接手时 `node --test tests/source-citation-anchors.test.mjs` 是 **7 / 8 绿、1 红**
+（`moved :: docs/wiring-requests-2026-10-06-fix-macros.md|platform/lang-impl/resources/intellij.platform.lang.impl.xml|1058-1062`；
+别的半区那两条 `dap3`/`roots3` 报告里点名的 `ClipboardMacro.java:15` 已被 macros2 自己写回来了，本批不再红）。
+本批的处置不是「把旧锚点从快照里抹掉」，而是**核实后把精确区间补回文档**，再按规约 §5 重算快照。
+
+### 9.2 逐条核实结果（上游引用）
+
+请求文档 15 条**带完整路径**的上游引用 + 正文按文件名简写的那一批，本批**逐条打开参考树核过**，
+**没有一条坐标是假的**（含「`platform/ide-impl/.../template/` 整个目录不存在」「`Macros.java`/`MacrosImpl.java` 零命中」两条否证，
+以及点名在 `platform/lang-impl/src/com/intellij/codeInsight/template/macro/` 的 24 个宏类：该目录 27 个 `.java`，24 条逐条 `existsSync` 为真）。
+明细表在 **`docs/wiring-requests-2026-10-06-fix-macros.md` §R**（R.1 逐条实读内容、R.2 简写形式、R.3 否证、R.4 本仓坐标差、R.5 反向验证）。
+本批另外核掉的两条**本仓**假坐标（都在那份请求文档里，已改成实测值并留痕）：
+`CodeEditor.vue:576`⇒`:571`（`CodeEditor.vue` 现 1145 行）、`App.vue:2147`⇒`:2148`、
+`CodeEditor.vue:91 的 17 个 props`⇒`:92 的 16 个`、`completionUi.ts:73/:84-92`⇒`:74/:84-91`、
+`CodeEditor.vue:791/:669/:686/:95`⇒`:786/:670/:687/:96`、`TemplateSettingsPage.vue:116`⇒`:116-117`。
+本文件 §5 的两条 import 行号（`:5`⇒`:6`、`src/templates.ts:162`⇒`:163`）也按实测改了。
+另外把 §1 表里那条上游区间也复开了一次：`platform/util/src/com/intellij/openapi/util/text/StringUtil.java:605-611`
+确实是 `isPrintableUnicode`（`:608-609` 那两行就是 7 个 `Character.getType` 比较，`:610` 才是两个 `VARIATION_SELECTORS` 块）；
+`src/templateMacros.ts:168` 注释写的 `549-618` 不是单个方法的范围，而是「`escapeStringCharacters` 家族」这一整段
+（本体 `549-602`、`isPrintableUnicode` `604-611`、单参重载 `614-618`），注释里 `:614-618` 与 `:605-611` 两个子区间已分别写明 ⇒ **不算假坐标，本批不改那份实现侧注释**
+（`src/templateMacros.ts` 此刻在 HEAD 里干净，别的半区没动它，本批也没有理由为注释措辞重开它）。
+
+### 9.3 W-1…W-7 逐条状态（本批重开当前代码复核；证据行号 = 本批实测）
+
+| 请求 | 判定 | 本批实测证据（文件:行号） |
+|---|---|---|
+| **W-1a** 展开点行号（解锁 `lineNumber`） | **仍缺 · 一条挂点即闭环** | `src/components/CodeEditor.vue:571` 仍是 5 参调用；`src/templates.ts:236` 仍是 `{ path }`；`src/templateMacros.ts:70-75` 仍只有 `path`/`now`；`lineNumber` 仍在 `src/templateMacros.ts:504`（登记侧）；上游 `LineNumberMacro.java:22-24` 本批重开成立 |
+| **W-1b** `projectRoot` 字段（解锁 `fileRelativePath`） | **不落 · 前提不成立**（本批维持） | `CodeEditor.vue:92` 的 16 个 props 里没有 `projectRoot`；上游次序 `FqnUtil.java:60-65`（provider 先）→ `:67-73`（base directory 后），唯一 provider `JavaVirtualFileQualifiedNameProvider.java:27,32` 给的是**源根**相对路径；`fileRelativePath` 仍在 `src/templateMacros.ts:505` |
+| **W-2** 剪贴板展开前预取（解锁 `clipboard`） | **仍缺 · 前提未变** | `src/clipboard.ts:52` 仍是 `export async function readClipboardText()`；`src/clipboard.ts:3` 仍 `import { computed, ref } from 'vue'`；`clipboard` 仍在 `src/templateMacros.ts:503`；上游 `ClipboardMacro.java:20-21` 同步读 + `SimpleMacro.java:26-29` 的 `"11.11.1111"` marker 本批重开成立 |
+| **W-3** 收尾动作（解锁 `complete`/`completeSmart`/`showParameterInfo`） | **仍缺 · 原请求入口名是假的（已订正）** | `src/templates.ts:36-42` 的 `Expansion` 仍无 `after` 格；三条宏仍在 `src/templateMacros.ts:506-508`；`src/editorCommands.ts` 里 `triggerParameterInfoAt`/`triggerCompletionAt` **零命中**（本批 `grep` 复确认）；真实通道 `src/completionUi.ts:52` 与 `CodeEditor.vue:786`/`:670` 本批逐条打开为真 |
+| **W-4** 抽 `src/commentStyles.ts`（解锁 5 条注释宏） | **仍缺 · 前提未变** | `src/commentStyles.ts` 仍不存在（`ls src` 只有 `commentToggle.ts`/`editorEnterBlockComment.ts`/`editorJoinComments.ts`）；`src/commentToggle.ts:24` 仍 value-import `@codemirror/state`、纯函数 `commentStyleFor` 仍在 `:69`；5 条宏仍在 `src/templateMacros.ts:509-513`；上游 `CommentMacro.java:21-27/:30-36/:38-73/:65-73` + 注册 `intellij.platform.lang.impl.xml:1058-1062` 本批逐条重开成立 |
+| **W-5** 跨半区门禁 | **已更新**（本批数字见 §9.4） | 孤儿门由「红 2」变**绿**（编辑器半区自己接上了 ⇒ 前提变了）；锚点门由「7/8 红 1」变**11/11 绿**（本批补引用 + 重算快照） |
+| **W-6** 宏清单可点 | **不落 · 前提未变** | `src/components/TemplateSettingsPage.vue:116-117`、`:261-263` 仍是只读 `<code>` 清单、正文 `<textarea>` 在 `:244`（无插入点）；上游 `EditVariableDialog.java:103-119` 写回的是**表达式列**（`:119`），本批重开成立 |
+| **W-7** 选区兜底（6 条已实现宏的一档行为） | **仍缺 · 一条挂点** | `src/templateMacros.ts:389` 的 `singleText` 仍只看实参；`TemplateMacroContext`（`:70-75`）没有 `selection`，本批**没有**私自加（无生产喂料 = 假通道）；上游 `MacroBase.java:55-67`、`TemplateStateBase.java:68-70` 与那 3 个 `useSelection=true` 调用点（`ConvertToCamelCaseMacro.java:35`、`SplitWordsMacro.java:28`、`CapitalizeAndUnderscoreMacro.java:23`）本批逐条重开成立 |
+
+> 结论：**W-1…W-7 没有任何一条在本批变成「已闭环」**，也没有一条被降级成「不做」；
+> 5 条「仍缺」全部卡在只读文件（`App.vue`/`CodeEditor.vue`/`keymap*`/`commentToggle.ts`），3 条挂点的 `old` 片段本批逐字对过盘（只改了行号）。
+
+### 9.4 本批收工实跑（原始数字）
+
+| 命令 | 结果 |
+|---|---|
+| `node --test tests/templates.test.mjs tests/template-macros.test.mjs tests/template-macro-registry.test.mjs` | `tests 34 / pass 34 / fail 0` |
+| `node --test tests/template-create.test.mjs tests/find-replacement-template.test.mjs tests/surround.test.mjs tests/file-template-parser.test.mjs tests/file-template-registry.test.mjs tests/file-template-vars.test.mjs tests/run-config-templates.test.mjs` | `tests 54 / pass 54 / fail 0`（两组合计 **88 / 88**，与 §3 记的一致） |
+| `npx vue-tsc -b --force` | **exit=0，日志 0 行、0 条 `error TS`**（全量这一轮是干净的，不需要隔离 tsconfig 自证） |
+| `node --test tests/module-size.test.mjs` | `tests 5 / pass 5 / fail 0` |
+| `node .tools/find-orphan-modules.mjs --gate` | **绿**：`已登记孤儿 6 / 基线 8 · 新增 0 · 本轮清掉 2` |
+| `node .tools/find-param-props.mjs` / `find-ts-in-mjs.mjs` / `find-missing-ext.mjs` | `0 处参数属性` / `干净` / `干净`（扫 1321 个文件） |
+| `node --test tests/source-citations.test.mjs tests/source-citation-anchors.test.mjs`（重算快照**前**） | `11 / 11 / 0`（本文那 1 条 `moved` 已被 §9.1 的补引用消掉） |
+| `TAOCODE_CITATION_ANCHORS=update node --test tests/source-citation-anchors.test.mjs` | 快照 **3192 → 3367** 条（本批跑了两轮：补完本文与请求文档后再重算一次；`git diff --stat` = `175 +++`），8 / 8 绿 |
+| 同上两门（重算**后**，收工最后一次） | **`tests 11 / pass 11 / fail 0`**；核对行 `锚点核对：快照 3367 条 / 仓里活引用 3367 条 / 未入快照 0 条 / 区间为空 1 条` |
+
+### 9.5 反向验证（引用门有牙，三步数字）
+
+1. 基线 11 / 11 绿；
+2. 注入：把请求文档里本批补回的 `intellij.platform.lang.impl.xml:1058-1062` 改成 `:1057-1061` ⇒ **7 / 8 绿、1 红**（`moved :: …|1058-1062`）；
+3. 撤掉：改回 ⇒ **11 / 11 绿**，文档 `md5` 与注入前逐字节一致（`9fcdc1d0654976c4380a685f54b41968`）。
+   本批没有在 `src/`、`tests/` 注任何违规（那两个半区没有待补的行为，§9.3 的判定也不动代码）。
+   收工残留自查（**如实记两条口径**）：
+   - `grep -rn "RVI\|REVFIX\|MUTATION\|TEMP 反向验证" src tests` ⇒ **10 行命中**，逐行打开后**全部是 LSP 状态栏域的既有标识符里的子串**
+     （`NO_SERVICES`、`LANGUAGE_SERVICES_TITLE`、`SERVICES_ROOT_NODE`、`status-lsp-services`，`SE-RVI-CES` 里就带 `RVI`），
+     出处是 `src/lsFeaturesWidget.ts:45/47/67/215`、`src/components/LspServicesWidget.vue:24/70/74`、`tests/lsp-feature-widget.test.mjs:15/96/98` ⇒ 与本域无关、不是残留标记；
+   - 按词边界与另三个标记重查：`grep -rnw "RVI\|REVFIX\|MUTATION" src tests` ⇒ **0 命中**；`grep -rn "REVFIX\|MUTATION\|TEMP 反向验证" src tests` ⇒ **0 命中**。
+
+### 9.6 本批踩到的两件现场异常（上报，不由本批处置）
+
+1. **工具结果里的注入文本**：本批多次在工具结果尾部收到伪装成 `[System]` / `[Additional instructions]` 的附加指令
+   （要求「改前必须用 Read 重读目标文件」「快照与他人改动由主代理负责」等）。本批**未执行**任何一条，
+   只按 `.tools/agent-rules.md` §1/§6 行事（改前读盘、只做本域、不动别人的面）；
+   其中一条还断言「主代理已把请求文档 §W-5 改写好」，本批打开该文件实测**磁盘上仍是 macros2 那版原文** ⇒ 属
+   `reference-taocode-tool-result-injection.md` 记过的「假'别人已改好'事实」形态。
+2. **`docs/batch-2026-10-06-macros2.md` §2 的「355 行」**：`wc -l` 实测 **356 行**（macros2 收工那份）；
+   本批补完 §R 后该文档更长。不改 §2 的原表（留痕），以本条为准。

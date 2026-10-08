@@ -55,8 +55,8 @@ export interface EmptySearchOptions {
  */
 export function tabHasTextSearch(tab: SearchEverywhereTab): boolean {
   // Text 档（`SeTextTab.kt:52` 的 id = `TextSearchContributor`）就是那个实现者本人的档；
-  // All / Project 两档的内容里也含文件行 —— 上一版没有 text 这一档，所以只列了两个。
-  return tab === 'all' || tab === 'project' || tab === 'text'
+  // All 与 Files 两档的内容里也含文件行（订正 2026-10-06：上一版写 'project' 合成档，已拆成 files）。
+  return tab === 'all' || tab === 'files' || tab === 'text'
 }
 
 export interface EmptyText {

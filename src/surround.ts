@@ -3,6 +3,8 @@
 // one level and put the caret where the person has to type next (inside an empty `()`
 // when the template opens a condition, otherwise just after the code), so the next
 // keystroke can never replace what was just wrapped.
+import { customFoldingSurroundRows } from './customFoldingSurround.ts'
+
 export interface SurroundTemplate {
   title: string
   keywords: string
@@ -30,18 +32,18 @@ export const surroundTemplates: SurroundTemplate[] = [
   { title: '行注释 //', keywords: 'comment line 注释', prefix: '// ', suffix: '', block: false },
   { title: '括号 ( )', keywords: 'parentheses group 括号', prefix: '(', suffix: ')', block: false },
   { title: '方括号 [ ]', keywords: 'brackets array 方括号', prefix: '[', suffix: ']', block: false },
-  // 自定义折叠区域（上游 `CustomFoldingSurroundDescriptor.getAllSurrounders`：`platform/lang-impl/
-  // src/com/intellij/lang/folding/CustomFoldingSurroundDescriptor.java:224-227` 逐个
-  // `CustomFoldingProvider` 造一个 surrounder，标题取 `getDescription()`）。
-  // 四个 provider 的标记原文见各自的 `getStartString`/`getEndString`：
-  //   `VisualStudioCustomFoldingProvider.java:36-42` region ? / endregion（`?` 是描述占位符，:47）、
-  //   `NetBeansCustomFoldingProvider.java:36-42` `<editor-fold desc="?">` / `</editor-fold>`；
-  // `//<region>` / `//</region>` 与 `#region` 两族是 2018.3+ 的内置区域标记，provider 在
-  // 社区树之外（**无法核实**其 `getDescription()` 的确切文案），这里按标记原文列出。
-  { title: '折叠区域 //<region>', keywords: 'region fold custom folding 折叠区域 区域', prefix: '//<region>', suffix: '//</region>', block: true },
-  { title: '折叠区域 //region', keywords: 'region fold custom folding 折叠区域 区域', prefix: '//region', suffix: '//endregion', block: true },
-  { title: '折叠区域 #region', keywords: 'region pragma fold custom folding 折叠区域 区域', prefix: '#region', suffix: '#endregion', block: true },
-  { title: '折叠区域 <editor-fold>', keywords: 'editor-fold netbeans region fold 折叠区域 区域', prefix: '//<editor-fold desc="Description">', suffix: '//</editor-fold>', block: true },
+  // 自定义折叠区域：**每个 provider 一行**，标题与标记文字都取自 `src/customFoldingProviders.ts`
+  // 那张表，不再在这里手写（上游 `CustomFoldingSurroundDescriptor.java:217-227` `getSurrounders()`
+  // = 逐个 `CustomFoldingProvider.getAllProviders()` 造一个 surrounder，`:244-246` 标题 =
+  // `getDescription()`；`VisualStudioCustomFoldingProvider.java:36-42` 与
+  // `NetBeansCustomFoldingProvider.java:36-42` 各给 `getStartString`/`getEndString`）。
+  // 上一版在这里手写的是四行 `//<region>` / `//region` / `#region` / `//<editor-fold desc="Description">`：
+  // 注释前缀写死 `//`，而 `CustomFoldingSurroundDescriptor.java:275-289` + `:306-307` 是拿
+  // **这门语言的 `Commenter`** 去包标记的（`:52-56` 那道门：连注释词法都没有就一条都不给）
+  // ⇒ 在 Python / Shell / SQL / Lua 里点这一行插进去的是**不成注释的裸文本**，既编译不过，
+  // `src/customFoldingProviders.ts` 的 `commentMarkerBody` 也不认（它按注释前缀剥壳）。
+  // 现在静态给的是 `//` 那一档，落地前由 `surroundRowForFile` 按目标文件的注释词法重包。
+  ...customFoldingSurroundRows(),
 ]
 
 export interface Wrapped {

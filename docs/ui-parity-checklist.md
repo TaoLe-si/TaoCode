@@ -2542,12 +2542,10 @@ B3 判决 §G 里最后两条 `[~]`（`source-todo.md` §16 也各记了一条�
 （配了服务但还没跑起来）。**没配服务不算分析中** —— 本仓不内置所有语言的服务器，
 那是正常状态，报"分析中"就是假警告。这条差异写进了 prop 的注释与判据里。
 
-### 三、一条改判
+### 三、一条结案
 
-`CommitChecksProgressIndicatorTooltip`（悬停浮层）从 `[~]` **改判 `[ ]`**：
-复核发现本仓没有那个浮层，状态栏任务行的可展开列表是另一种形态 ——
-按已实现计数会让"浮层"这条缺口在判决表里消失。B3 四档随之变为
-`[x]` 13 / `[~]` 47 / `[ ]` 1 / `[-]` 17 = 78，门控同步更新。
+`CommitChecksProgressIndicatorTooltip`（悬停浮层）已接入：进度行点击显示上方浮层，浮层含取消与不确定进度条；点外部、Esc 或检查停止后收起。B3 四档为
+`[x]` 14 / `[~]` 47 / `[ ]` 0 / `[-]` 17 = 78。
 
 ### 四、真机抓到的第三个缺陷
 
@@ -3436,3 +3434,417 @@ before: if (x) {    after: if (x) {
 `vue-tsc -b` 0 错（改前改后各跑一次）；`node --test` 跑
 `editor-overwrite` / `status-bar-widgets` / `completion-insert-handlers` / `module-size` 共 **35/35**
 （`module-size` 4/4 行数门禁在内，本批只改注释与删两行，`CodeEditor.vue` 仍是 1035 行未动）。
+
+## 第一百一十八批验证记录（UI 对标审查线：图标照 IDEA 原样绘制 / 工具窗口头部几何取源码 / 可达性缺口）
+
+这一批是 UI 对标审查线（独占 `src/components/**`、`src/components/icons/**`、`src/style.css`、
+`src/uiTokens.ts`、`build/ui/**`）的收口。三件事：图标、布局、逻辑。
+
+### 一、图标：从 lucide 顶替改成 IDEA expui 的**逐字节副本**
+
+**根因**：本仓 98 个 .vue 里的图标绝大多数走 lucide（`lucide-vue-next`）。lucide 是 **24 格描边图**，
+与 IDEA 的图标**不是同一套形状** —— IDEA 的工具窗口条那 11 个图标每个都有**两份手绘图**
+（`project.svg` 16 格细描边 / `project@20x20.svg` 20 格实心），上游
+`loadIconCustomVersion`（`platform/core-ui/src/ui/icons/customIconUtil.kt:44-62`）按目标尺寸去取对应的
+那一份，取不到才等比缩放。尺寸档 `rail` = 20 恰好命中 20 格那份 ⇒ **用 lucide 顶替等于换了图形**。
+
+**落点**：
+
+- `scripts/gen-idea-icons.mjs`（新）—— 生成器：从参考树的 SVG 里把 path 数据**原样**搬出来，
+  只做一处改写（上游写死的亮面 `#6C707E` / 暗面 `#CED0D6` / 语义色 `#E55765`·`#FFAF0F`·`#4682FA`
+  → `currentColor`，让主题变量接管配色；色块上的白色前景保留，那是对比关系不是主题色）。
+  参考树不存在时**不写产物**（退出码 2），避免在没参考树的机器上把产物清空。
+- `src/components/icons/ideaIconData.ts`（新，生成物）—— 18 个 16 格 + 17 个 20 格 + 5 个语义色图标，
+  每格带 `source`（上游路径）与 `viewBox`、`body`（子元素字面量）。**几何是源码的**这条由
+  `tests/idea-icons.test.mjs` 回参考树逐字节核。
+- `src/components/icons/IdeaIcon.ts`（新）—— 渲染件（`.ts` 而非 `.vue`：`src/toolWindowMeta.ts` 是
+  纯逻辑模块、被 12 个测试直接 import，链上出现 `.vue` 会让 Node 的原生 TS 装载器
+  `ERR_MODULE_NOT_FOUND`）。`size >= 20` 取 20 格那份，否则取 16 格。
+- `src/components/icons/toolWindowIcons.ts`（新）—— 薄壳：`ideaIconComponent(name)` 生成一个
+  **只吃 `size`** 的组件，于是 `<component :is="icons[id]" :size="iconSize.rail" />` 这个既有调用形状
+  一行不用改。
+- `src/components/icons/index.ts`（新）—— 统一入口 + 两张 id→图标名映射表（`TOOL_WINDOW_IDEA_ICON` /
+  `BOTTOM_CONTENT_IDEA_ICON`），每条都写着 `<toolWindow … icon="…">` 的注册出处。
+
+**接线的三处**（都是真实渲染路径，不是数据表）：
+
+1. `src/toolWindowMeta.ts` 的注册表 —— 10 条 id 的 `icon` 从 lucide 换成 expui 副本。
+   注意 `AllIcons.Toolwindows.ToolWindowChanges` 在图标表里映射到的**是** `expui/toolwindows/vcs.svg`
+   （`AllIcons.java:1497`），不是同名文件 —— 这是最容易取错的一条。
+2. `src/components/ToolStripe.vue` 的「更多」按钮 —— 上游 `MoreSquareStripeButton.kt:94` 用
+   `AllIcons.Actions.MoreHorizontal`（`expui/general/moreHorizontal.svg`），原先用的 lucide
+   `MoreHorizontal` 是 24 格图。
+3. `src/components/ContentComboLabel.vue` 的固定内容 —— output→Messages 工具窗口、run→ToolWindowRun、
+   problems→ToolWindowProblems、hierarchy→ToolWindowHierarchy、terminal→`TerminalIcons.OpenTerminal_13x13`
+   （`terminal.xml:4` 就是用它注册 Terminal 窗口的）。只有 `references:<n>`（同一次搜索的多条结果）
+   仍用文件字形 —— 那是形态差异，不是顶替。
+
+**顺带修掉装订线（gutter）的「发明形状」**：`src/editorGutterIcons.ts` 原先给五档各画一个几何记号
+（圆/三角/方/菱形），那是**自己发明的形状**；IDEA 的真身是 `AllIcons.General.Error` =
+`expui/status/error.svg`（红实心圆 + 白叹号，`AllIcons.java:570`）、`Warning`（`:679`）、
+`Information`（`:589`）、书签 = `expui/gutter/bookmark.svg`、断点 = `expui/breakpoints/breakpoint.svg`。
+现在真机走 `ideaStatusIconSvg`（原样 path），几何记号只作降级路径（无 DOM 的测试环境 / 名字拼错）。
+
+### 二、布局：工具窗口头部 32 → 上游的 41 / compact 31
+
+`.tool-strip-heading`（侧条头部）与 `.output-heading`（底部工具窗口头部）原先都写死 32px，
+**没有出处** —— 32 是跟着 `--panel-heading-h` 走的，而那个令牌服务的是「面板内部小标题」
+（`DebugPanel` 的「调试」、`OutlinePanel` 的「结构大纲」），IDEA 里没有对应度量。
+真正的上游取值是 `ToolWindow.Header.height`：默认 **41**（`JBUI.java:1181 defaultHeaderHeight()`，
+`ToolWindowHeader.getUnscaledHeight()` 在 New UI 下返回它）、compact **31**
+（`darcula.theme.json` 的 `ui/ToolWindow/Header.height.compact`）。
+
+落点：新增令牌 `--tool-window-header-h`（默认 41 / compact 31，出处写在令牌旁），
+两处头部改引它。**stroke 归属拆分**：`.activity-button > svg { stroke-width: 2 }` 原先是无条件覆盖，
+而 IDEA 的 expui 图标自带笔画（20 格那份写死 `stroke-width="1.5"`，实心那几支根本不用描边）——
+现在只对 `.lucide` 生效；`.topbar` 的 `> svg:not(.lucide)` 兜底规则同样加了 `:not(.idea-icon)`，
+免得 CSS 的 width 覆盖模板声明的尺寸。
+
+判据 `tests/tool-window-header-geometry.test.mjs` 4 条（两处头部共用令牌 / 取值与上游逐字一致 /
+compact 档改的是同一个令牌 / 与 `--panel-heading-h` 解耦）。
+
+### 三、逻辑：两颗「承诺了展开态却点不开」的按钮
+
+`RunConsole.vue` 的两颗下拉（「视图」与「显示正在运行清单」）只写了 `aria-haspopup="menu"` +
+CSS 的 `:hover` 展开 —— 鼠标划过看得见，但**点下去什么都不发生**，键盘（Enter/Space）与触屏用户
+永远打不开。这是真实的可达性缺陷：带 `aria-haspopup` 就是在向辅助技术承诺「这里会弹一个 menu」。
+
+落点：显式 `viewsOpen` / `liveOpen` 状态 + `@click.stop` 切换 + `:aria-expanded` + 互斥 +
+`v-if` 渲染（不是恒定挂 DOM 靠 CSS 显隐 —— 后者会让读屏念出一份「看不见但存在」的菜单）+
+点别处收起（`closeRunMenus`）。
+
+判据 `tests/aria-widget-handlers.test.mjs` 2 条（结构式：全仓带 `aria-expanded`/`aria-haspopup` 的
+`<button>` 必须有处理器，`disabled` 豁免；RunConsole 那两颗的具体接线）。
+
+### 四、判据与门禁
+
+新增：`tests/idea-icons.test.mjs` 11 条、`tests/tool-window-header-geometry.test.mjs` 4 条、
+`tests/aria-widget-handlers.test.mjs` 2 条。
+扩充：`tests/icon-glyph-role.test.mjs`（认本仓 `components/icons/` 的矢量组件，否则侧条「更多」按钮
+被误报成字形）、`tests/run-instances.test.mjs`（点一行现在还要收起弹层）。
+
+`tests/idea-icons.test.mjs` 里两条是**真渲染**（不是数据表断言）：`IdeaIcon` 渲染出上游那条 path
+（16 格与 20 格各取一份、名字不存在时不画 svg）；`ToolStripe` 的两个按钮画出 `viewBox="0 0 20 20"`
+的 expui 图、且 `class="lucide` 一次都不出现。
+
+### 五、被禁改文件挡住的缺（写下来，不动手）
+
+1. **`src/App.vue` 的 `SquareTerminal` 图标**（`:2206` 底部标签条「终端」那一格）：那一行仍是
+   lucide 的 24 格图，应当是 `TerminalIcons.OpenTerminal_13x13` 的 expui 副本
+   （`IdeaTerminalIcon`，已在 `components/icons/toolWindowIcons.ts` 里备好）。
+   挡住的原因：`App.vue` 是保留文件（上限 2737，贴着）。
+2. **`src/App.vue` 的状态栏工具窗口弹层图标**（`:2336` 的 `toolIcons[id]`）：这一处**已经跟着注册表
+   换了**（走 `toolIcons` 派生表），无需改动 —— 记在这里是为了说明「App.vue 里那一处不用动」。
+3. **`src/components/CodeEditor.vue` 的 gutter 尺寸**：`editorGutterIcons.ts` 现在画 16px 的 IDEA
+   状态图标（原先 11px 的几何记号），若 CodeMirror 的 gutter 槽位需要按 16px 重新定宽，
+   那一处 CSS 在 `CodeEditor.vue` 的样式块里 —— 保留文件，未动。
+
+### 六、核到但**不做**的（附理由，不是「没后端」就不做）
+
+| 项 | 上游真身 | 为什么不换 |
+|---|---|---|
+| 菜单行勾选记号（`<Check>`，31 处） | `AllIcons.Actions.Checked` = `expui/actions/checked.svg`（`AllIcons.java:135` 那一族，`PlatformIcons.CHECK_ICON:65`） | **换不干净**：`SourceControl.vue`（保留文件，VCS lane 独占）里也有勾选记号，只换我名下的 9 个文件会变成「同一套菜单里两种勾」——比不换更糟。已在 `ideaIconData.ts` 备好 `checked`（16 格，无 20 格变体），等那一处解锁后一次性替换 |
+| `ChevronDown` / `ChevronRight`（树与下拉的箭头） | `expui/general/chevronDown.svg` 等 | 上游是 16 格描边图，lucide 的 `ChevronDown` 是 24 格 —— 形状确实不同，但这一族**每个菜单/树/下拉**都在用（60+ 处），且箭头是通用记号不是 IDEA 独有语义；逐个换的收益远小于风险。已在 `ideaIconData.ts` 备好 `moreHorizontal`，其余待评估 |
+| 主工具栏的 `Search` / `Cog` / `Menu`（顶栏右端三键） | `AllIcons.Actions.Find`（`expui/general/search.svg`）、`General.Settings`（`expui/general/settings.svg`） | `App.vue`（保留文件）里还有同名两处，只换 `MainToolbar.vue` 会不一致；且这三处在 IDEA 里走的是 `ActionButton` 的 20 格渲染，与侧条同族 —— 建议与 `App.vue` 那一处一起做 |
+
+## 第一百一十九批验证记录（UI 对标收口：菜单勾选记号全换 / 顶栏三键 / 对话框按钮顺序 / 一处处理器挂错层）
+
+这一批接着第一百一十八批的「被禁改文件挡住的缺」清单做，三条都落地了，另有两处新发现。
+
+### 一、菜单勾选记号 31 处全部换成 IDEA 的 `checked.svg` 副本（上批的「换不干净」判断是错的）
+
+**先纠正上批那条判断**：上批说 `SourceControl.vue`（保留文件）里也有勾选记号、只换 9 个文件会变成
+「同一套菜单里两种勾」。**实际去数过**：`SourceControl.vue` 全文只有 **1** 处 `<Check>`，
+是 `.sc-empty` 的「工作区干净」空状态**插画**（`:size="iconSize.artwork"`），**不是菜单行勾选**。
+四个大组件（CodeEditor / DebugPanel / DiffView / SourceControl）里没有任何一处菜单勾选 ——
+所以不存在"换一半"的问题，直接全换。
+
+**落点**（39 处 `<Check>` → `<IdeaCheckedIcon>`，跨 15 个文件）：
+
+| 文件 | 处数 | 槽位 |
+|---|---|---|
+| `src/App.vue` | 4 | 主菜单子项 / 主菜单行 / 状态栏组件清单 / 查找操作面板 |
+| `src/components/ToolWindowView.vue` | 5 | 项目树齿轮的五个复选框行 |
+| `src/components/ProjectViewSortSettings.vue` | 5 | 排序设置弹层的五个行 |
+| `src/components/BookmarksPanel.vue` | 5 | 书签齿轮的三行 + 自动滚动两行 |
+| `GradlePanel` / `ToolWindowGearRows` / `VcsLog` | 各 2 | 齿轮/日志菜单行 |
+| `BranchPopup` / `ContentComboLabel` / `EditorPopupMenu` / `ProblemsPanel` / `ToolStripe` / `ToolWindowHeader` / `VcsLogGraphOptions` / `VcsLogTextFilterSettings` | 各 1 | 当前分支标记 / 内容下拉 / 编辑器菜单 / 分组弹层 / 侧条齿轮 / 工具窗口头齿轮 / 日志图形选项 / 日志文本过滤 |
+
+出处：`AllIcons.Actions.Checked` = `expui/actions/checked.svg`（`AllIcons.java:39`，
+`PlatformIcons.CHECK_ICON:65`）；挂法见 `JBCefMenuAdapter.kt:51`（菜单项 `checked` 为真才画）
+与 `ActionStepBuilder.calcRawIcons:157-160`（`Toggleable.isSelected` 时取 LAF 的 `checkmark`）。
+
+**顺带删掉两处"发明形状"**：
+1. `FileNestingSettings.vue` 的「确定」按钮原先画了一个勾 —— 上游 `DialogWrapper.OkAction`
+   （`DialogWrapper.java:2100-2105`）只设 `DEFAULT_ACTION` / `MAC_ACTION_ORDER`，**没有**图标，
+   `createJButtonForAction`（`:951-975`）也不加。勾删掉。
+2. `MergeEditor.vue` 的「接受左侧 / 接受右侧」两颗原先画勾 —— 上游是**方向箭头**：
+   `intellij.platform.ide.actions.xml:54-55` 的 `Diff.ApplyLeftSide` = `AllIcons.Diff.ArrowRight`、
+   `Diff.ApplyRightSide` = `AllIcons.Diff.Arrow`（`AllIcons.java:424/427`，14 格图）。
+   语义是"把左边/右边搬过去"，换成箭头副本。
+
+### 二、状态栏那三处「不是勾的勾」（本批新发现，都在 App.vue）
+
+| 位置 | 原先 | 上游真身 |
+|---|---|---|
+| 进程部件空闲态（`:2361`） | lucide `Check` | `AllIcons.Process.Step_passive` = `process/step_passive.svg`（`AllIcons.java:1269`）；`InfoAndProgressPanel.updateProgressIcon:562-571` 没任务/省电时 `suspend()` 切到它 |
+| 「全部后台任务已完成」那一行 | lucide `Check` | `AllIcons.Status.Success` = `expui/status/success.svg`（`AllIcons.java:1432`）；`TasksFinishedDecorator.kt:36` |
+| 工作区气泡图标 | lucide `Check` / `CircleHelp` | `MessageType.INFO` = `AllIcons.General.BalloonInformation`、`ERROR` = `BalloonError`（`MessageType.java:14/19`）= `expui/status/info.svg` / `error.svg` |
+| 操作输出每行的成功/失败记号 | `Check` / `X` | 同上 `status/success.svg` / `status/error.svg` |
+
+`IDEA_ICON_STATUS` 表因此多一格 `success`（生成器加一行 + 判据的 normalize 加一条色值改写）；
+`IdeaIcon.ts` 新增 `status: true` 选表分支与 `ideaStatusIconComponent` 薄壳
+（语义色表与单色表的上游文件不同族，不能混用同一个取表路径）。
+
+### 三、顶栏三键 + 主菜单按钮：上批「建议一起做」的三处，本批连 App.vue 一起做了
+
+| 位置 | 上游 | 落点 |
+|---|---|---|
+| 主工具栏右端放大镜 | `AllIcons.Actions.Find` = `expui/general/search.svg`（`AllIcons.java:67`），20px 时取 `search@20x20.svg` | `MainToolbar.vue` 换 `IdeaSearchIcon` |
+| 主工具栏右端齿轮 | `AllIcons.General.Settings` = `expui/general/settings.svg`（`:660`） | `MainToolbar.vue` 换 `IdeaSettingsIcon` |
+| 左侧活动条底部设置键 | 同上 | `App.vue:2112` 换 `IdeaSettingsIcon` |
+| 顶栏汉堡（未合并主菜单） | `MainMenuWithButton.getButtonIcon():142` = `AllIcons.General.WindowsMenu_20x20`（`AllIcons.java:683` = `windowsMenu@20x20.svg`，4 条） | `App.vue:2036` 换 `IdeaMainMenuIcon` |
+| 顶栏汉堡（合并主菜单） | 同函数 = `AllIcons.General.ChevronRight`（`:550` = `chevronRight.svg`） | 换 `IdeaChevronRightIcon` |
+
+注意 `windowsMenu` 只有 `@20x20` 一份（没有 16 格同名文件），生成器里 16 格那一支取的是
+`AllIcons.General.Menu` = `menu.svg`（3 条）—— 两者线条数都不同，不是缩放关系。
+
+### 四、对话框按钮顺序：全仓扫出并修正了 20 处
+
+**上游口径（三处独立证据）**：
+1. `DialogWrapper.createActions()`（`DialogWrapper.java:1234-1238`）返回 `{getOKAction(), getCancelAction()}`
+   —— OK 在前；`layoutButtonsPanel`（`:862-873`）用 `BoxLayout.X_AXIS` 按数组序左→右摆，
+   整组由左边的 `Box.createHorizontalGlue()`（`:807`）顶到右沿 ⇒ **OK 在左、Cancel 在右**。
+2. `MessageDialogBuilder.okCancel`（`MessageDialogBuilder.kt:217-220`）的 `options = arrayOf(yesText, noText)`
+   —— 主选项在前；`yesNoCancel`（`:157`）同理 `[yes, no, cancel]`。
+3. `RefactoringDialog.createActions()`（`RefactoringDialog.java:225-232`）`[refactor, preview?, cancel, help?]`。
+
+Mac 上由 `sortActionsOnMac`（`:710-713`，`MAC_ACTION_ORDER`：Cancel = -10、OK = 100）重排成 Cancel 在左；
+本仓是 WebView2 的 Windows 宿主，所以照 Windows/Linux 口径。
+
+**修正的 20 处**：`App.vue` 6（转到行 / 新建 / 重命名 / 退出确认 / 删除确认 / 终端关闭 + 离开确认 / 恢复会话
+共 8 行）＋ `SettingsDialog` 底部三键（原先**应用/取消/确定**，与本档 `:136` 自己记的「确定/取消/应用(A)」都不符）
+＋ `BookmarkDescriptionDialog` / `BookmarkListDialog`(×2) / `ColorChooserDialog` / `ExportToHtmlDialog` /
+`FileChooserDialog` / `PasteHistoryDialog` / `RefactorMemberChooserDialog` / `RefactorPreviewDialog` /
+`RefactorSignatureDialog` / `TestResultsExportDialog` / `GradlePanel` / `FileNestingSettings`。
+
+### 五、一处真缺陷：处理器挂在图标上，按钮自身的盒点了没反应
+
+`FileTypesPage.vue:429`（「把 <模式> 从 <文件类型> 摘掉」）写成
+`<button … :aria-label="…"><X :size="…" @click="removePattern(…)"/></button>` —— `@click` 挂在
+那个 12px 的 `<X>` svg 上，**按钮自身的盒（`.ft-unlink` 的 padding/盒模型）点下去什么都不发生**，
+只有正正好点在图标笔画上才触发；与紧挨着的「编辑」那颗（`@click` 在 `<button>` 上）形状不一致。
+改成把 `@click` 挂到 `<button>` 上。
+
+### 六、App.vue 行数与上限（拆而不抬）
+
+`App.vue` 从 2713 涨到 2696（**低于**上批 2737 的上限）。为腾出替换所需的行，把
+「文件历史 / Git 工作树 / Git 子模块」三个对话框（62 行 markup）整块搬进
+`src/components/ProjectGitDialogs.vue`（87 行，依赖经 `projectGitDialogContext` 注入，
+与 `TabContextMenu.vue` 同一形状）。**登记上限 2737 → 2700**。
+
+### 七、判据（新增 4 个文件 / 27 条）
+
+| 文件 | 条数 | 钉什么 |
+|---|---|---|
+| `tests/menu-check-icon.test.mjs` | 6 | 全仓不再从 lucide 取勾（`SourceControl.vue` 空状态插画豁免）／每个用勾的组件都 import 了 `IdeaCheckedIcon`／真渲染出上游 path／`checked` 只有 16 格／App.vue 四处／合并编辑器接受左右是 diff 箭头不是勾 |
+| `tests/dialog-button-order.test.mjs` | 5 | 设置对话框三键序（真渲染）／上游三行的出处回核／**全仓结构式**：主按钮不许排在「取消」后面（按父容器分组 + 只认 `.primary-button`，零假阳性、例外表为空）／例外表不许过期／五个对话框真渲染逐框核 |
+| `tests/button-handler-host.test.mjs` | 2 | 按钮的点击处理器不许只挂在图标上（结构式扫全仓 300+ 按钮）／FileTypesPage 摘模式那一颗的具体接线 |
+| `tests/project-git-dialogs-render.test.mjs` | 7 | 三个对话框的真渲染（关闭态零节点／行数=数据条数／高亮与补丁／移除带路径／**三个输入的双向接线**用自搭渲染器取 vnode props 真调 `onInput`／子模块状态翻译／三个关闭互不串） |
+
+扩充：`tests/idea-icons.test.mjs`（语义色表加 `success`、normalize 加两色）、
+`tests/workbench-dock-render.test.mjs`（底部「终端」那一格画的是 `terminal.svg` 不是 lucide，真渲染）、
+`tests/main-toolbar-render.test.mjs`（loader 认得组件目录内的 `./icons/*.ts` 相对依赖）。
+
+### 八、门禁
+
+`vue-tsc --noEmit` 0 错（我的文件；仓里另有两条别的 lane 在飞的新文件报错：
+`src/findUsagesProvider.ts` 与 `src/changeListSection.ts`，未动）。
+本批相关的 15 个测试文件 **101/101**。全量 `npm test` **6971/6978**：
+7 条红全在别的 lane 的在飞改动上（`hierarchyView.ts`/`App.vue` 的层级范围下拉、`CodeEditor.vue`+`editorKeymap.ts`
+的 F2/Ctrl+Shift+M 键位、`src/runInstances.ts` 涨到 917 行未登记、B9 判决档位漂移），与本批零交集。
+
+### 九、仍需大组件 lane 配合的清单（本批后**已清空**）
+
+上批列的「`SourceControl.vue` 的菜单勾选记号」经核实**不存在**（那一处是空状态插画，不在替换范围）。
+四个大组件（CodeEditor / DebugPanel / DiffView / SourceControl）本批**没有**任何需要它们配合的勾选记号或
+顶栏图标改动。若将来大组件里真出现菜单勾选，判据 `tests/menu-check-icon.test.mjs` 会当场点名
+（它按 `<Check>` + lucide 导入两条扫全仓，只豁免 `SourceControl.vue` 的空状态那一处 —— 那个豁免
+是按"文件 + 用途"写的，不是按"文件"放行）。
+
+## 第一百二十批验证记录（UI 对标续做：图标笔画归属门禁 / 控件几何收进令牌 / 三颗状态钮与一处 ARIA 嵌套）
+
+这一批接着第一百一十八 / 一百一十九批的 UI 对标收口，三件事：**字体图标对齐**、**格式不统一**、**布局错位**。
+
+### 一、字体图标对齐
+
+**1. 笔画归属落成门禁（原先只有注释、没有机检）**
+
+`.activity-button > svg.lucide { stroke-width: 2 }` 这类覆盖在批 118 已经改成"只对 lucide 生效"，
+但**没有任何判据拦得住它退回去**。本批新增 `tests/icon-stroke-ownership.test.mjs`（3 条），扫
+`src/**/*.css` 与所有 `.vue` 的 `<style>` 块：
+
+- 任何 `stroke-width: <值>` 的选择器，选择器片段里必须带 `.lucide`（`inherit/initial/unset` 放行）；
+- 作用到 `.idea-icon` 的规则不许声明 `stroke`/`stroke-width`（expui 图标的笔画写在 path 上，
+  覆盖它就把 IDEA 手绘的笔画改成另一套）；
+- 裸 `svg` 选择器不许声明 `stroke`/`stroke-width`（要限定 `:not(.lucide):not(.idea-icon)`）。
+
+核过：全仓**只有** `src/style.css:346` 一处 `stroke-width` 声明（`.lucide`），门禁 3/3 绿。
+
+**2. 纯图标按钮的 title+aria-label**：已有 `tests/ui-icons.test.mjs:122` 守着，本批复扫全仓
+（除四个禁改大组件）只剩 `FileChooserDialog.vue:380` 一颗 —— 带 `aria-hidden="true"` 的装饰性展开箭头
+（在一行里，读屏由整行给名），**不算缺**。
+
+**3. 三颗"状态只写在视觉/读屏名里、class 上没记号"的钮**（既有 `tests/toggle-aria-state.test.mjs`
+按 class 记号扫，抓不到这三颗，所以本批按表达式逐个钉进那张"逐处接线"表）：
+
+| 位置 | 键 | 上游口径 |
+|---|---|---|
+| `RunConsole.vue` 暂停输出 | `:aria-pressed="runOutputPaused"` | `PauseOutputAction` 是 `ToggleAction` ⇒ 开关用 pressed，不是 expanded |
+| `DebugBreakpointEditDialog.vue` 新建… | `:aria-expanded="creatingGroup"` + `aria-controls="bp-new-group"` | 披露一段输入区 ⇒ 披露钮用 expanded |
+| `HistoryPanel.vue` 放置标签 | `:aria-expanded="labelPrompt"` + `aria-controls="hist-label-add"` | 同上（披露，不是开关） |
+
+开关与披露**不混用**：开关按下去代表"某物被开了"（pressed），披露按下去只是"露出了下面那段"（expanded）。
+
+**4. 图标与文字基线**：全仓复扫 —— 带图标的 flex 行**没有**一处缺 `align-items: center`；
+`vertical-align: middle` 在需要的内联混排处（`VcsLogChangeTree` 的 `summary svg`、
+`ScopesSettingsPage` 的 `.field-hint > svg`）都已就位。无需改动。
+
+### 二、格式不统一（硬编码 → 令牌）
+
+**先纠一条事实**：把全仓（除四个禁改大组件）的 `gap/padding/margin` 硬编码按"是否等于某个
+`--space-*` 值"扫了一遍，**一个都不剩** —— 间距的令牌化在之前几批已经做完。本批补的是
+**控件高度**与**圆角**两族。
+
+**1. 硬编码高度 → 既有令牌（同值替换，零视觉变化）**
+
+| 落点 | 原先 | 换成 | 依据 |
+|---|---|---|---|
+| `style.css` `.menu-button` | `min-height: 28px` | `var(--menu-row-height)` | New UI `List.rowHeight`（`.dropdown > .menu-item` 早就引它，只有这条漏了） |
+| `style.css` `.icon-button` | `width/height: 28px` | `var(--ctrl-height)` | 控件高度三档（24/28/32）里的中档 |
+| `style.css` `.tab-close` | `width/height: 24px` | `var(--ctrl-height-sm)` | 同一档 |
+| `style.css` `.icon-button.hamburger-button` | `width/height: 30px` | `var(--toolbar-btn-size)` | `JBUI.java:1276` 的 30x30（规则上方注释自己写着） |
+| `style.css` `.notice > .icon-button` | `width/height: 24px` | `var(--ctrl-height-sm)` | 同上 |
+
+**2. 行内搜索/筛选框的 `22px` 全部收进 `--ctrl-height-sm`（10 处）**
+
+`22px` **没有任何出处**，而且**不随紧凑模式收**（`--ctrl-height-sm` 会被
+`html[data-density='compact']` 覆写成 20）—— 于是紧凑模式下同一排控件一个 20、一个 22。
+收进令牌后：`SpeedSearchBar` / `VcsLogGoToRef` / `VcsLogFilters` / `HistoryPanel`（搜索框+标签输入）/
+`ReferencePanel` / `EventLogPanel`（搜索框+更多钮）/ `ProblemsPanel`（两个 select）/ `OutlinePanel`（筛选框）。
+
+**3. 圆角"令牌在旁边却另写一个数"**
+
+- `ScopesSettingsPage.vue` 三个盒子 `6px` → `var(--radius-md)`（7，卡片/内层盒）；
+- `ColorChooserDialog.vue` 外壳 `8px` → `var(--radius-lg)`（9，对话框外壳），边框同时从
+  `var(--line)` 提到 `var(--line-strong)`（与其它对话框壳一致）；
+- `SearchEverywhereDialog.vue` `.se-tab` `4px` → `var(--radius-sm)`（与 `.settings-tab` 同档）；
+- `ScopesSettingsPage.vue` `.scope-list li` `4px` → `var(--radius-sm)`；
+- `MarkdownPreview.vue` `pre` `6px` → `var(--radius-md)`；
+- `style.css` `.activity-number` `6px` → `var(--radius-pill)`（12px 高的编号徽标，6 就是半高 = 胶囊）。
+
+**4. 判据**：新增 `tests/control-geometry-tokens.test.mjs`（3 条）——本线文件里不许再有 `height: 22px`
+的控件；点名的控件必须引令牌（不许退回裸数字）；圆角不许 `6px`/`8px`（滚动条拇指的 8px 单列豁免，
+理由写在判据里：它是按可见宽度画的圆头，`--radius-pill` 会在加宽档变成另一套形状）。
+
+### 三、布局错位
+
+**1. 三颗非方形图标盒 → 方形（宽高同一个令牌）**
+
+| 落点 | 原先 | 换成 | 为什么是错位 |
+|---|---|---|---|
+| `HistoryPanel.vue` `.hist-tool` | `24 × 22` | `var(--ctrl-height-sm) × 同` | 24 宽 22 高，图标在盒里垂直居中后会与同排方钮错 1px；hover 底色不是正方形 |
+| `OutlinePanel.vue` `.outline-tool` | `24 × 22` | 同上 | 与 `.outline-filter` 同一排，两个盒高不一致、上缘对不齐 |
+| `style.css` `.route-icon` | `29 × 28` | `var(--ctrl-height) × 同` | 29 宽 28 高，图标水平方向偏 0.5px |
+
+判据并进 `tests/control-geometry-tokens.test.mjs` 的同一张表（"方形盒的宽高必须引用同一个令牌"）。
+
+**2. 一处 ARIA 嵌套错位（`InternalErrorsDialog.vue`）**
+
+错误簇清单原是 `<li role="option" :aria-selected><button …></li>` —— `option` 里塞了
+`<button>` 这类可交互内容，是非法嵌套；状态又在父级、焦点在子级，读屏报出的选中项与真被点的不是同一个。
+改成把 `role="option"` + `:aria-selected` 直接挂到 `<button>` 上、`<li>` 降为 `role="presentation"` ——
+`listbox > li(presentation) > button[role=option]` 是这条 listbox 的正确形状。
+
+### 四、判据与门禁
+
+新增：`tests/icon-stroke-ownership.test.mjs` 3 条、`tests/control-geometry-tokens.test.mjs` 3 条。
+扩充：`tests/toggle-aria-state.test.mjs` 的"逐处接线"表加三行（上面那三颗）。
+
+- 本批相关的 13 个既有门禁文件 **102/102**；两个新门禁 + 扩充后的 toggle 门禁 **12/12**。
+- `vue-tsc --noEmit`：本批文件 **0 错**（仓里另有 8 条别的 lane 在飞的文件报错：
+  `FileTree.vue` / `projectTreeModel.ts` / `usageViewGrouping.ts` / `usageViewTreeModel.ts`，未动）。
+- 全量 `npm test` **7271/7271**（首次跑时 `source-citations.test.mjs` 对 `src/todoExtraPlaces.ts`
+  的上游行号报过一条红，复跑即绿 —— 是别的 lane 正在改那条引用，与本批零交集）。
+
+### 五、核到但不做的（附理由）
+
+| 项 | 为什么不换 |
+|---|---|
+| 带文字按钮里的装饰性图标补 `aria-hidden="true"`（复扫出 ~110 处） | 不是本批点名的三件事之一；且这 110 处横跨二十多个组件文件，而别的 lane 正在同一批文件上并行编辑 —— 一次百点机械改写会制造大面积冲突。现有 `tests/ui-icons.test.mjs`（纯图标钮的 title+aria-label）与 `tests/icon-glyph-role.test.mjs`（字形冒充图标）已覆盖真正影响可达性的两类 |
+| `font-size` 的 10/11/12/13/14 五档 | 全仓**没有** `--font-size-*` 令牌，硬造一套再全量替换属于"发明度量"，收益小于风险。字号是成体系的（10=等宽小字、11=次要、12=正文、13=大号、14=palette 输入），并非混乱 |
+| `.activity-bar` 的 `padding: var(--space-1) 0`（4px 上下内缩） | 上游 `Stripe`/`New UI` 条带的 border 是 `empty()`（`ToolWindowToolbar.kt:126`），确实没有外边距；但这条 4px 内缩在本仓用了很久、无出处也无反证，删掉是纯观感改动，无法在本环境目测验证，故**记录不动** |
+| `.welcome-tab` 的 `gap: 9px / padding: 0 17px`、`.tab-toolbar` 的 `gap: 2px / padding: 0 6px` | 都是 off-scale 值，但**没有**与之同角色的令牌可映射（`--space-*` 只有 4/8/12/16/20/24），换任一个都是"改数值"而不是"统一格式"，风险大于收益 |
+
+## 第一百二十二批验证记录（UI 弹层族令牌对齐线：散装弹层收进 popup 族 + 判据扫到组件样式块）
+
+> 批号说明：第一百二十一批的题头已被并行的 UI 对标线在 `tests/popup-shadow-family.test.mjs`
+> 里占用（那条线收的是浮层**阴影档位**）。本线是并行的「B12 弹层族令牌对齐」线，接在其后记 122。
+
+`src/tokens.css:348-388` 早就写明浮层族是**一套**规格：阴影只有一档（菜单、补全、各处下拉共用
+`--popup-shadow`），底色/前景/选中行共用 `--popup-*`，通用列表弹窗（action/list popup）与补全同族。
+但落到具体弹层，边框、圆角、底色、前景四件各有各的写法 —— 最危险的是**画了浮层底色却不写
+`color:`**：浮层可以挂在任何容器里（顶栏下拉就挂在深炭色顶栏内），继承了宿主颜色就会在白底浮层上
+写出白字，`tests/popup-foreground.test.mjs` 开头记的正是这个现场。
+
+### 一、点名的落点逐条收族（8 处）
+
+| 落点 | 改前 | 改后 | 上游/依据 |
+|---|---|---|---|
+| `src/components/VcsLog.vue:295` `.log-menu`（提交行右键菜单） | `border: 1px solid var(--line)`、`border-radius: var(--radius-sm)`、无 `color` | `var(--popup-border)` / `var(--popup-radius)` / `color: var(--popup-foreground)`，底色一并收 `--popup-background` | 族定义 `src/tokens.css:348-388` |
+| `src/components/GradlePanel.vue:470` `.gradle-menu` | `background: var(--panel)`、无圆角、无 `color` | `--popup-background` / `--popup-border` / `--popup-radius` / `color: var(--popup-foreground)` | 同上；Gradle 工具窗设置菜单 |
+| `src/components/SearchEverywhereDialog.vue:518` `.se-funnel-panel` | `background: var(--editor)` / `1px solid var(--line-strong)` / `var(--radius-xs)` / `box-shadow: var(--shadow-2)` / 无 `color` | `--popup-background` / `var(--popup-border)` / `var(--popup-radius)` / `color` | 上游 `getFilterTypesAction` 那格（同文件 :515 的注释） |
+| `src/components/ProjectStructurePane.vue:598` `.ps-popup` | `1px solid var(--line-strong)` / `var(--radius-sm)` / `background: var(--elevated)` / `box-shadow: var(--shadow-2)` / 无 `color` | popup 族四件（底色收 `--popup-background`）+ `color` | 内容根/依赖路径输入弹层（同文件引 `RootDetectionUtil.java:53-149` + `DetectedRootsChooserDialog`） |
+| `src/style.css:564` `.find-history`（编辑器内查找历史） | `var(--radius-sm)`、无 `color` | `var(--popup-radius)` + `color` | 族定义同上 |
+| `src/style.css:1364` `.quickdoc-popup`（快速文档） | `background: var(--panel)` / `var(--radius-md)` / `box-shadow: 0 4px 16px …` | `--popup-background` / `--popup-radius` / `--popup-shadow` + `color` | 同上 |
+| `src/style.css:1413` `.quick-eval-hint`（调试悬停值） | `var(--radius-sm)` / `--shadow-2` | `--popup-radius` / `--popup-shadow` | 同上 |
+| `src/style.css:1417` `.signature-popup`（参数信息） | `var(--radius-md)` / `--shadow-2` | `--popup-radius` / `--popup-shadow`；`.signature-header` 顶角跟着改 `var(--popup-radius) var(--popup-radius) 0 0` | 同上 |
+
+其余组件里的浮层（`MainToolbar` 的 `.run-more-popup` / `.targets-popup` / `.run-dashboard-popup`、`RunConsole` 的 `.run-views-menu`、
+`TodoPanel` 的 `.groupby-popup`、`SettingsDialog` 的 `.settings-history-popup`、`RunConfigurationsDialog` 的 `.rc-add-menu` /
+`.run-views-menu`、`VcsLogFilters` / `VcsLogGoToRef` / `VcsLogGraphOptions` / `VcsLogTextFilterSettings` 的 `.popup`、
+`BookmarksPanel` 的 `.bookmark-gear` / `.bookmark-row-menu`、`BranchPopup`、`FileColorsSettingsPage`、`WelcomePage`、`SearchPanel`、
+`DebugRowMenu`、`DebugInspectWindow`、`DebugBreakpointEditDialog`、`DependencyAnalyzerDialog` 等）复扫后全部自带 `color`。
+
+### 二、判据（`tests/popup-foreground.test.mjs`，6 → 7 条）
+
+1. **扫描面扩到组件**：`src/style.css` + `src/components/**/*.vue` 的 `<style>` 块（`styleOf` 逐个抽块、
+   剔掉模板 —— 模板里的 `{{ }}` 会被 CSS 规则误当成选择器）。此前 `.log-menu` 这类挂在组件里的浮层
+   一个都扫不到。
+2. **禁改文件显式排除**：`CodeEditor` / `DebugPanel` / `SourceControl` / `DiffView` / `EditorFindBar` /
+   `App.vue` 六个进 `LOCKED`，扫描面跳过。`SourceControl.vue:886` 的 `.sc-checks-popup`
+   （画了 `--elevated` 底、没有 `color:`）是已知的同类缺口，归 VCS lane —— 注释里写明原因与
+   解锁后的期望（补 `color: var(--popup-foreground)`）。
+3. **新增「浮层族必须共用 `--popup-border` / `--popup-radius`」**：按 `--popup-shadow` 认族
+   （tokens.css 写明浮层只有一档阴影，画了它就是族内规则），族内规则自造边框/圆角即红。
+4. **新增「禁改文件被显式排除在扫描面之外」**：拦「悄悄解锁」—— 谁把 `SourceControl.vue`
+   从 `LOCKED` 里拿掉，这条立刻点名。
+5. 两条反例（漏 `color` / 自造边框圆角）保留；两条正例各带非空断言（扫描到 40 条浮层底色规则、
+   52 条浮层族规则），防止判据退化成空转。
+
+### 三、核到但不做（附理由）
+
+| 项 | 为什么不动 |
+|---|---|
+| `src/components/SourceControl.vue:886` `.sc-checks-popup` 缺 `color:` | 禁改文件（VCS lane 独占）。判据里显式排除并写明原因；文件解锁后应与其余浮层一样补 `color: var(--popup-foreground)` |
+| `src/codeLensExtension.ts:129` `.cm-code-lens-menu`（代码愿景菜单）在 `cssText` 里画了 `--elevated` 底 + `--popup-shadow`，没有 `color` | 不在本线文件所有权内（本线只有 `src/components/**` 与 `src/style.css`/`tokens.css`）；它是 JS 注入的内联样式，不在判据扫描面（样式表 + `.vue` 样式块）。且该菜单挂在 `document.body` 上（继承 `--text`），不是「挂在异色容器里」的现场，风险低 —— 记录，归属待定 |
+
+### 四、门禁
+
+- `node --test tests/popup-foreground.test.mjs tests/focus-ring-ownership.test.mjs tests/moon-palette.test.mjs tests/module-size.test.mjs tests/ui-icons.test.mjs tests/control-geometry-tokens.test.mjs`
+  → **44/44**（其中 `popup-foreground` **7/7**）
+- `npx vue-tsc --noEmit` → **0 错**
+- `npm test`（全量）→ **7361/7361**，0 失败
+- 独立复扫（不依赖判据脚本本身）：`src/style.css` + 23 个可改 `.vue` 的样式块里 **40** 条浮层底色规则
+  全部自带 `color`，**52** 条浮层族（`--popup-shadow`）规则全部走 `--popup-border`/`--popup-radius`，0 违规
+- 组件行数未顶破登记上限（`module-size` 5/5 绿；本批改动都是同行的声明替换，行数不变）

@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { RUN_CONFIG_TYPES, buildRunConfigTree, nodeKey, runConfigTypeLabel, uniqueRunConfigName, validateFolderName } from '../src/runConfigTree.ts'
+import {
+  RUN_CONFIG_TYPES, buildRunConfigTree, extractRunConfigBaseName, nodeKey, runConfigTypeLabel,
+  uniqueRunConfigName, validateFolderName,
+} from '../src/runConfigTree.ts'
 
 const config = (name, extra = {}) => ({ name, command: 'run', ...extra })
 
@@ -37,12 +40,18 @@ test('every type the panel offers has a label', () => {
   assert.equal(runConfigTypeLabel('something-else'), 'something-else', 'an unknown type keeps its raw id')
 })
 
-// RunConfigurable.kt:934 createUniqueName —— 新建/另存为时取名不能撞车。
-test('a new configuration name is made unique', () => {
-  const configs = [config('新配置'), config('新配置 2')]
-  assert.equal(uniqueRunConfigName(configs, '新配置'), '新配置 3')
-  assert.equal(uniqueRunConfigName(configs, '其它'), '其它')
+// RunManager.kt:51-65 suggestUniqueName（编号从 1 起、形状是 `名 (N)`；:67-71 先剥尾部 (N)）。
+// 原写「沿用『名字 2』风格」钉的是本仓自造的形状，已按上游改成括号形并补「剥尾部」那条（留痕见
+// docs/batch-2026-10-06-runcfg4.md §0/§4）。
+test('a new configuration name is made unique the way the platform suggests it', () => {
+  const configs = [config('未命名'), config('未命名 (1)')]
+  assert.equal(uniqueRunConfigName(configs, '未命名'), '未命名 (2)', '1 已被占 ⇒ 下一个空位是 (2)')
+  assert.equal(uniqueRunConfigName(configs, '其它'), '其它', '没被占用就原样返回')
   assert.equal(uniqueRunConfigName([], 'x'), 'x')
+  assert.equal(uniqueRunConfigName([config('api'), config('api (1)')], 'api (1)'), 'api (2)',
+    '先按 extractBaseName 剥掉尾部 (1) 再数：不产出 `api (1) (1)`')
+  assert.equal(extractRunConfigBaseName('api (12)'), 'api')
+  assert.equal(extractRunConfigBaseName('api (x)'), 'api (x)', '非数字尾巴不剥（上游正则 \\(\\d+\\)）')
 })
 
 // 与原生 runConfigs[].folder 的校验同规则。

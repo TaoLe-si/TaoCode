@@ -138,12 +138,12 @@ function createGroup() {
           <option :value="null">&lt;无组&gt;</option>
           <option v-for="name in options.groups" :key="name" :value="name">{{ name }}</option>
         </select>
-        <button class="bp-edit-btn" @click="creatingGroup = !creatingGroup">新建…</button>
+        <button class="bp-edit-btn" type="button" :aria-expanded="creatingGroup" aria-controls="bp-new-group" @click="creatingGroup = !creatingGroup">新建…</button>
         <button class="bp-edit-btn" :disabled="!model.group || model.group === defaultGroup"
                 :title="model.group && model.group !== defaultGroup ? `把「${model.group}」设为默认组` : '先选一个组'"
                 :aria-label="`把当前组设为默认`" @click="emit('setDefaultGroup', model.group)">设为默认</button>
       </div>
-      <div v-if="creatingGroup" class="bp-edit-group">
+      <div v-if="creatingGroup" id="bp-new-group" class="bp-edit-group">
         <input v-model="newGroupName" class="bp-edit-field" type="text" aria-label="新组名" placeholder="组名" @keydown.enter.prevent="createGroup" />
         <button class="bp-edit-btn primary" :disabled="!newGroupName.trim()" @click="createGroup">建立并放入</button>
       </div>
@@ -161,7 +161,7 @@ function createGroup() {
 </template>
 
 <style scoped>
-.bp-edit { position: absolute; z-index: 70; left: var(--space-3); right: var(--space-3); top: var(--space-3); display: flex; flex-direction: column; max-height: min(70vh, 520px); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.bp-edit { position: absolute; z-index: 70; left: var(--space-3); right: var(--space-3); top: var(--space-3); display: flex; flex-direction: column; max-height: min(70vh, 520px); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .bp-edit-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); }
 .bp-edit-title { flex: 1; min-width: 0; color: var(--bright); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bp-edit-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-1); }

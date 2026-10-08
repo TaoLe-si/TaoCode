@@ -3,7 +3,7 @@
 // 本仓唯一一处「哪些级别算错误/警告/信息」的定义在 `src/highlightLevels.ts` 的 `levelForSeverity`
 // （`<= 1` 全归 ERROR），计数走 `src/problemsView.ts` 的 `problemCounts`。
 // 状态栏那一格（`src/App.vue` 的 `status-problems`）此前一直**就地再数一遍**
-// `allProblems.filter(p => p.severity === 1).length` —— 那是第二把尺。
+// `allProblems.filter(p => p.severity === 1).length` —— 那是第二把尺；2026-10-06 R1 已改读 `problemCounts`。
 // 上游不是这么做的：状态栏那一格的数字来自计数对象本身
 // （`platform/lang-impl/src/com/intellij/codeInsight/daemon/impl/TrafficLightRenderer.kt:383`
 // 用 `severity.getCountMessage(count)`，`count` 取自 `status.errorCounts`；
@@ -19,14 +19,9 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 const RECOUNT = /\.\s*filter\(\s*\w+\s*=>\s*\w*\.?severity\s*===\s*\d+\s*\)\s*\.length/g
 
 // 已登记的第二把尺（R1 的现场）。命中数必须逐字对上，多一条少一条都红。
-const PINNED = [
-  {
-    file: 'src/App.vue',
-    hits: 2,
-    sample: /\{\{ allProblems\.filter\(p => p\.severity === 1\)\.length \}\} 错误/,
-    reason: 'docs/wiring-requests-2026-10-06-prob3.md R1：状态栏那一格仍就地 filter，未改读 problemCounts',
-  },
-]
+// 2026-10-06：R1 已落地（`src/App.vue` 的状态栏那一格改读 `problemCounts`）⇒ 登记表清空。
+// 表**留着**：下面那条「未登记的字段就地重数就红」的循环全靠它区分「已知欠账」与「新写的第二把尺」。
+const PINNED = []
 
 function sourceFiles(dir) {
   const out = []
@@ -71,7 +66,7 @@ test('problemCounts 仍然有生产消费方（不许退回只过自己测试）
   const consumers = sourceFiles('src')
     .filter(file => !file.endsWith('problemsView.ts') && !file.endsWith('highlightLevels.ts'))
     .filter(file => readFileSync(file, 'utf8').includes('problemCounts('))
-  assert.deepEqual(consumers, ['src/components/ProblemsPanel.vue'],
+  assert.deepEqual(consumers, ['src/App.vue', 'src/components/ProblemsPanel.vue'],
     'problemCounts 的生产消费方清单变了（R1 落地后这里应当多出 src/App.vue）')
 })
 

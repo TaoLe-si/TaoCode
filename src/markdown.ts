@@ -55,7 +55,7 @@ function renderLink(target: string, label: string, basePath?: string): string {
   if (!path) return label
   // `#path` is a same-document href, so even a click nobody intercepts cannot
   // navigate the WebView away from the app; the component opens the target instead.
-  return `<a href="#${path}" data-md-open="${path}">${label}</a>`
+  return `<a href="#${escapeHtml(path)}" data-md-open="${escapeHtml(path)}">${label}</a>`
 }
 function renderImage(target: string, alt: string, basePath?: string): string {
   const decoded = unescape(target)
@@ -66,7 +66,7 @@ function renderImage(target: string, alt: string, basePath?: string): string {
   if (!path) return `<span class="md-image-broken">图片地址无效：${target}</span>`
   // Kept as a data-carrying span: the preview reads the bytes over the bridge and
   // swaps in an <img> with a data: URL, which is all the CSP permits here.
-  return `<span class="md-image md-image-pending" role="img" data-md-src="${path}" data-md-alt="${alt}">图片加载中…</span>`
+  return `<span class="md-image md-image-pending" role="img" data-md-src="${escapeHtml(path)}" data-md-alt="${alt}">图片加载中…</span>`
 }
 
 // Inline rendering runs after block escaping; `code` spans were re-escaped inside,

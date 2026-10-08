@@ -28,8 +28,10 @@
 // 取不到当前窗格宿主就整格不渲染（上游是 `isEnabledAndVisible = false`）。
 import { computed, ref } from 'vue'
 import type { ProjectTreeSortSettings } from '../projectTreeSort'
-import { Check } from 'lucide-vue-next'
+import {  } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 import { projectTreeHostFor } from '../projectTreeState'
 import FileNestingSettings from './FileNestingSettings.vue'
 
@@ -48,9 +50,9 @@ const showScratches = computed(() => props.settings.showScratchesAndConsoles ?? 
        Only the items this repository actually has a backend for, in the XML's order. -->
   <div v-if="host" role="group" aria-label="外观">
     <div class="menu-section-label" role="presentation">外观</div>
-    <button class="menu-item" role="menuitemcheckbox" :aria-checked="showScratches" title="在树里显示或隐藏「临时文件与控制台」那一条合成根" @click="emit('update', { showScratchesAndConsoles: !showScratches })"><span class="menu-item-icon"><Check v-if="showScratches" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">显示临时文件和控制台</span></button>
+    <button class="menu-item" role="menuitemcheckbox" :aria-checked="showScratches" title="在树里显示或隐藏「临时文件与控制台」那一条合成根" @click="emit('update', { showScratchesAndConsoles: !showScratches })"><span class="menu-item-icon"><IdeaCheckedIcon v-if="showScratches" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">显示临时文件和控制台</span></button>
     <div class="menu-rule" role="separator" />
-    <button class="menu-item" role="menuitemcheckbox" :aria-checked="settings.compactDirectories ?? false" title="把只有一个子目录的目录与那个子目录并成一行" @click="emit('update', { compactDirectories: !(settings.compactDirectories ?? false) })"><span class="menu-item-icon"><Check v-if="settings.compactDirectories" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">压缩目录</span></button>
+    <button class="menu-item" role="menuitemcheckbox" :aria-checked="settings.compactDirectories ?? false" title="把只有一个子目录的目录与那个子目录并成一行" @click="emit('update', { compactDirectories: !(settings.compactDirectories ?? false) })"><span class="menu-item-icon"><IdeaCheckedIcon v-if="settings.compactDirectories" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">压缩目录</span></button>
     <div class="menu-rule" role="separator" />
     <button class="menu-item" role="menuitem" title="配置文件嵌套规则" @click="nestingOpen = true"><span class="menu-item-icon" aria-hidden="true" /><span class="menu-item-title">文件嵌套…</span></button>
   </div>
@@ -58,10 +60,10 @@ const showScratches = computed(() => props.settings.showScratchesAndConsoles ?? 
        separator, folders always on top. No placeholder unsupported actions. -->
   <div role="group" aria-label="排序">
     <div class="menu-section-label" role="presentation">排序</div>
-    <button class="menu-item" role="menuitemradio" :aria-checked="settings.sortKey === 'BY_NAME'" @click="emit('update', { sortKey: 'BY_NAME' })"><span class="menu-item-icon"><Check v-if="settings.sortKey === 'BY_NAME'" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">按名称</span></button>
-    <button class="menu-item" role="menuitemradio" :aria-checked="settings.sortKey === 'BY_TYPE'" @click="emit('update', { sortKey: 'BY_TYPE' })"><span class="menu-item-icon"><Check v-if="settings.sortKey === 'BY_TYPE'" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">按类型</span></button>
+    <button class="menu-item" role="menuitemradio" :aria-checked="settings.sortKey === 'BY_NAME'" @click="emit('update', { sortKey: 'BY_NAME' })"><span class="menu-item-icon"><IdeaCheckedIcon v-if="settings.sortKey === 'BY_NAME'" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">按名称</span></button>
+    <button class="menu-item" role="menuitemradio" :aria-checked="settings.sortKey === 'BY_TYPE'" @click="emit('update', { sortKey: 'BY_TYPE' })"><span class="menu-item-icon"><IdeaCheckedIcon v-if="settings.sortKey === 'BY_TYPE'" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">按类型</span></button>
     <div class="menu-rule" role="separator" />
-    <button class="menu-item" role="menuitemcheckbox" :aria-checked="settings.foldersAlwaysOnTop" @click="emit('update', { foldersAlwaysOnTop: !settings.foldersAlwaysOnTop })"><span class="menu-item-icon"><Check v-if="settings.foldersAlwaysOnTop" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">目录始终在前</span></button>
+    <button class="menu-item" role="menuitemcheckbox" :aria-checked="settings.foldersAlwaysOnTop" @click="emit('update', { foldersAlwaysOnTop: !settings.foldersAlwaysOnTop })"><span class="menu-item-icon"><IdeaCheckedIcon v-if="settings.foldersAlwaysOnTop" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">目录始终在前</span></button>
   </div>
   <p v-if="persistenceError" class="persistence-warning" role="status">{{ persistenceError }}</p>
   <FileNestingSettings
@@ -75,5 +77,5 @@ const showScratches = computed(() => props.settings.showScratchesAndConsoles ?? 
 </template>
 
 <style scoped>
-.persistence-warning { max-width: 250px; padding: 4px 12px; color: var(--muted); font-size: 11px; }
+.persistence-warning { max-width: 250px; padding: var(--space-1) var(--space-3); color: var(--muted); font-size: 11px; }
 </style>

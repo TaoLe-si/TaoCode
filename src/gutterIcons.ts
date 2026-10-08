@@ -60,19 +60,39 @@ export interface GutterIcon {
 export const GUTTER_ICON_ORDER: readonly GutterIconKind[] =
   ['error', 'warning', 'hint', 'breakpoint', 'bookmark']
 
-/** 一档的外形与配色（配色全部走主题变量，见 src/tokens.css）。 */
+/**
+ * 一档的外形与配色（配色全部走主题变量，见 src/tokens.css）。
+ *
+ * `shape` 是**降级外形**：真机渲染走 `ideaIcon`（IDEA 的原样图标，见
+ * `src/components/icons/ideaIconData.ts` 的 `IDEA_ICON_STATUS`），只有在拿不到那份数据时
+ * 才退回这个几何记号（无 DOM 的测试环境、或图标名拼错）。保留它同时是为了让
+ * 「一档一个外形 + 一档一个主题色」这条契约本身可判（`tests/gutter-icons.test.mjs`）。
+ */
 export interface GutterIconAppearance {
   shape: 'circle' | 'triangle' | 'square' | 'diamond'
   color: string
+  /** IDEA 原样图标名（`IDEA_ICON_STATUS` 的键）。上游出处逐条写在下面。 */
+  ideaIcon: 'error' | 'warning' | 'info' | 'breakpoint' | 'bookmark'
 }
 
+/**
+ * 一档的外形、主题色与 IDEA 原样图标。
+ *
+ * 上游依据（`platform/util/ui/src/com/intellij/icons/AllIcons.java`）：
+ *   · `:570` `General.Error`   = `expui/status/error.svg`（红色实心圆 + 白色感叹号）
+ *   · `:679` `General.Warning` = `expui/status/warning.svg`（黄色实心三角 + 白色感叹号）
+ *   · `:589` `General.Information` = `expui/status/info.svg`（蓝色实心圆 + 白色 i）
+ *   · 书签 = `expui/gutter/bookmark.svg`（黄色实心书签），断点 = `expui/breakpoints/breakpoint.svg`（红色实心圆）
+ * 这三张 status 图**自己就带语义色**（不是 `#6C707E` 那套单色前景），所以本仓照抄形状、
+ * 只把主色换成 `currentColor` 让主题变量接管（明暗主题各有取值）。
+ */
 export function gutterIconAppearance(kind: GutterIconKind): GutterIconAppearance {
   switch (kind) {
-    case 'error': return { shape: 'circle', color: 'var(--error)' }
-    case 'warning': return { shape: 'triangle', color: 'var(--warning)' }
-    case 'hint': return { shape: 'circle', color: 'var(--accent)' }
-    case 'breakpoint': return { shape: 'square', color: 'var(--error)' }
-    case 'bookmark': return { shape: 'diamond', color: 'var(--accent)' }
+    case 'error': return { shape: 'circle', color: 'var(--error)', ideaIcon: 'error' }
+    case 'warning': return { shape: 'triangle', color: 'var(--warning)', ideaIcon: 'warning' }
+    case 'hint': return { shape: 'circle', color: 'var(--accent)', ideaIcon: 'info' }
+    case 'breakpoint': return { shape: 'square', color: 'var(--error)', ideaIcon: 'breakpoint' }
+    case 'bookmark': return { shape: 'diamond', color: 'var(--accent)', ideaIcon: 'bookmark' }
   }
 }
 

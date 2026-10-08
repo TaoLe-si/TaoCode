@@ -17,12 +17,13 @@
 // `StackingPopupDispatcherImpl.java:116-164`（自顶向下：落点在某层内就停），
 // Esc 走 `:181-193` + `SpeedSearch.java:77-81` 的两段式。
 import { computed, nextTick, ref } from 'vue'
-import { MoreVertical } from 'lucide-vue-next'
 import ToolWindowGearRows from './ToolWindowGearRows.vue'
 import type { MenuRow } from '../menus/types'
 import { gearRowsForWindow } from '../menus/toolWindowGear.ts'
 import { usePopupLayer } from '../popupStack.ts'
 import { iconSize } from '../uiIcons'
+// 齿轮图标 = `AllIcons.Actions.More`（New UI 的竖排三点，见 toolWindowIcons.ts）。
+import { IdeaMoreVerticalIcon } from './icons/toolWindowIcons.ts'
 
 // `toolWindowId` = 这个齿轮当前挂在哪个工具窗口上（底部那一格 = 选中的那条 content 的 id，
 // 上游按的是窗口自己那份 `canCloseContents()`，`ToolWindowImpl.kt:647`）。
@@ -59,7 +60,7 @@ function pick(row: MenuRow) {
 <template>
   <span v-if="shownRows.length" class="tool-gear">
     <button type="button" class="icon-button" :aria-expanded="open" :aria-label="label ?? '工具窗口选项'"
-            :title="label ?? '工具窗口选项'" @click.stop="toggle($event)"><MoreVertical :size="iconSize.control" /></button>
+            :title="label ?? '工具窗口选项'" @click.stop="toggle($event)"><IdeaMoreVerticalIcon :size="iconSize.control" /></button>
   </span>
   <Teleport v-if="open" to="body">
     <div ref="menu" class="tool-menu tool-gear-menu" role="menu" :aria-label="label ?? '工具窗口选项'"

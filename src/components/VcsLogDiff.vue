@@ -33,18 +33,18 @@ onBeforeUnmount(() => { token++ })
       :subtitle="`${result.beforeRevision.slice(0, 8) || '空'} → ${result.afterRevision.slice(0, 8) || '空'}`"
       :rows="result.sides.rows" :unified="result.patch" :truncated="result.sides.truncated" closable @close="emit('close')" />
     <template v-else>
-      <header><span>{{ change?.path }}</span><button class="icon-button" title="关闭" aria-label="关闭差异" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button></header>
-      <p v-if="loading" role="status">正在加载提交文件差异…</p>
-      <p v-else-if="error" role="alert">{{ error }}</p>
-      <p v-else-if="result?.status === 'binary'">二进制文件，无法显示文本差异。</p>
-      <p v-else-if="result?.status === 'tooLarge'">文件超过文本差异大小或行数上限（字节上限 {{ result.maxBytes }}；原文件 {{ result.beforeSize }}，新文件 {{ result.afterSize }} 字节）。</p>
-      <p v-else-if="result?.status === 'unsupported'">不支持此文件类型的文本差异（{{ result.beforeMode || '空' }} → {{ result.afterMode || '空' }}）。</p>
-      <p v-else-if="result">后端没有提供文本差异行。</p>
+      <header class="preview-header"><span>{{ change?.path }}</span><button class="icon-button" title="关闭" aria-label="关闭差异" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button></header>
+      <p v-if="loading" class="preview-message" role="status">正在加载提交文件差异…</p>
+      <p v-else-if="error" class="preview-message" role="alert">{{ error }}</p>
+      <p v-else-if="result?.status === 'binary'" class="preview-message">二进制文件，无法显示文本差异。</p>
+      <p v-else-if="result?.status === 'tooLarge'" class="preview-message">文件超过文本差异大小或行数上限（字节上限 {{ result.maxBytes }}；原文件 {{ result.beforeSize }}，新文件 {{ result.afterSize }} 字节）。</p>
+      <p v-else-if="result?.status === 'unsupported'" class="preview-message">不支持此文件类型的文本差异（{{ result.beforeMode || '空' }} → {{ result.afterMode || '空' }}）。</p>
+      <p v-else-if="result" class="preview-message">后端没有提供文本差异行。</p>
     </template>
   </section>
 </template>
 <style scoped>
 .preview { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
-header { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 11px; }
-p { padding: 8px; font-size: 11px; color: var(--muted); }
+.preview-header { display: flex; justify-content: space-between; align-items: center; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); font-size: 11px; }
+.preview-message { padding: var(--space-2); font-size: 11px; color: var(--muted); }
 </style>

@@ -63,8 +63,8 @@ import {
 } from './debugBreakpointExtras.ts'
 import { isBreakpointEnabled } from './breakpointGroups.ts'
 
-/** `src/bridge.ts` 的 `DapBreakpoint` 接口本轮冻结、没有 `logMessage` 字段 ⇒ 本地投影（同面板那一处）。 */
-export type BreakpointPoint = DapBreakpoint & { logMessage?: string }
+/** 断点条目就是桥接接口本身（`src/bridge.ts` 的 `DapBreakpoint` 已登记 `logMessage?`，2026-10-06 R1）。 */
+export type BreakpointPoint = DapBreakpoint
 
 /** 一次下发要用的三类前端状态（都不进 DAP，只在「发谁」这一层起作用）。 */
 export interface BreakpointSendRules {
@@ -155,11 +155,13 @@ export async function sendBreakpointFile(item: BreakpointFileSend): Promise<DapB
 
 /** 一轮下发的结果：`error` 给界面用，`result` 给「有没有全部被验证」这类判据用。 */
 export interface BreakpointRound {
+  /** 只有 `applied` 为真时才可能非空：被合并掉的那一份在上游根本不 run，它的回调拿不到错。 */
   error: string | null
+  /** 同上：只有 `applied` 为真时才可能非空（失败由**载荷主人**报那一次，界面因此不必再判 `applied`）。 */
   result: DapBreakpointsResult | null
-  /** 落地的那一轮带的**就是这一份**载荷。被后来的改动合并掉时是 `false` ——
-   *  等待者按版本结算（见 `pump`），所以 `result` 可能是「更新的那份载荷」的结果，
-   *  拿它来判自己那份（例如比 `verifiedLines.length`）会误报。 */
+  /** 落地的那一轮带的**就是这一份**载荷。被后来的改动合并掉时是 `false`，
+   *  且此时 `error` 与 `result` 都是 `null`（等待者按版本结算，见 `pump`）⇒
+   *  想问「我这轮到底成了没」必须先 `applied`，不然会把别人的载荷结果算到自己头上。 */
   applied: boolean
 }
 
@@ -243,8 +245,16 @@ export function createBreakpointUpdater(
         const later: typeof list = []
         for (const waiter of list) {
           // 这一轮带的是 `held.version` 那份载荷：不比它新的请求都算已经生效（含被合并掉的）。
-          if (waiter.version <= held.version) waiter.done({ ...round, applied: waiter.version === held.version })
-          else later.push(waiter)
+          // **被合并掉的那一份既不拿结果、也不拿错**：上游同目标的旧 Update 是 `setProcessed()` +
+          // `setRejected()` 之后**根本不 run**（`MergingUpdateQueue.kt:574-582` 的 `put` 里 `:579`，
+          // `:545` `updatesToReject.forEachGuaranteed(Update::setRejected)`），而它的回调挂在 Update 自己身上
+          // （`FrontendXLineBreakpointVisualizationManager.kt:296-304` 的 `callOnUpdate` 在 `run()` 里）
+          // ⇒ 旧那一份的回调一次都不会被叫到。原来这里把 `round` 整份原样发给所有等待者，
+          //   连排同一文件时「别人那份载荷的失败」会被说成自己这轮的失败（订正留痕见 dapfix 批次报告）。
+          const mine = waiter.version === held.version
+          if (waiter.version <= held.version) {
+            waiter.done({ error: mine ? round.error : null, result: mine ? round.result : null, applied: mine })
+          } else later.push(waiter)
         }
         waiters.set(path, later)
       }

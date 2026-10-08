@@ -1,4 +1,10 @@
 // 补全插入处理器 / 尾类型的判据（实现：src/completionInsertHandlers.ts）。
+//
+// 本轮删掉了本文件曾经覆盖的一个出口 `planSpaceTail`：它既不是 `planTail` 的 switch 分支、
+// 也不是 `tailForCompletion` 会产出的尾类型（`src/` 全域只有这里的判据在调它）⇒ 死代码，
+// 按「死代码直接删」移除；它原先注释里那两条与上游相反的说法记在实现文件头的「订正留痕」。
+// 「补一个空格」那一档**活着的实现**是关键字条目走的 `planCharTail(…, ' ', true)`，
+// 下面第 3 条把它的行尾/空格/越界三档钉住（把行尾改成"不补"就红）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -8,20 +14,23 @@ import {
   planCompletionTail,
   planHumbleSpace,
   planParensTail,
-  planSpaceTail,
   tailForCompletion,
 } from '../src/completionInsertHandlers.ts'
 
-test('AddSpaceInsertHandler：后继不是空格 ⇒ 补一个空格并把光标放到空格后', () => {
-  assert.deepEqual(planSpaceTail('foo'), { insert: ' ', caret: 1 })
-  assert.deepEqual(planSpaceTail(''), { insert: '', caret: 0 }, '行尾不补（没有下一个词要隔开）')
-  assert.deepEqual(planSpaceTail('('), { insert: '', caret: 0 }, '后继是 ( 时不补（上游 VALID_COMPLETION_CHARS 那一档）')
-  assert.deepEqual(planSpaceTail(')'), { insert: ' ', caret: 1 })
+test('关键字条目的尾类型 = 补一个空格（活的那条路，不是被删的 planSpaceTail）', () => {
+  assert.deepEqual(tailForCompletion('keyword', 'return'), { kind: 'char', char: ' ', overwrite: true })
+  assert.deepEqual(planCompletionTail('foo', 'keyword', 'return'), { insert: ' ', caret: 1 })
 })
 
-test('AddSpaceInsertHandler：后继已是空格 ⇒ 光标越过去（overwrite）', () => {
-  assert.deepEqual(planSpaceTail(' '), { insert: '', caret: 1 })
-  assert.deepEqual(planSpaceTail('  x'), { insert: '', caret: 1 }, '两个空格时只越过一个，不吞用户输入')
+test('AddSpaceInsertHandler / insertChar：行尾**要补**、后继同字符且 overwrite 才只越过', () => {
+  // 上游两条判据同方向：`AddSpaceInsertHandler.java:68-72` 的 `isCharAtSpace` 在光标后面没有字符时
+  // 是**假**（`getTextLength() > startOffset` 不成立）⇒ 走 `:51-53` 插入那一支；
+  // `TailType.java:50-54` 的第一个条件就是 `tailOffset == textLength` ⇒ 插。
+  assert.deepEqual(planCharTail('', ' ', true), { insert: ' ', caret: 1 },
+    '行尾必须补 —— 旧实现里那份被删的 planSpaceTail 把这一格写成"不补"，与上游相反')
+  assert.deepEqual(planCharTail(' ', ' ', true), { insert: '', caret: 1 }, '后继已是空格 ⇒ 光标越过去')
+  assert.deepEqual(planCharTail('  x', ' ', true), { insert: '', caret: 1 }, '两个空格时只越过一个，不吞用户输入')
+  assert.deepEqual(planCharTail('x', ' ', true), { insert: ' ', caret: 1 })
 })
 
 test('CharTailType：后继同字符且 overwrite ⇒ 不插入，只把光标后移', () => {

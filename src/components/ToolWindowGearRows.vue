@@ -12,10 +12,12 @@
 // 带图标的行对齐（上游 ActionGroup 行一律有前导槽）。槽也让「显示菜单图标」关掉时由
 // `html[data-menu-icons='off']` 一起收起，与其它菜单面同一条路。
 import { computed } from 'vue'
-import { Check } from 'lucide-vue-next'
+import {  } from 'lucide-vue-next'
 import type { MenuRow } from '../menus/types'
 import { gearRowsForWindow } from '../menus/toolWindowGear.ts'
 import { iconSize } from '../uiIcons'
+// 菜单行的勾选记号 = `AllIcons.Actions.Checked`（`expui/actions/checked.svg`），不是 lucide 的 24 格图。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 
 // `toolWindowId` = 这一组行当前挂在**哪个工具窗口**上。上游的齿轮组不是宿主统一算好再发两边的：
 // `InternalDecoratorImpl.kt:290` 给每个标题栏的是 `gearProducer = { toolWindow.createPopupGroup(true) }`，
@@ -38,12 +40,12 @@ function titleOf(row: MenuRow): string {
   <template v-for="row in shownRows" :key="row.id">
     <button type="button" class="menu-button tool-menu-item" role="menuitem"
             :disabled="row.enabled ? !row.enabled() : false" @click="emit('pick', row)">
-      <span class="menu-item-icon"><Check v-if="row.checked" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ titleOf(row) }}</span>
+      <span class="menu-item-icon"><IdeaCheckedIcon v-if="row.checked" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ titleOf(row) }}</span>
     </button>
     <button v-for="child in row.children ?? []" :key="child.id" type="button"
             class="menu-button tool-menu-item is-child" role="menuitem"
             :disabled="child.enabled ? !child.enabled() : false" @click="emit('pick', child)">
-      <span class="menu-item-icon"><Check v-if="child.checked" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ titleOf(child) }}</span><kbd v-if="child.keys">{{ child.keys }}</kbd>
+      <span class="menu-item-icon"><IdeaCheckedIcon v-if="child.checked" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ titleOf(child) }}</span><kbd v-if="child.keys">{{ child.keys }}</kbd>
     </button>
   </template>
 </template>

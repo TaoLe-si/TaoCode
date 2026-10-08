@@ -22,10 +22,20 @@
 //     实际是**有键**（`src/settingsModel.ts:427`，默认 true = 上游 `CodeInsightSettings.java:140`）
 //     **有界面**（`src/components/EditorEnterKeysFields.vue:29`）**没有消费方**，正是派单第 3 节禁的假控件。
 //     本批把消费方接在本模块的 `smartQuotes` 上（开关关掉 ⇒ `skip`/`pair`/face 那三档都不接管、
-//     `wrap` 仍接管，理由见下一条）。宿主把 `props.settings.autoInsertPairQuote` 传进来那一行在保留文件里
-//     ⇒ `docs/wiring-requests-2026-10-06-editorinput.md` R1（**注意**：不能只靠「不挂 smartQuotes」实现这条开关 ——
+//     `wrap` 仍接管，理由见下一条）。宿主那一行已经在编辑器里传了 `props.settings.autoInsertPairQuote`
+//     （`src/components/CodeEditor.vue:966`，接线请求 W-1 已闭环）。**注意**：不能只靠「不挂 smartQuotes」实现这条开关 ——
 //     本仓挂着 `basicSetup`（`src/components/CodeEditor.vue:3`），它自带 `closeBrackets`，摘掉本模块
 //     反而会退回 CodeMirror 那套固定字符集的配对）。
+//     **订正（2026-10-06 · editact，判决第②条）**：上面那句「不接管」当时只做到了一半。
+//     键位 `return false` 只是把这次输入**让给** `basicSetup`，而 `closeBrackets()` 不是键位而是
+//     `EditorView.inputHandler`（`node_modules/codemirror/dist/index.js:61` 把它带进 basicSetup、
+//     `node_modules/@codemirror/autocomplete/dist/index.js:1830-1832` = `[inputHandler, bracketState]`、
+//     `inputHandler`（`:1844-1856`）对任何用户输入调 `insertBracket`（`:1851`）、`:1795` 的 `defaults.brackets` 含 `"`、
+//     `:1990-1994` 的 `handleSame` 补出 `""`）⇒ 关掉开关后用户在 Java 文件里敲 `"` **仍然**得到一对，
+//     那一格设置当时仍然观察不到差别。现在 `runQuoteKey` 在关掉时自己把那个普通字符落下去并**吃掉键**
+//     （与上游 `TypedQuoteImpl.java:66-68` 之后走 `TypedCharImpl` 普通输入同解）；
+//     判据 `tests/editor-enter-switches.test.mjs`（含「放行给 CodeMirror 就会补一对」那条实测前提，
+//     所以把实现改回 `return false` 会当场变红）。
 //   · 「有选区时用引号把选区包住」是**另一个**开关：`SURROUND_SELECTION_ON_QUOTE_TYPED`
 //     （`SelectionQuotingTypedHandler.java:47`，默认 true 在 `CodeInsightSettings.java:137`）。
 //     本仓 `EditorSettings` 里没有这一条 ⇒ 不做假设置，`wrap` 那一档恒开（与上游默认一致），如实记在报告里。
@@ -52,6 +62,25 @@ import { FACE_CARET_ADVANCE, faceAction, faceInsertion } from './editorQuoteFace
 // 「哪门语言注册了 QuoteHandler、它是不是 JavaLike」那张逐语言表，与两条「这一次不补配对」的门槛
 // （`TypedQuoteImpl.java:89-97`、`:104-105`、`:117-118`）。
 import { isJavaLikeQuoteLanguage, pairInsertionSuppressed } from './quoteHandlerRegistry.ts'
+// 扩展点宿主接线（`com.intellij.typedHandler` / `com.intellij.backspaceHandlerDelegate`）：
+// 第三方按 id 挂的字符输入 / 退格委托在这里被真实分派（bundled 的 passthrough 委托不改变既有行为）。
+import {
+  dispatchBackspaceAfter, dispatchBackspaceBefore, dispatchTypedHandler, fileTypeOfLanguage, notifyTypingStarted,
+  type BackspaceInput, type TypedCharInput,
+} from './editorActionExtensionPoints.ts'
+// 选区去引号过滤（`com.intellij.selectionUnquotingFilter`）：第三方按 id 挂的过滤器在这里
+// 被真实问到（bundled 恒不跳过 ⇒ 既有「用引号包住选区」的行为逐字不变）。
+import { shouldSkipQuoteReplacement } from './editorActionExtraExtensionPoints.ts'
+
+/** 把 CodeMirror 的一次按键整形成扩展点要的输入（`TypedCharInput` / `BackspaceInput`）。 */
+function typedInputOf(view: EditorView, ch: string, language: string | undefined): TypedCharInput {
+  const head = view.state.selection.main.head
+  const line = view.state.doc.lineAt(head)
+  return {
+    path: '', language: language ?? 'other', fileType: fileTypeOfLanguage(language),
+    text: view.state.doc.toString(), line: line.number - 1, character: head - line.from, char: ch,
+  }
+}
 
 /** 一门语言的引号：`single` 参与「插一对 / 跳过收尾 / 包住选区」，`multi` 是多字符引号（不参与配对插入）。 */
 export interface QuoteRules {
@@ -172,71 +201,169 @@ export function quotedChars(): string[] {
 }
 
 /**
- * 按语言的引号键位：`getLanguage` 传取值函数（编辑器换文件时才定得下语言），
- * `autoInsertPairQuote` 传上游那条开关（缺省 = 恒开 = 上游默认值 `CodeInsightSettings.java:140`）。
- * 当前语言不在表里（C++/TS/纯文本）时**一律返回 false**，CodeMirror 的 `closeBrackets` 原样接管，
- * 本模块不抢它的行为。
+ * 敲 `ch` 这个引号时键位真正跑的那一段（`smartQuotes` 的键位体，抽出来是为了能被判据驱动：
+ * 见 `tests/editor-enter-switches.test.mjs` —— 「开关关掉」是**这一步**的返回值决定的，
+ * 只看 `quoteActionWithSwitch` 那一层的档位看不到「放行给 CodeMirror 之后又补回来」这一截）。
+ * 返回 false = 这个键交回下一张键位（`basicSetup`）。
+ *
+ * **2026-10-06 本 lane 补**：本函数现在是 `com.intellij.typedHandler` 的分派点 —— 开头把
+ * `beforeCharTyped` 交给 EP 委托（任一支返回 `STOP` 就整键接管、返回 true），走完本仓逻辑后
+ * 再把 `charTyped` 交给 EP 委托。bundled 的委托是 passthrough（`CONTINUE`）⇒ 既有行为逐字不变；
+ * 第三方按 id 挂的委托能在这里被真实分派。
  */
-export function smartQuotes(
-  getLanguage: () => string | undefined, autoInsertPairQuote: () => boolean = () => true,
-): Extension {
-  return Prec.high(keymap.of(quotedChars().map(ch => ({
-    key: ch,
-    run: (view: EditorView): boolean => {
-      const quotes = quotesFor(getLanguage())
-      if (!quotes) return false
-      // 上游 `TypedQuoteImpl.java:66-68`：`AUTOINSERT_PAIR_QUOTE` 关掉 ⇒ `handleQuote` 直接返回 false
-      // ⇒「跳过收尾引号」「补一对」这两档都不发生，敲进去的就是一个普通字符；文本块（face）那一档走的是
-      // 同一条链路（`TypedQuoteImpl.java:80-85` 之前先问 handler），所以一起关。
-      // 「有选区时包住」是**另一条**开关（`SelectionQuotingTypedHandler.java:47` 的
-      // SURROUND_SELECTION_ON_QUOTE_TYPED），本仓没有那一格设置 ⇒ `wrap` 不受这里影响。
-      const pairQuote = autoInsertPairQuote()
-      const selection = view.state.selection.main
-      // 多字符引号那一档先问（Java 文本块 `"""`）：跳过收尾 face = `JavaQuoteHandler.java:58-63`，
-      // 「刚敲完开 face 补配对」= `:104-108` + `:111-128`，插 `"\n\"\"\""` 与光标停位 = `:134-149`。
-      if (selection.empty && pairQuote) {
-        for (const face of quotes.multi) {
-          const faceStep = faceAction(view.state.doc.toString(), selection.head, face, ch)
-          if (faceStep === 'skip') {
-            view.dispatch({ selection: EditorSelection.cursor(selection.head + 1), userEvent: 'input' })
-            return true
-          }
-          if (faceStep === 'open') {
-            view.dispatch({
-              changes: { from: selection.head, insert: ch + faceInsertion(face) },
-              selection: EditorSelection.cursor(selection.head + 1 + FACE_CARET_ADVANCE),
-              userEvent: 'input',
-            })
-            return true
-          }
-        }
-      }
-      const line = view.state.doc.lineAt(selection.head)
-      const action = quoteActionWithSwitch(
-        line.text, selection.head - line.from, ch, quotes, !selection.empty, pairQuote, getLanguage(),
-      )
-      if (action === 'plain') return false
-      if (action === 'skip') {
+export function runQuoteKey(
+  view: EditorView, ch: string,
+  getLanguage: () => string | undefined, autoInsertPairQuote: () => boolean,
+): boolean {
+  const language = getLanguage()
+  const before = typedInputOf(view, ch, language)
+  notifyTypingStarted(before)
+  if (dispatchTypedHandler(before, 'beforeCharTyped') === 'STOP') return true
+  const handled = handleQuoteKey(view, ch, language, autoInsertPairQuote)
+  if (handled) dispatchTypedHandler(typedInputOf(view, ch, language), 'charTyped')
+  return handled
+}
+
+function handleQuoteKey(
+  view: EditorView, ch: string,
+  language: string | undefined, autoInsertPairQuote: () => boolean,
+): boolean {
+  const quotes = quotesFor(language)
+  if (!quotes) return false
+  // 上游 `TypedQuoteImpl.java:66-68`：`AUTOINSERT_PAIR_QUOTE` 关掉 ⇒ `handleQuote` 直接返回 false
+  // ⇒「跳过收尾引号」「补一对」这两档都不发生，敲进去的就是一个普通字符；文本块（face）那一档走的是
+  // 同一条链路（`TypedQuoteImpl.java:80-85` 之前先问 handler），所以一起关。
+  // 「有选区时包住」是**另一条**开关（`SelectionQuotingTypedHandler.java:47` 的
+  // SURROUND_SELECTION_ON_QUOTE_TYPED），本仓没有那一格设置 ⇒ `wrap` 不受这里影响。
+  const pairQuote = autoInsertPairQuote()
+  const selection = view.state.selection.main
+  // 多字符引号那一档先问（Java 文本块 `"""`）：跳过收尾 face = `JavaQuoteHandler.java:58-63`，
+  // 「刚敲完开 face 补配对」= `:104-108` + `:111-128`，插 `"\n\"\"\""` 与光标停位 = `:134-149`。
+  if (selection.empty && pairQuote) {
+    for (const face of quotes.multi) {
+      const faceStep = faceAction(view.state.doc.toString(), selection.head, face, ch)
+      if (faceStep === 'skip') {
         view.dispatch({ selection: EditorSelection.cursor(selection.head + 1), userEvent: 'input' })
         return true
       }
-      if (action === 'wrap') {
-        const text = view.state.sliceDoc(selection.from, selection.to)
+      if (faceStep === 'open') {
         view.dispatch({
-          changes: { from: selection.from, to: selection.to, insert: `${ch}${text}${ch}` },
-          selection: { anchor: selection.from + 1, head: selection.to + 1 },
+          changes: { from: selection.head, insert: ch + faceInsertion(face) },
+          selection: EditorSelection.cursor(selection.head + 1 + FACE_CARET_ADVANCE),
           userEvent: 'input',
         })
         return true
       }
+    }
+  }
+  // 开关关掉 ⇒ 这个键**必须由本模块吃掉并只落一个字符**，不能 `return false` 交回下一张键位：
+  // `basicSetup` 自带的 `closeBrackets()`（`node_modules/codemirror/dist/index.js:61`）不是键位而是
+  // `EditorView.inputHandler`（`node_modules/@codemirror/autocomplete/dist/index.js:1831` = `[inputHandler, bracketState]`、`:1844-1856`），
+  // 键位放行只会把这次输入让给它，它照旧补出 `""`（`:1795` 的 `defaults.brackets` 含 `"`、
+  // `:1990-1994` 的 `handleSame`）—— 实测见 `tests/editor-enter-switches.test.mjs` 的「前提」那条。
+  // 上游没有这层兜底：`TypedQuoteImpl.java:66-68` 直接 return false 之后走 `TypedCharImpl` 的普通输入
+  // ⇒ 文档里只多一个字符。这里自己落那一个字符，开关才算真的接进了行为。
+  // 只管「这门语言的引号表接管过的那个键」（表里没有的语言仍整条交回 CodeMirror，见模块头）；
+  // 多光标时不动它：本模块其余分支都只认 main，在这里吃掉键会让别的光标一个字符都收不到。
+  if (!pairQuote && selection.empty && view.state.selection.ranges.length === 1 && quotes.single.includes(ch)) {
+    view.dispatch({
+      changes: { from: selection.head, insert: ch },
+      selection: EditorSelection.cursor(selection.head + ch.length),
+      userEvent: 'input.type',
+    })
+    return true
+  }
+  const line = view.state.doc.lineAt(selection.head)
+  const action = quoteActionWithSwitch(
+    line.text, selection.head - line.from, ch, quotes, !selection.empty, pairQuote, language,
+  )
+  if (action === 'plain') return false
+  if (action === 'skip') {
+    view.dispatch({ selection: EditorSelection.cursor(selection.head + 1), userEvent: 'input' })
+    return true
+  }
+  if (action === 'wrap') {
+    const text = view.state.sliceDoc(selection.from, selection.to)
+    const caretLine = view.state.doc.lineAt(selection.head)
+    // `com.intellij.selectionUnquotingFilter`（上游 `SelectionQuotingTypedHandler.java:152-157`
+    // 的 `shouldSkipReplacementOfQuotesOrBraces`，问在 `:46`/`:52`）：任一过滤说要跳过 ⇒
+    // **不包住选区**，就按普通字符落下去（上游返回 `super.beforeSelectionRemoved` / DEFAULT 之后
+    // 走 `TypedCharImpl` 的普通输入，结果就是用敲进去的那个字符替换掉选区）。
+    // bundled 过滤恒返回 false ⇒ 没有第三方挂进来时这一格与既有行为逐字相同。
+    if (shouldSkipQuoteReplacement({
+      path: '', language: language ?? '', text: view.state.doc.toString(),
+      line: caretLine.number - 1, character: selection.head - caretLine.from,
+      selectedText: text, typed: ch,
+    })) {
       view.dispatch({
-        changes: { from: selection.head, insert: ch + ch },
-        selection: EditorSelection.cursor(selection.head + 1),
+        changes: { from: selection.from, to: selection.to, insert: ch },
+        selection: EditorSelection.cursor(selection.from + ch.length),
         userEvent: 'input',
       })
       return true
-    },
-  }))))
+    }
+    view.dispatch({
+      changes: { from: selection.from, to: selection.to, insert: `${ch}${text}${ch}` },
+      selection: { anchor: selection.from + 1, head: selection.to + 1 },
+      userEvent: 'input',
+    })
+    return true
+  }
+  view.dispatch({
+    changes: { from: selection.head, insert: ch + ch },
+    selection: EditorSelection.cursor(selection.head + 1),
+    userEvent: 'input',
+  })
+  return true
+}
+
+/**
+ * 退格键位体：把 `com.intellij.backspaceHandlerDelegate` 的 `beforeCharDeleted` / `charDeleted`
+ * 交给 EP 委托（上游 `BackspaceHandlerDelegate.java:23`/`:33`）。任一支 `charDeleted` 返回 true
+ * = 这一键由委托接手（本仓替它删掉那一个字符、返回 true，跳过 `basicSetup` 的默认退格）；
+ * 没有委托接手时返回 false ⇒ CodeMirror 默认退格照旧（bundled 的委托恒返回 false）。
+ */
+export function runBackspaceKey(view: EditorView, getLanguage: () => string | undefined): boolean {
+  const selection = view.state.selection.main
+  if (!selection.empty || view.state.selection.ranges.length !== 1) return false
+  const head = selection.head
+  if (head <= 0) return false
+  const line = view.state.doc.lineAt(head)
+  const language = getLanguage()
+  const input: BackspaceInput = {
+    path: '', language: language ?? 'other', text: view.state.doc.toString(),
+    offset: head, line: line.number - 1, character: head - line.from,
+    char: view.state.doc.sliceString(head - 1, head),
+  }
+  dispatchBackspaceBefore(input)
+  if (!dispatchBackspaceAfter(input)) return false
+  view.dispatch({
+    changes: { from: head - 1, to: head },
+    selection: EditorSelection.cursor(head - 1),
+    userEvent: 'delete',
+  })
+  return true
+}
+
+/**
+ * 按语言的引号键位：`getLanguage` 传取值函数（编辑器换文件时才定得下语言），
+ * `autoInsertPairQuote` 传上游那条开关（缺省 = 恒开 = 上游默认值 `CodeInsightSettings.java:140`）。
+ * 当前语言不在表里（C++/TS/纯文本）时**一律返回 false**，CodeMirror 的 `closeBrackets` 原样接管，
+ * 本模块不抢它的行为。
+ *
+ * 键位表除引号外还挂了 `Backspace`（`com.intellij.backspaceHandlerDelegate` 的分派点，见
+ * `runBackspaceKey`）：没有委托接手时返回 false，CodeMirror 默认退格逐字不变。
+ */
+export function smartQuotes(
+  getLanguage: () => string | undefined, autoInsertPairQuote: () => boolean = () => true,
+): Extension {
+  return Prec.high(keymap.of([
+    ...quotedChars().map(ch => ({
+      key: ch,
+      run: (view: EditorView): boolean => runQuoteKey(view, ch, getLanguage, autoInsertPairQuote),
+    })),
+    { key: 'Backspace', run: (view: EditorView): boolean => runBackspaceKey(view, getLanguage) },
+  ]))
 }
 
 /**

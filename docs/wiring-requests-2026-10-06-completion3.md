@@ -159,3 +159,17 @@ import { hoverDocStampOf, sharedDocHover } from '../docHoverContent.ts'
 - 开工实测：5 条里红 1 条 —— `src/components/CodeEditor.vue 现在 1151 行 > 上限 1147`（**别人名下**，本批 `git diff` 里没有该文件）。
 - 收工实测：**5 / 5 全绿**（该域在本批期间自己把它降到 1144）。上限一个没动、没有新增豁免。
 - 留给 N3 的约束：现在只剩 3 行余量，接 hover 通道时**必须顺手拆**，不要抬上限（派单 §5）。
+
+## 处理结果（wiring-backlog lane，2026-10-06）
+
+- **N1 已接线（形状迁移）**：`docHoverPolicyFromSettings` 由 `src/workspaceLifecycle.ts:247` 调用（不再是 settingsPersistence.ts）。
+- **N2 部分**：`@policy-change` 已接（`src/App.vue:2478` 附近，`(patch) => void saveSettingsPatch(patch)`）；`:can-toggle-hover="true"` **未加**（N3 未落地前不放假控件，见 3a R2）。
+- **N3** —— 目标 `src/components/CodeEditor.vue`（禁改清单）。需 CodeEditor owner。
+- **N4（style.css 弹层几何）** —— 非本 lane。**N5 / N6** —— 登记/留痕。
+
+结论：N1 已接线；N2 的 can-toggle-hover 与 N3 转 CodeEditor owner。
+
+## 处理结果（接线 lane，2026-10-06）
+
+复核（对当前工作区代码逐条核对）：上一条 `wiring-backlog lane` 的分解已逐项复核，其结论为「N1 已接线；N2 的 can-toggle-hover 与 N3 转 CodeEditor owner。」。
+本 lane 本轮接线：无 —— 本份请求的挂载点目标均落在禁改/非本 lane 面（`src/components/CodeEditor.vue`、`src/bridge.ts`、`native/**`、`src/settingsModel.ts`、`src/keymapBindings.ts`、`src/*.ts` 等），或为上一条记录里的「登记待办 / 判定项」。
