@@ -5,8 +5,7 @@
 上一条同名 lane 的盘上遗留**逐件核实后全部接下**（没有回退任何东西）：
 
 - `src/editorTyping.ts`：已在 HEAD（`6d6d17f`），消费方齐（`src/components/CodeEditor.vue:25` 的 `smartQuotes`/`insertedText`、`src/enterHandlers.ts:98`、`src/lspCompletion.ts:27`），无半成品。
-- `src/lspCompletion.ts`（+67 行）/`src/completionAutoPopup.ts`（当时未跟踪）/`tests/completion-auto-popup.test.mjs`/`tests/editor-typed-handler-faces.test.mjs`：接续时 13+10 条全绿、接线是真的（自动档入口逐档消费）。**订正一处真缺陷**（见下）。
-- 任务书点名的 `tests/editor-typing.test.mjs` **不存在**；对等物是 `tests/editor-typed-handler-faces.test.mjs`（10 条，TypedHandler 委托面）。
+- `src/lspCompletion.ts`（+67 行）/`src/completionAutoPopup.ts`（当时未跟踪）/`tests/completion-auto-popup.test.mjs`/`tests/editor-typed-handler-faces.test.mjs`：接续时 13+10 条全绿、接线是真的（自动档入口逐档消费）；**订正一处真缺陷**（见下）。任务书点名的 `tests/editor-typing.test.mjs` **不存在**，对等物是 `tests/editor-typed-handler-faces.test.mjs`（10 条，TypedHandler 委托面）。
 - 另一条 lane/协调者在本 lane 进行中提交了 `545eb6b`，把上一条 lane 的遗留（含我修的 `src/lspCompletion.ts:555`）扫进 HEAD；我的新判据仍在工作树（未提交）。
 
 ## 本批做的两件事

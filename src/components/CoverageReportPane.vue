@@ -22,6 +22,10 @@ import {
   COVERAGE_FORMAT_LABELS, collectCoverageReportPath, coverageAvailableGroupings,
   coverageViewSection, parseCoverageReport, type CoverageGrouping, type CoverageSummary,
 } from '../coverageReport.ts'
+import {
+  COVERAGE_EXPORT_DIALOG_TITLE, COVERAGE_EXPORT_FILE_NAME, coverageReportExportAvailable,
+  coverageReportExportPath, coverageReportHtml,
+} from '../coverageExport.ts'
 
 const props = defineProps<{
   /** 指定报告路径（工作区相对/绝对）；省略时自动在文件清单里认一个。 */
@@ -89,6 +93,33 @@ async function load(reportPath = props.reportPath): Promise<CoverageSummary | nu
 }
 
 defineExpose({ load })
+
+// ── 导出（上游 `GenerateCoverageReportAction` → `ExportToHTMLDialog`） ────────────────
+// 上游：动作可用性门 `isReportGenerationAvailable`（`GenerateCoverageReportAction.java:51-58`），
+// 落盘由各覆盖率引擎写出一棵 HTML 树。本仓没有采集引擎 ⇒ 把已解析的汇总写成一份自包含
+// `index.html`（`src/coverageExport.ts`），目录选择与写盘走宿主既有两条通道
+// （`dialog.pickDirectory` / `app.writeExportFiles`，后者只放行 .html/.htm/.txt）。
+const exporting = ref(false)
+const exportNote = ref('')
+const canExport = computed(() => props.ready !== false && !exporting.value && coverageReportExportAvailable(summary.value))
+async function exportReport() {
+  if (props.ready === false) return
+  const current = summary.value
+  if (!coverageReportExportAvailable(current)) return
+  exporting.value = true
+  exportNote.value = ''
+  try {
+    const directory = await request<string | null>('dialog.pickDirectory', { title: COVERAGE_EXPORT_DIALOG_TITLE, initial: '' })
+    if (!directory) return
+    const path = coverageReportExportPath(directory)
+    await request('app.writeExportFiles', { files: [{ path, content: coverageReportHtml(current, { generatedAt: new Date() }) }] })
+    exportNote.value = `已写入 ${path}`
+  } catch (caught) {
+    exportNote.value = caught instanceof Error ? caught.message : String(caught)
+  } finally {
+    exporting.value = false
+  }
+}
 </script>
 
 <template>
@@ -101,6 +132,11 @@ defineExpose({ load })
       <span v-if="summary" class="coverage-format">{{ formatLabel }}</span>
       <span v-if="summary" class="coverage-path" :title="summary.reportPath">{{ summary.reportPath }}</span>
       <button type="button" class="coverage-action" :disabled="busy" aria-label="读取覆盖率报告" @click="load()">{{ busy ? '读取中…' : '重读报告' }}</button>
+      <!-- 生成报告（上游 `GenerateCoverageReportAction`：先选目录再写出 HTML）。门与上游那条
+           `isReportGenerationAvailable` 同义（没有报告内容就不可用），不可用时标题写明原因。 -->
+      <button type="button" class="coverage-action" :disabled="!canExport" aria-label="生成覆盖率报告"
+              :title="canExport ? `把当前报告的汇总写成 ${COVERAGE_EXPORT_FILE_NAME}` : '没有可导出的报告内容（先读到一份覆盖率报告）'"
+              @click="exportReport()">{{ exporting ? '导出中…' : '生成报告' }}</button>
     </div>
     <div v-if="summary" class="coverage-modes" role="group" aria-label="覆盖率聚合方式">
       <button type="button" class="coverage-action" :class="{ active: grouping === 'file' }" :aria-pressed="grouping === 'file'" :disabled="!available.file" @click="grouping = 'file'">按文件 ({{ summary.files.length }})</button>
@@ -119,6 +155,7 @@ defineExpose({ load })
     <p v-if="extraRows" class="coverage-note">还有 {{ extraRows }} 行未列出。</p>
     <p v-if="summary && summary.classesTruncated" class="coverage-note">类数超过上限，只解析了前 {{ summary.classes.length }} 个。</p>
     <p v-if="summary && summary.methodsTruncated" class="coverage-note">方法数超过上限，只解析了前 {{ summary.methods.length }} 个。</p>
+    <p v-if="exportNote" class="coverage-note" role="status">{{ exportNote }}</p>
     <p v-if="note" class="coverage-note" role="status">{{ note }}</p>
   </div>
 </template>
