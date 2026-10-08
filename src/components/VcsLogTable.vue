@@ -18,7 +18,8 @@ import type { LogRefGroup } from '../vcsLogPresentation'
 import { isSpeedSearchTypeable, speedSearchKeyAction, speedSearchMatches, speedSearchStepForKey, speedSearchWalk } from '../speedSearch'
 const props = withDefaults(defineProps<{ commits: GitFullCommit[]; selected: string; root: string; loading?: boolean; dateFormat?: DateTimeFormatSettings; preferCommitDate?: boolean; showTagNames?: boolean;
   showRootNames?: boolean; hidden?: LogColumn[]; compactReferences?: boolean; alignLabels?: boolean; showLongEdges?: boolean;
-  collapsed?: LinearCollapseState; currentBranch?: string; branchTrackInfos?: GitBranchTrackInfo[]; isOnBranch?: boolean }>(), {
+  collapsed?: LinearCollapseState; currentBranch?: string; branchTrackInfos?: GitBranchTrackInfo[]; isOnBranch?: boolean;
+  highlightMergeCommits: boolean }>(), {
   // `isOnBranch` 是**三态**：不给 = 仓库状态未知，不编警示组（`logRefGroups` 只在 `=== false` 时才独立成组）。
   // Vue 的布尔档会把"没传"折成 false ⇒ 那时每个带 HEAD 的行都会长出一枚「Detached HEAD」警示 chip
   // （默认值给了 `undefined` 就不做这层 casting，声明的 `boolean | undefined` 才在运行时也成立）。
@@ -242,7 +243,7 @@ defineExpose({ focusHash })
     <VcsLogColumns :storage-key="`taocode.vcs.log.${encodeURIComponent(root)}.columns`" :rows="columnRows" :viewport="viewportWidth" :root-width="showRootNames ? 101 : 6" :hidden="hiddenForLayout" @metrics="setColumnMetrics">
     <div :style="{ height: `${start * ROW_H}px` }" aria-hidden="true" />
     <div v-for="(row, index) in graph.rows.slice(start, end)" :key="row.commit.hash" class="log-row" role="option" :data-index="index + start" :aria-posinset="index + start + 1" :aria-setsize="visible.length"
-      :class="{ selected: selected === row.commit.hash }" :aria-selected="selected === row.commit.hash"
+      :class="{ selected: selected === row.commit.hash, 'merge-highlighted': highlightMergeCommits && selected !== row.commit.hash && row.commit.parents.length >= 2 }" :aria-selected="selected === row.commit.hash"
       :title="logCommitTooltip({ subject: row.commit.subject, author: row.commit.author, date: dateText(row.commit), hash: row.commit.shortHash, fullHash: row.commit.hash })"
       :tabindex="selected === row.commit.hash || (!visible.some(c => c.hash === selected) && index === 0) ? 0 : -1"
       @click="emit('select', row.commit.hash)" @keydown="keys(index + start, $event)"
@@ -315,5 +316,6 @@ defineExpose({ focusHash })
 .author { order: var(--author-order); flex: 0 0 var(--author-width); color: var(--secondary); }
 .date { order: var(--date-order); flex: 0 0 var(--date-width); overflow: hidden; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .hash { order: var(--hash-order); flex: 0 0 var(--hash-width); overflow: hidden; color: var(--muted); font: 10px var(--font-mono); }
+.log-row.merge-highlighted .subject, .log-row.merge-highlighted .author, .log-row.merge-highlighted .date, .log-row.merge-highlighted .hash { color: var(--muted); }
 .log-row.selected .subject, .log-row.selected .author, .log-row.selected .date, .log-row.selected .hash { color: var(--bright); }
 </style>

@@ -41,9 +41,20 @@ test('三组标题与顺序照 ZCode（基础设置 / Agent 能力 / 数据与�
 })
 
 test('每个节位都有渲染出口（没有一节落到 v-else 兜底里）', () => {
-  // 正面：逐节找它的出口标记。
+  // `selectSection` 的源码片段：跳转出口就在它的 if 分支里（判据读的是"这一节有没有出口"，
+  // 不是"哪一行写了什么"，所以按函数体切一段即可）。
+  const selectSectionStart = page.indexOf('function selectSection(')
+  const selectSection = page.slice(selectSectionStart, page.indexOf('\n}', selectSectionStart))
+  // 正面：逐节找它的出口标记。两种合法出口：
+  //   ① 模板里按节位分派（`section === '<id>'`）；
+  //   ② **跳转出口** —— 外观 / 键盘快捷键两节的内容本仓已有页面（ZCode 那两节是同一份设置，
+  //      不重复造），`selectSection` 里对这两个 id 直接 `emit('navigate', …)` 跳过去。
+  //      所以对它们判的是「有按 id 命名的跳转分支」，不是「模板里有一格」——
+  //      判据要的仍是**没有节位静默无反应**，条数不变。
   for (const [id] of ZCODE_SECTIONS) {
-    assert.match(page, new RegExp(`section === '${id}'`), `节位 ${id} 在模板里没有出口`)
+    const hasOutlet = new RegExp(`section === '${id}'`).test(page)
+    const hasNavigate = selectSection.includes(`id === '${id}'`) && selectSection.includes("emit('navigate'")
+    assert.ok(hasOutlet || hasNavigate, `节位 ${id} 既没有模板出口也没有跳转出口（点了不会有任何反应）`)
   }
   // 反面：**不许**再有 `v-else` 的兜底块。九节各有组件之后，那段兜底是不可达的 ——
   // 留着就等于「万一有新节位进来就显示一段假说明」。

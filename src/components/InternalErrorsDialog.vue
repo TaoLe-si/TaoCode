@@ -49,7 +49,7 @@ async function copyAll() {
     <section class="command-palette errors-dialog" role="dialog" aria-modal="true" :aria-label="ERRORS_DIALOG_TITLE">
       <div class="palette-input">
         <span class="errors-heading">{{ ERRORS_DIALOG_TITLE }}（{{ errors.count }}）</span>
-        <button class="icon-button" :aria-label="ERRORS_DIALOG_CLOSE" @click="emit('close')"><X :size="iconSize.action" /></button>
+        <button class="icon-button" :aria-label="ERRORS_DIALOG_CLOSE" :title="ERRORS_DIALOG_CLOSE" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="errors-body">
         <!-- 簇清单：一条 = 一个去重键（上游左侧那一列 cluster 列表）。 -->
@@ -101,7 +101,9 @@ async function copyAll() {
 .errors-messages { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; overflow: auto; list-style: none; }
 .errors-messages li { display: flex; gap: var(--space-2); color: var(--text); font: 11px/1.6 var(--font-mono); overflow-wrap: anywhere; }
 .errors-time { flex-shrink: 0; color: var(--muted); }
-.errors-actions { align-items: center; gap: var(--space-1); }
+/* 底栏缺 `display: flex`：`align-items`/`gap` 与 `.errors-note` 的 `flex: 1`（把动作推到右侧）
+   在这条声明缺失时**整条失效**（`<div>` 的 UA 默认是 block）。2026-10-08 lane visual-leftovers 补。 */
+.errors-actions { display: flex; align-items: center; gap: var(--space-1); }
 .errors-note { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .errors-actions .subtle-button { display: inline-flex; align-items: center; gap: 2px; }
 .errors-actions .subtle-button > svg { flex-shrink: 0; }

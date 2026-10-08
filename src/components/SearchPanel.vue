@@ -609,8 +609,8 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
     <div class="fs-heading">
       <span><Search :size="iconSize.menu" />全局搜索</span>
       <div class="heading-actions">
-          <button class="icon-button" aria-label="切换文件筛选" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen"><SlidersHorizontal :size="iconSize.control" /></button>
-          <button class="icon-button" aria-label="清空搜索" :disabled="!query && !replacement && !total" @click="reset"><X :size="iconSize.control" /></button>
+          <button class="icon-button" aria-label="切换文件筛选" title="切换文件筛选" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen"><SlidersHorizontal :size="iconSize.control" /></button>
+          <button class="icon-button" aria-label="清空搜索" title="清空搜索" :disabled="!query && !replacement && !total" @click="reset"><X :size="iconSize.control" /></button>
       </div>
     </div>
 
@@ -623,7 +623,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
             <option v-for="value in variableCandidates" :key="value" :value="value" />
           </datalist>
           <!-- 最近搜索下拉（上游 `SearchTextArea` 的历史；Alt+Down 打开，`FindPopupPanel.java:1237` 的预填用同一张表）。 -->
-          <button v-if="recents.finds.length" class="icon-button fs-history-toggle" type="button" aria-label="搜索历史记录" :aria-expanded="historyOpen === 'find'" @click="historyOpen = historyOpen === 'find' ? null : 'find'"><History :size="iconSize.control" /></button>
+          <button v-if="recents.finds.length" class="icon-button fs-history-toggle" type="button" aria-label="搜索历史记录" title="搜索历史记录" :aria-expanded="historyOpen === 'find'" @click="historyOpen = historyOpen === 'find' ? null : 'find'"><History :size="iconSize.control" /></button>
           <div v-if="historyOpen === 'find'" class="find-history" role="listbox" aria-label="搜索历史记录">
             <button v-for="row in recentRows(recents.finds)" :key="row" class="menu-button find-history-row" role="option" :aria-selected="false" @click="pickRecent('find', row)">{{ row }}</button>
           </div>
@@ -647,14 +647,14 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
                   <button class="fs-template-pick" @click="applyTemplate(item)">
                     <strong>{{ item.name }}</strong><span class="fs-template-query">{{ item.query }}</span>
                   </button>
-                  <button v-if="item.saved" class="fs-template-remove" aria-label="删除模板" @click="deleteTemplate(item.name)"><X :size="iconSize.control" /></button>
+                  <button v-if="item.saved" class="fs-template-remove" aria-label="删除模板" title="删除模板" @click="deleteTemplate(item.name)"><X :size="iconSize.control" /></button>
                 </div>
               </template>
               <button class="fs-template-save" :disabled="!query.trim()" @click="saveCurrentTemplate">存为模板…</button>
             </div>
           </div>
         </div>
-        <button class="icon-button" aria-label="搜索" :disabled="!canSearch || replacing" @click="runSearch"><Search :size="iconSize.control" /></button>
+        <button class="icon-button" aria-label="搜索" title="搜索" :disabled="!canSearch || replacing" @click="runSearch"><Search :size="iconSize.control" /></button>
       </div>
       <div v-if="filtersOpen" class="fs-filters">
         <label class="fs-filter"><span>包含</span><input v-model="include" type="text" placeholder="*.cpp 或 src/**" aria-label="仅搜索这些文件" spellcheck="false" /></label>
@@ -665,7 +665,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
       <div class="fs-row">
         <div class="fs-input-wrap">
           <input ref="replaceInput" v-model="replacement" class="fs-input" type="text" placeholder="替换为" aria-label="替换内容" spellcheck="false" @keydown.enter.ctrl.prevent="replaceAllOnDisk" @keydown="onFieldKeydown($event, 'replace')" />
-          <button v-if="recents.replaces.length" class="icon-button fs-history-toggle" type="button" aria-label="替换历史记录" :aria-expanded="historyOpen === 'replace'" @click="historyOpen = historyOpen === 'replace' ? null : 'replace'"><History :size="iconSize.control" /></button>
+          <button v-if="recents.replaces.length" class="icon-button fs-history-toggle" type="button" aria-label="替换历史记录" title="替换历史记录" :aria-expanded="historyOpen === 'replace'" @click="historyOpen = historyOpen === 'replace' ? null : 'replace'"><History :size="iconSize.control" /></button>
           <div v-if="historyOpen === 'replace'" class="find-history" role="listbox" aria-label="替换历史记录">
             <button v-for="row in recentRows(recents.replaces)" :key="row" class="menu-button find-history-row" role="option" :aria-selected="false" @click="pickRecent('replace', row)">{{ row }}</button>
           </div>
@@ -832,7 +832,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
 .fs-replace { flex-shrink: 0; min-height: var(--ctrl-height); padding: 0 var(--space-2); color: var(--secondary); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
 .fs-replace:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .fs-replace:disabled { color: var(--muted); opacity: .55; }
-.fs-replace.fs-confirm { color: var(--on-accent); background: var(--error); border-color: var(--error); }
+.fs-replace.fs-confirm { color: var(--on-accent); background: var(--error); border-color: var(--error); transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
 .fs-replace.fs-confirm:hover:not(:disabled) { color: var(--on-accent); background: var(--error); border-color: var(--error); }
 .fs-filters { display: flex; flex-direction: column; gap: var(--space-1); }
 .fs-filter { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: 11px; color: var(--secondary); }

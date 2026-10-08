@@ -165,9 +165,20 @@ export async function saveWorkspaceFileSearchIgnore(
   return { root: snapshot.root, content, version: saved.version, mode: 'write', source: 'file', error: null }
 }
 
-export function loadWorkspaceFileSearchEntries(root: string): Promise<WorkspaceSearchFileEntry[]> {
-  if (candidateRequest?.root === root) return candidateRequest.promise
-  if (candidateRequest) void request('workspace.searchFiles.cancel').catch(() => undefined)
+/**
+ * 取一次工作区文件候选（已按 `.zcodeignore` 过滤）。
+ *
+ * 默认会复用**同一个根的在途请求**（同一个根被两个消费方同时要时只扫一次盘）。
+ * `fresh: true` 表示调用方明确要一份"此刻"的快照：不复用缓存，另起一次扫描。
+ * 用它的场合是**磁盘已经变了**（Search Everywhere 收到文件变化推送、或换了一轮会话）——
+ * 在途那次扫描是在变化之前发出的，拿它回来就是一份过期清单。
+ * 注意：`fresh` 不会去取消同根的在途扫描 —— 那一份可能正被另一个消费方等待
+ * （`src/agentPanelPromptMenu.ts` 的 @ 文件候选），取消它会把别人的加载打成失败。
+ * 过期的那一份由调用方自己按请求序号丢弃。
+ */
+export function loadWorkspaceFileSearchEntries(root: string, options: { fresh?: boolean } = {}): Promise<WorkspaceSearchFileEntry[]> {
+  if (!options.fresh && candidateRequest?.root === root) return candidateRequest.promise
+  if (candidateRequest && candidateRequest.root !== root) void request('workspace.searchFiles.cancel').catch(() => undefined)
   const promise = (async () => {
     const [scan, snapshot] = await Promise.all([
       request<WorkspaceSearchFileList>('workspace.searchFiles'),

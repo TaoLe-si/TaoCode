@@ -736,11 +736,19 @@ async function runExternalTool(command: string, name: string, cwd?: string | nul
   } catch (error) { endRun(); notify(`无法启动外部工具「${name}」：${errorMessage(error)}`, true) }
 }
 // 停止**当前实例**（IDEA 的 Stop 按钮作用在选中的那个 Content 上）；没有选中就停全部。
+//
+// 两段式（上游 `KillableProcessHandler.java:26-30` 的类注释：「第一次按 Stop 优雅、之后再按才强杀」）：
+// **第一次**请求宿主只做**优雅停止** —— `native/win_graceful_stop.cpp` 给子进程自己的控制台发
+// Ctrl+C、给树里可见的顶层窗口发 WM_CLOSE（Windows 那一支与上游
+// `WinProcessTerminator.terminateWinProcessGracefully` 同一手段）；进程还在跑时实例留在清单里、
+// 这一格停在「正在结束」，用户**再按一次**才走 Job Object 强杀（宿主按实例记 `stop_requested`，
+// 见 native/run_host.cpp 的 `Manager::stop`）。所以这里不做「请求过了就禁掉」的假象：再按一次
+// 真的会再发一条同样的 `run.stop {instance}`，宿主的第二次请求就是强杀。
 async function stopRun() {
   const instance = activeRunInstance.value
   // 请求一发出就把这一格标成「正在结束」：上游读的是 `ProcessHandler.isProcessTerminating()`
-  // 这个内存字段（`StopProcessAction.java:68-76`），本仓宿主只在进程结束时才回事件
-  // ⇒ 「正在运行」清单的那个 kill 图标只能由发请求的这一侧记（见 src/runInstances.ts）。
+  // 这个内存字段（`StopProcessAction.java:68-76`），本仓宿主在请求时也置位（随快照回传
+  // `stopping`），这里先记是为了不等下一次快照就把「正在运行」清单的图标换成 kill。
   if (instance) markRunInstanceStopping(instance)
   try { await request('run.stop', instance ? { instance } : {}) }
   catch (error) { notify(errorMessage(error), true) }
@@ -751,7 +759,20 @@ const debugButtonTitle = computed(() => `调试 (Shift+F9)${isDesktop ? '' : ' �
 async function stopAnyProcess() {
   try {
     if (dapState.running) await request('dap.terminate')
-    if (runState.running) await request('run.stop')
+    if (!runState.running) return
+    // 上游 `StopAction` 全局位置有一条**单选**分支（`StopAction.java:132-140`）：可停的只有一个时
+    // `ExecutionManagerImpl.stopProcess(descriptor)` 停的就是那一个（走 ProcessHandler 的优雅那一档），
+    // 多个才弹 popup / 走「停止全部」。本仓那张弹层是 `src/runStopAction.ts` 的 chooser，
+    // 工具栏这个按钮不弹 ⇒ 照单选那一支：一个在跑就停**它**（再按一次才强杀），
+    // 多个才发不带实例的 `run.stop`（停止全部 = 每棵树的 Job Object 直接结束）。
+    const stoppable = [...runInstances.values()].filter(instance => instance.running)
+    const only = stoppable.length === 1 ? stoppable[0] : null
+    if (only) {
+      markRunInstanceStopping(only.id)
+      await request('run.stop', { instance: only.id })
+    } else {
+      await request('run.stop')
+    }
   } catch (error) { notify(errorMessage(error), true) }
 }
 async function sendRunInput() {

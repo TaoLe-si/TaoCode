@@ -435,7 +435,7 @@ function save() {
     <section class="help-dialog run-configs-dialog" role="dialog" aria-modal="true" aria-label="运行/调试配置">
       <header class="run-configs-head">
         <h2>运行/调试配置</h2>
-        <button type="button" class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
+        <button type="button" class="icon-button" aria-label="关闭" title="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
       </header>
       <!-- IDEA 的 splitter（RunConfigurable.kt:563-575）：左树带右边框，右面板 padding 15,5,0,15。 -->
       <div class="rc-body">
@@ -450,7 +450,7 @@ function save() {
                 :class="{ 'is-selected': selected === nodeKey('type', node.id) }"
                 @click="pickNode(nodeKey('type', node.id))"
               >
-                <button type="button" class="rc-caret" :aria-label="collapsed.has(nodeKey('type', node.id)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('type', node.id))">
+                <button type="button" class="rc-caret" :aria-label="collapsed.has(nodeKey('type', node.id)) ? '展开' : '折叠'" :title="collapsed.has(nodeKey('type', node.id)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('type', node.id))">
                   <ChevronRight v-if="collapsed.has(nodeKey('type', node.id))" :size="iconSize.dense" /><ChevronDown v-else :size="iconSize.dense" />
                 </button>
                 <span>{{ node.label }}</span>
@@ -467,7 +467,7 @@ function save() {
                     :class="{ 'is-selected': selected === nodeKey('folder', node.id, group.name) }"
                     @click="pickNode(nodeKey('folder', node.id, group.name))"
                   >
-                    <button type="button" class="rc-caret" :aria-label="collapsed.has(nodeKey('folder', node.id, group.name)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('folder', node.id, group.name))">
+                    <button type="button" class="rc-caret" :aria-label="collapsed.has(nodeKey('folder', node.id, group.name)) ? '展开' : '折叠'" :title="collapsed.has(nodeKey('folder', node.id, group.name)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('folder', node.id, group.name))">
                       <ChevronRight v-if="collapsed.has(nodeKey('folder', node.id, group.name))" :size="iconSize.dense" /><ChevronDown v-else :size="iconSize.dense" />
                     </button>
                     <FolderPlus :size="iconSize.dense" aria-hidden="true" />
@@ -500,10 +500,10 @@ function save() {
                 <button v-for="entry in TYPES" :key="entry.id" type="button" :disabled="busy" @click="addConfig(entry.id)">{{ entry.label }}</button>
               </div>
             </div>
-            <button type="button" class="icon-button" aria-label="删除配置" :disabled="busy || !selectedConfigName" @click="emit('remove', selectedConfigName)"><Minus :size="iconSize.toolbar" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" aria-label="复制配置" :disabled="busy || !selectedConfigName" @click="copyConfig"><Copy :size="iconSize.control" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" aria-label="保存配置" :disabled="busy || !form.name.trim()" @click="save"><Save :size="iconSize.control" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" aria-label="新建文件夹" :disabled="busy" @click="createFolder"><FolderPlus :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="删除配置" title="删除配置" :disabled="busy || !selectedConfigName" @click="emit('remove', selectedConfigName)"><Minus :size="iconSize.toolbar" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="复制配置" title="复制配置" :disabled="busy || !selectedConfigName" @click="copyConfig"><Copy :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="保存配置" title="保存配置" :disabled="busy || !form.name.trim()" @click="save"><Save :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="新建文件夹" title="新建文件夹" :disabled="busy" @click="createFolder"><FolderPlus :size="iconSize.control" aria-hidden="true" /></button>
           </div>
         </div>
 

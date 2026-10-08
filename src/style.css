@@ -347,9 +347,9 @@ html[data-tool-names='on'] .activity-button::after { inset: 0; }
 .activity-button > svg:not(.lucide):not(.idea-icon) { width: var(--icon-size-rail); height: var(--icon-size-rail); }
 .activity-button::before { content: ''; position: absolute; left: -5px; width: 2px; height: 16px; border-radius: 2px; background: var(--header-accent); opacity: 0; transform: scaleY(.4); transition: transform var(--dur-2) var(--ease), opacity var(--dur-1) var(--ease); }
 .activity-button:hover { color: var(--header-fg); }
-.activity-button:hover::after { background: var(--header-hover); }
+.activity-button:hover::after { background: var(--hover); }
 .activity-button.active { color: var(--header-accent); }
-.activity-button.active::after { background: var(--header-hover); }
+.activity-button.active::after { background: var(--selected); }
 .activity-button.active::before { opacity: 1; transform: scaleY(1); }
 /* 条纹里的分隔件（App.vue 那颗「处理记录」与下半组之间）= `StripeButtonSeparator`：
    盒高 11（`StripeButtonSeparator.kt:22-23`），里面画一条 24x1、垂直居中的线（`:30-32`）——
@@ -582,13 +582,17 @@ html[data-tool-names='on'] .activity-button::after { inset: 0; }
 .literal-preview-chip { width: 28px; height: 18px; border: 1px solid var(--completion-border); border-radius: var(--radius-xs); }
 .literal-preview-label { color: var(--muted); font: 11px var(--font-mono); }
 .literal-preview-image { display: block; max-width: 220px; max-height: 160px; image-rendering: pixelated; }
-.welcome-screen { margin: auto; width: 100%; max-width: 620px; max-height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: clamp(24px, 5vh, 52px) clamp(20px, 4vw, 44px); }
+.welcome-screen { margin: auto; width: 100%; max-width: 620px; max-height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: clamp(var(--space-6), 5vh, 52px) clamp(var(--space-5), 4vw, 44px); }
 .workbench-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
 .back-to-projects { display: inline-flex; align-items: center; gap: var(--space-1); margin-top: var(--space-4); color: var(--muted); }
 .eyebrow { font: 10px var(--font-brand); letter-spacing: 1.1px; color: var(--muted); }
 .welcome-screen h1 { margin: 10px 0 var(--space-3); font-weight: 500; color: var(--bright); font-size: clamp(20px, 2vw, 24px); line-height: 1.4; letter-spacing: .2px; }
 .welcome-screen h1 > span { color: var(--secondary); }
 .welcome-screen > p { color: var(--secondary); font-size: 12px; line-height: 1.8; }
+/* 定尺图标钮的**方形盒**：宽高引用同一档控件高度。原先写 29×28 —— 盒里的图标与同排控件
+   错开半点，且高度不随紧凑模式收（--ctrl-height 会被 html[data-density=compact] 覆写成 24）。
+   判据 tests/control-geometry-tokens.test.mjs。 */
+.route-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--ctrl-height); height: var(--ctrl-height); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--accent); background: var(--selected); }
 .primary-button { background: var(--accent); color: var(--on-accent); border: 1px solid var(--accent); border-radius: var(--radius-sm); min-height: 32px; padding: var(--space-1) var(--space-3); display: inline-flex; gap: var(--space-2); align-items: center; font-weight: 500; margin-top: var(--space-3); }
 .primary-button:hover { background: var(--accent-hover); }
 .primary-button:focus-visible { outline: var(--focus-ring-on-accent); outline-offset: var(--focus-ring-offset-inset); }
@@ -1177,7 +1181,7 @@ html[data-presentation='on'] .statusbar { font-size: 1.15em; }
 .rename-note { margin: var(--space-2) 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
 .ref-list { flex: 1; min-height: 0; overflow: auto; padding: var(--space-1) 0; }
-.ref-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: 3px 14px; border: 0; background: transparent; color: var(--text); text-align: left; font-size: 12px; cursor: pointer; }
+.ref-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: 3px 14px; border: 0; background: transparent; color: var(--text); text-align: left; font-size: 12px; cursor: pointer; transition: background-color var(--dur-1) var(--ease); }
 .ref-item:hover { background: var(--hover); }
 .ref-item > svg { flex-shrink: 0; color: var(--muted); }
 .ref-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; }

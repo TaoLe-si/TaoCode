@@ -689,8 +689,8 @@ watch(() => [props.root, props.active] as const, () => {
       <ShelfPane :rows="shelfRowsView" :busy="busy || shelfBusy" :loading="loading" @save="saveShelf" @pop="popShelf" @refresh="loadShelf" />
       <!-- IDEA 的 `CommitChecksProgressIndicator`（`CommitProgressPanel.kt:108-130`）：跑检查时那一行
            （标题 + 两档正文 + 取消），任务结束整行收掉（可见性由 `checksProgress(..., running)` 给）。 -->
-      <div v-if="checksProgress.visible" ref="checksProgressEl" class="sc-checks-progress" role="group" @click="checksPopupOpen = !checksPopupOpen">
-        <button type="button" class="sc-checks-progress-trigger" aria-haspopup="dialog" :aria-expanded="checksPopup.visible">
+      <div v-if="checksProgress.visible" ref="checksProgressEl" class="sc-checks-progress" role="group">
+        <button type="button" class="sc-checks-progress-trigger" aria-haspopup="dialog" :aria-expanded="checksPopup.visible" @click="checksPopupOpen = !checksPopupOpen">
           <span class="sc-checks-progress-text" role="status"><strong>{{ checksProgress.title }}</strong>{{ checksProgress.text }}</span>
           <span v-if="checksProgress.detail" class="sc-checks-progress-detail">{{ checksProgress.detail }}</span>
         </button>

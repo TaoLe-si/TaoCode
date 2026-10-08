@@ -163,7 +163,9 @@ test('换项目/关项目真的会喂这份缓存，且这个键登记在原生�
     '换项目（activateWorkspace 开头）与关项目各清一次：上一个项目的目录不许串过来')
   // 白名单这条是**硬教训**换来的：漏登 ⇒ 存它 `INVALID_SETTINGS`，而读盘那一条把整个 perProject 记录判
   // STATE_CORRUPT（`native/project_settings_state.cpp:106` 调 `validate_project_patch`），用户直接被锁在项目外。
+  // 项目级那一半（含 validate_project_patch）2026-10-08 拆进 native/settings_project_schema.cpp。
   const schema = readFileSync(new URL('../native/settings_schema.cpp', import.meta.url), 'utf8')
+    + readFileSync(new URL('../native/settings_project_schema.cpp', import.meta.url), 'utf8')
   const from = schema.indexOf('void validate_project_patch(')
   const whitelist = schema.slice(from, schema.indexOf('if (patch.contains("foldingState"))'))
   assert.ok(from > 0 && whitelist.length > 0, '找得到 validate_project_patch 那一段')

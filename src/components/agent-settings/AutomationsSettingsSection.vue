@@ -12,7 +12,7 @@ import AgentSettingsSectionShell from './AgentSettingsSectionShell.vue'
 import AgentSettingsSwitch from './AgentSettingsSwitch.vue'
 import { iconSize } from '../../uiIcons'
 import {
-  AGENT_AUTOMATIONS_MAX_ENTRIES, AGENT_AUTOMATION_LIFECYCLE_STATUSES,
+  AGENT_AUTOMATIONS_BETA_BADGE, AGENT_AUTOMATIONS_MAX_ENTRIES, AGENT_AUTOMATION_LIFECYCLE_STATUSES,
   AGENT_AUTOMATION_STATUS_FILTERS,
   automationNextRun, automationStatusFilterOf, formatAutomationSchedule, hasAutomationFailure,
   loadAgentAutomations, normalizeAgentAutomations, saveAgentAutomations, validateAgentAutomations,
@@ -100,10 +100,17 @@ function save() {
     ? '已保存到本机设置。'
     : '本次会话仍生效，但没有存下来（本机存储不可用）。'
 }
+
+/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
+const SECTION_DESCRIPTION = '管理定时任务：调度摘要与下次运行时间。'
 </script>
 
 <template>
-  <AgentSettingsSectionShell>
+  <AgentSettingsSectionShell title="自动化" :description="SECTION_DESCRIPTION">
+    <p class="auto-beta" role="note">
+      <span class="auto-beta-chip">{{ AGENT_AUTOMATIONS_BETA_BADGE }}</span>
+      <span>本节只保存配置：本仓还没有调度器去真的执行这些定时任务（`loadAgentAutomations` 之外没有消费方）。</span>
+    </p>
     <fieldset class="settings-fields">
       <div class="auto-toolbar">
         <label for="auto-filter">状态筛选</label>
@@ -126,7 +133,11 @@ function save() {
           <Plus :size="iconSize.control" aria-hidden="true" />用模板
         </button>
       </div>
+      <p v-if="!draft.templates.length" class="field-hint">
+        模板目录是空的：本仓没有预置假模板，直接点「新建」自己写一条。
+      </p>
 
+      <p v-if="!visible.length" class="field-hint">没有符合条件的任务。</p>
 
       <article v-for="(automation, index) in visible" :key="automation.id" class="auto-card">
         <div class="auto-card-head">
@@ -140,6 +151,7 @@ function save() {
           <span v-if="failOf(automation)" class="auto-chip auto-chip-fail">失败</span>
           <button
             class="settings-icon-button settings-icon-button-danger" type="button"
+            :title="`删除定时任务 ${automation.title || '未命名定时任务'}`"
             :aria-label="`删除定时任务 ${automation.title || '未命名定时任务'}`" @click="removeAt(draft.automations.indexOf(automation))"
           ><Trash2 :size="iconSize.control" aria-hidden="true" /></button>
         </div>
@@ -198,6 +210,8 @@ function save() {
 .auto-card-meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: var(--space-1) 0 0; color: var(--muted); font-size: 12px; }
 .auto-chip { padding: 0 var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--secondary); font-size: 12px; }
 .auto-chip-fail { border-color: var(--error); color: var(--error); }
+.auto-beta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.auto-beta-chip { display: inline-flex; align-items: center; min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); border: 1px solid var(--accent); border-radius: var(--radius-pill); color: var(--accent); font-size: 11px; font-weight: 600; line-height: 1; }
 .auto-form { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); }
 .auto-row-block { align-items: flex-start; }
 .auto-row-block > textarea { flex: 1 1 100%; min-height: 60px; padding: var(--space-1); resize: vertical; }

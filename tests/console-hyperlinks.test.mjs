@@ -151,8 +151,12 @@ test('消费链：面板用这一层的切片表，两类链接各自可点，�
   assert.match(panel, /emit\('jump', action\.payload\)/, 'file: 命中复用控制台现成的 jump 通道')
   assert.match(panel, /v-else-if="segment\.url" class="run-issue-link"/,
     'URL 片段有独立的渲染分支，但样式与文件链接同一个（上游也是同一个 HYPERLINK 属性）')
-  assert.match(panel, /@contextmenu\.prevent="openLinkMenu\(segment\.url, \$event\)"/,
+  // `.stop`：行本身挂着 `@contextmenu="openFoldMenu(line, $event)"`（折叠菜单），链接按钮必须
+  // 掐断冒泡 —— 否则右键一个链接会同时弹出折叠菜单，两张菜单叠在一起。
+  assert.match(panel, /@contextmenu\.prevent\.stop="openLinkMenu\(segment\.url, \$event\)"/,
     '右键出菜单（上游那张 ActionGroup），左键仍是打开/跳转')
+  assert.match(panel, /@contextmenu="openFoldMenu\(line, \$event\)"/,
+    '行上的折叠菜单还在 ⇒ 上面那条 `.stop` 不是可选项')
   assert.match(panel, /consoleLinkMenuItems\(linkMenu\.link\)/, '菜单条目由这一层判定，组件不自己列')
   assert.match(panel, /copyToClipboard\(link\.href\)/, '复制的是命中的原文那一串')
   assert.match(panel, /import AnchoredMenu from '\.\/AnchoredMenu\.vue'/, '弹层外壳复用既有的 AnchoredMenu，不自建')

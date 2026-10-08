@@ -2,13 +2,22 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Cable, Plus, Trash2, Upload } from 'lucide-vue-next'
 import { iconSize } from '../../uiIcons'
-import { isDesktop, request } from '../../bridge.ts'
+import { isDesktop, request } from '../../bridge'
 import AgentSettingsSectionShell from './AgentSettingsSectionShell.vue'
 import {
   describeMcpFailure, loadAgentMcpSettings, mcpServerConfigJson,
   normalizeAgentMcpSettings, parseMcpServerInput, saveAgentMcpSettings, validateAgentMcpSettings,
   type AgentMcpRuntimeSnapshot, type AgentMcpServer, type AgentMcpServerStatus,
 } from '../../agentMcpServers'
+
+const TRANSPORT_OPTIONS = [
+  { value: 'stdio' as const, label: '标准输入输出（stdio）' },
+  { value: 'http' as const, label: 'HTTP（流式）' },
+  { value: 'sse' as const, label: 'SSE' },
+]
+
+/** 落盘层级的中文名（字段名是上游的，译文是本节自己的短标签，与 `PROTOCOL_VERSIONS` 同一种写法）。 */
+const MCP_SCOPE_LABELS: Record<AgentMcpServer['scope'], string> = { user: '用户', workspace: '工作区' }
 
 /** 协议版本。`''` = 未设置 = 自动协商（ZCode 用 `auto` 作 Select 哨兵，`McpServerForm.tsx:196-199`）。 */
 const PROTOCOL_VERSIONS = [{ value: '', label: '自动（推荐）' }, { value: 'legacy', label: '兼容旧版' }, { value: '2026-07-28', label: 'v2' }]
@@ -168,10 +177,13 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (statusPoll !== undefined) window.clearInterval(statusPoll)
 })
+
+/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
+const SECTION_DESCRIPTION = '管理 ZCode Agent 使用的 MCP 服务器配置（`settings.mcp.description`）。'
 </script>
 
 <template>
-  <AgentSettingsSectionShell>
+  <AgentSettingsSectionShell title="MCP 服务器" :description="SECTION_DESCRIPTION">
     <ul v-if="servers.length" class="mcp-list">
       <li v-for="server in servers" :key="server.id" class="mcp-row" :class="{ active: server.id === selectedId }">
         <Cable :size="iconSize.control" aria-hidden="true" class="mcp-row-icon" />
@@ -179,6 +191,8 @@ onBeforeUnmount(() => {
           @click="selectedId = server.id">
           <span class="mcp-row-title">
             <span class="mcp-row-name">{{ server.name || '未命名服务器' }}</span>
+            <!-- 落盘层级：`AgentMcpServer.scope` 是上游 `mcpSettingsShared.ts` 的字段（user / workspace）。 -->
+            <span class="mcp-badge mcp-scope">{{ MCP_SCOPE_LABELS[server.scope] }}</span>
             <span v-if="statusFor(server)" class="mcp-status" :title="statusLabel(statusFor(server))">
               {{ statusLabel(statusFor(server)) }}
             </span>
@@ -189,12 +203,12 @@ onBeforeUnmount(() => {
           <span class="mcp-row-desc">{{ rowDescription(server) }}</span>
         </button>
         <label v-if="server.transport === 'stdio'" class="mcp-toggle">
-          <input :checked="server.enabled" type="checkbox" :aria-label="`启用或停用 ${server.name || '未命名服务器'}`"
-            @change="setEnabled(server, ($event.target as HTMLInputElement).checked)">
+          <input v-model="server.enabled" type="checkbox" :aria-label="`启用或停用 ${server.name || '未命名服务器'}`"
+            @change="setEnabled(server, server.enabled)">
           <span>{{ server.enabled ? '已启用' : '已停用' }}</span>
         </label>
         <button type="button" class="settings-icon-button" :aria-label="`删除 ${server.name || '未命名服务器'}`"
-          @click="removeServer(server.id)">
+          :title="`删除 ${server.name || '未命名服务器'}`" @click="removeServer(server.id)">
           <Trash2 :size="iconSize.dense" aria-hidden="true" />
         </button>
       </li>
@@ -211,6 +225,13 @@ onBeforeUnmount(() => {
       <div class="input-row">
         <label :for="`mcp-name-${selected.id}`">名称</label>
         <input :id="`mcp-name-${selected.id}`" v-model="selected.name" type="text">
+      </div>
+
+      <div class="input-row">
+        <label :for="`mcp-transport-${selected.id}`">类型</label>
+        <select :id="`mcp-transport-${selected.id}`" v-model="selected.transport">
+          <option v-for="item in TRANSPORT_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
       </div>
       <div class="mcp-field-row">
         <div class="input-row">
@@ -241,7 +262,7 @@ onBeforeUnmount(() => {
           <li v-for="(_value, key) in pairTable" :key="key" class="mcp-pair">
             <input :value="key" type="text" readonly :aria-label="`键名 ${key}`">
             <input v-model="pairTable[key]" type="text" :aria-label="`${key} 的值`">
-            <button type="button" class="settings-icon-button" :aria-label="`删除 ${key}`" @click="removePair(key)">
+            <button type="button" class="settings-icon-button" :aria-label="`删除 ${key}`" :title="`删除 ${key}`" @click="removePair(key)">
               <Trash2 :size="iconSize.dense" aria-hidden="true" />
             </button>
           </li>

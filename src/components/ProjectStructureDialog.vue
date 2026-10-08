@@ -63,7 +63,7 @@ function confirm() { if (apply()) emit('close') }
     <section class="help-dialog ps-dialog" role="dialog" aria-modal="true" aria-label="项目结构">
       <header class="ps-dialog-head">
         <h2>项目结构</h2>
-        <button type="button" class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
+        <button type="button" class="icon-button" aria-label="关闭" title="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
       </header>
       <div class="ps-dialog-body">
         <!-- IDEA 的 SidePanel：左侧分类，右侧详情。 -->

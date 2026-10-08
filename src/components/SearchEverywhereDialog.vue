@@ -383,7 +383,7 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
           @keydown.alt.down.prevent="applyHistoryStep(true)"
           @keydown.alt.up.prevent="applyHistoryStep(false)"
         />
-        <button class="icon-button" aria-label="关闭随处搜索" @click="emit('close')"><X :size="iconSize.action" /></button>
+        <button class="icon-button" aria-label="关闭随处搜索" title="关闭随处搜索" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="se-tabs" role="tablist">
         <button
@@ -411,14 +411,14 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
             v-else-if="action === 'preview'"
             class="se-tab se-tab-icon"
             :aria-pressed="showPreview"
-            :aria-label="showPreview ? '关闭预览' : '打开预览'"
+            :aria-label="showPreview ? '关闭预览' : '打开预览'" :title="showPreview ? '关闭预览' : '打开预览'"
             @click="showPreview = !showPreview"
           ><Eye v-if="showPreview" :size="iconSize.control" /><EyeOff v-else :size="iconSize.control" /></button>
           <div v-else-if="action === 'type' && typeStates.length" class="se-funnel">
             <button
               class="se-tab se-tab-icon"
               :aria-expanded="funnelOpen"
-              aria-label="按类型筛选结果"
+              aria-label="按类型筛选结果" title="按类型筛选结果"
               @click="funnelOpen = !funnelOpen"
             ><Filter :size="iconSize.control" /></button>
             <div v-if="funnelOpen" class="se-funnel-panel" role="group" aria-label="类型">

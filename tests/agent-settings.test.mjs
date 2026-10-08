@@ -2,16 +2,18 @@
 //
 // 起因（用户原话）："原有 Zcode 设置，并入 TaoCode，单开一栏 Agent 设置"。
 // 这里钉住三件事：坏存档能被救回来（不许把用户锁在外面）、用户敲错的输入要当场拦下、
-// 没连真模型这件事必须如实说出来（不许让填了地址看起来像已连上）。
+// 没配齐模型/供应商/端点/密钥时必须当场点名拒绝（不许让填了地址看起来像已连上）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   AGENT_CONTEXT_MAX_CHARS, AGENT_CONTEXT_MIN_CHARS, AGENT_SETTINGS_STORAGE_KEY,
-  editPolicyOf, isPermissionTier, loadAgentSettings, modelConnectionNotice,
+  editPolicyOf, isPermissionTier, loadAgentSettings,
   normalizeAgentSettings, saveAgentSettings, validateAgentSettings, defaultAgentSettings,
   TASK_AUTO_ARCHIVE_DAY_OPTIONS,
 } from '../src/agentSettings.ts'
 import { defaultAgentPermissions } from '../src/agent.ts'
+import { prepareModelRequest } from '../src/agentHostProtocol.ts'
+import { encodeCustomModelValue } from '../src/agentModelSelection.ts'
 
 test('ZCode 常规节（general）键名与出厂默认逐字对齐', () => {
   const general = defaultAgentSettings().general
@@ -43,7 +45,12 @@ test('providers 逐条救：坏条目只丢自己，models 里缺 id 的丢弃',
   const first = saved.providers[0]
   assert.equal(first.id, 'p1')
   assert.equal(first.models.length, 1, 'models 里只有 m1 合法')
-  assert.deepEqual(first.models[0], { id: 'm1', name: '一号', enabled: true })
+  // 模型条目的键集合由归一化登记（`inputFormat` 是 2026-10-07 之后的必带元数据，
+  // 这里不再整份 deepEqual —— 但把键集合钉死，防止归一再往形状里塞没登记的东西）。
+  assert.deepEqual(Object.keys(first.models[0]).sort(), ['enabled', 'id', 'inputFormat', 'name'])
+  assert.equal(first.models[0].id, 'm1')
+  assert.equal(first.models[0].name, '一号')
+  assert.equal(first.models[0].enabled, true)
   const second = saved.providers[1]
   assert.ok(second.id.startsWith('provider-'), '缺 id 的供应商补一个生成 id')
 })
@@ -57,7 +64,8 @@ test('设置往返（含 general/providers）读回是同一份', () => {
   const back = loadAgentSettings(storage)
   assert.equal(back.general.httpProxy, 'http://127.0.0.1:7890')
   assert.equal(back.providers.length, 1)
-  assert.deepEqual(back.providers[0].models, [{ id: 'glm', name: 'GLM', enabled: true }])
+  // 「读回是同一份」对的是**归一化后**的形状（模型元数据带 inputFormat 等可选键）。
+  assert.deepEqual(back.providers[0].models, normalizeAgentSettings(settings).providers[0].models)
 })
 
 
@@ -151,13 +159,30 @@ test('存储坏掉/不可用时退回默认，不抛', () => {
   assert.deepEqual(loadAgentSettings(null), defaultAgentSettings())
 })
 
-test('诚实提示：没填端点和使用假模型要说出来，填了端点也要说清尚未联网', () => {
-  const withoutEndpoint = modelConnectionNotice(defaultAgentSettings())
-  assert.match(withoutEndpoint, /本地假模型/)
-  assert.match(withoutEndpoint, /不访问网络/)
-  const withEndpoint = modelConnectionNotice({ ...defaultAgentSettings(), endpoint: 'https://api.example.com/v1' })
-  assert.match(withEndpoint, /尚未接入联网模型/)
-  assert.match(withEndpoint, /仅作为配置保存/)
+test('诚实提示：没配齐模型/供应商/端点/密钥时明确拒绝，不静默发空请求', () => {
+  // 旧口径的 `modelConnectionNotice`（"本地假模型 / 尚未接入联网模型 / 仅作为配置保存"三句）
+  // 随**真模型链路接通**作废：对话请求现在真的发出去（`src/agentHostProtocol.ts` 的
+  // `prepareModelRequest` + 原生 `agent.model.stream`），"有没有联网"不再是一句设置页文案
+  // 能断言的事。要钉的换成**没配齐时不假装**：每一条都点名缺什么，而不是发一个空请求出去。
+  const messages = [{ role: 'user', content: 'hi' }]
+  const provider = (patch = {}) => ({
+    ...defaultAgentSettings(),
+    model: encodeCustomModelValue('p1', 'm1'),
+    providers: [{
+      id: 'p1', name: 'P1', apiFormat: 'openai-chat-completions',
+      baseUrl: '', apiKey: '', models: [{ id: 'm1', name: 'M1', enabled: true }],
+      ...patch,
+    }],
+  })
+  assert.throws(() => prepareModelRequest(defaultAgentSettings(), messages, 'D:/proj', []), /请先选择已配置的模型/)
+  assert.throws(() => prepareModelRequest(provider(), messages, 'D:/proj', []), /缺少 Base URL/)
+  assert.throws(() => prepareModelRequest(provider({ baseUrl: 'https://api.example.com/v1' }), messages, 'D:/proj', []), /缺少 API Key/)
+  assert.throws(() => prepareModelRequest(provider({ baseUrl: 'not a url', apiKey: 'k' }), messages, 'D:/proj', []), /Base URL 无效/)
+  assert.throws(() => prepareModelRequest(provider({ baseUrl: 'ftp://example.test/v1', apiKey: 'k' }), messages, 'D:/proj', []), /只支持 HTTP 或 HTTPS/)
+  // 阳性对照：配齐之后不再抛，且组出的是真请求（否则上面五条可能只是"永远抛"）。
+  const plan = prepareModelRequest(provider({ baseUrl: 'https://api.example.com/v1', apiKey: 'k' }), messages, 'D:/proj', [])
+  assert.ok(plan.request.url.startsWith('https://api.example.com/v1'), '配齐后应组出真请求')
+  assert.ok(plan.request.body.includes('"model"'), '请求体里要带上模型（原生 http 层固定 POST，不带 method 字段）')
 })
 
 test('editPolicyOf 只交出差异那几位', () => {

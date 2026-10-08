@@ -4,7 +4,8 @@
 
 四档（同 B1）：`[x]` 已移植 · `[~]` 部分 · `[ ]` 未移植（TODO）· `[-]` 不适用（附理由）
 
-> **本文档对 350 类逐条给判决**：§G 是**逐条总表**（350 行，机检对齐），四档合计 **22 + 94 + 0 + 234 = 350**；
+> **本文档对 350 类逐条给判决**：§G 是**逐条总表**（350 行，机检对齐），四档合计 **23 + 93 + 0 + 234 = 350**；
+> **2026-10-08（lane visual-leftovers，B2 计数复核）**：`LineSeparatorWidgetFactory` 的 §G 行已由 vc-nav 的行分隔符批次改成 `[x]`（`src/components/LineSeparatorStatusWidget.vue` 的 CRLF/LF/CR 三档徽标 + 弹层 + `SPEEDSEARCH` 键入选择，复用 `src/speedSearch.ts`；消费点 `src/App.vue` 的状态栏 `showWidget('lineSeparator')`），但文档头部与 §A/§B 表头还停在旧数。本 lane 按 `appendixRows` 同款正则逐条重数 §G：`[x]` 23 / `[~]` 93 / `[ ]` 0 / `[-]` 234 = 350，据此把四档合计与 §A/§B 表头对齐（**取代**上一条记录里的 22/94；§G 仍是唯一真值来源）。§B 的 B-1…B-6 括号数字是 2026-09-29 入库时的族规模标记（与各自表行数、§G 档位数都不相等，属历史标注，非机检口径），保持原样。
 > **2026-10-06（b1b7verdict lane，EP 轮）**：`ProjectWidgetActionsFilter` `[~]` → `[x]` —— EP `com.intellij.projectWidgetActionsFilter` 已落并接进项目部件那份行的过滤点（`src/projectWidgetActionsFilter.ts` + `src/projectWidget.ts` 的 `filterProjects` + `src/menuUi.ts` 传当前项目根；判据 `tests/project-widget-actions-filter.test.mjs`），四档从 20/96 变成 21/95。
 > **2026-10-08（lane vc-nav，b2 计数对账）**：`ToggleReadOnlyAttributePanel` `[~]` → `[x]` —— 状态栏只读徽标的双态/点击面已全：`src/App.vue` 的 `status-locked` 芯片（`Lock`/`LockOpen` 双态、`aria-pressed`）+ `toggleReadOnlyFromStatusBar`（先存打开文档再切），落到 `src/treeActions.ts:68` 的 `toggleReadOnly` → 宿主 `native/file_queries.cpp:198` 的 `file.readOnly`；§A 的小节计数把它与另两条（`FilenameToolbarWidgetAction`/`ProjectWidgetActionsFilter`）一并计入（§A 表只列代表条目，逐条依据在 §G），四档 21/95 → 22/94。§G 逐条表即真值（22 + 94 + 0 + 234 = 350），§A/§B 的小节计数按它对齐。
 > **2026-10-06（b1b7verdict lane）**：`FilenameToolbarWidgetAction` 复核升 `[x]`（`src/filenameWidget.ts` 的 `filenameWidgetVisible`/`uniqueFileName`/`recentFilesPopupRows`/`isFilenameWidgetCloseGesture`/`fileStatusKind` 逐条对上游 `:53-60`/`:62-89`/`:94-102`，消费点 `MainToolbar.vue`/`App.vue`，判据 `tests/filename-widget.test.mjs`），四档从 19/97 变成 20/96。同批把 `AutoShowProcessPopupAction`/`ColumnSelectionModePanel`/`DockToolWindowAction`/`EncodingPanel`/`IdeStatusBarImpl`/`InfoAndProgressPanel`/`InlineProgressIndicator`/`MaximizeToolWindowAction`/`PositionPanel`/`ProcessBalloon`/`ProcessPopup`/`ProjectToolbarWidgetAction`/`ProjectWidgetActionsFilter`/`SeparatorDecorator`/`ShowProcessWindowAction`/`TasksFinishedDecorator`/`ToggleReadOnlyAttributePanel` 十七行的「缺」写精确（原来多数只写一句落点、没有缺口记录）——其中 `ProjectWidgetActionsFilter` 订正了一处**记错**：上游是扩展点接口 `com.intellij.projectWidgetActionsFilter`（`ProjectWidgetActionsFilter.kt:12-16` 的 `shouldHideProjectSwitchingActions`），不是速度搜索过滤（本仓无插件运行时 ⇒ 无该 EP）。
@@ -36,7 +37,7 @@
 
 > 这张表是给**注释**算的口径（脚本逐类 strip 注释后复查）。它不直接等于判决数：判决按「行为是否落地」给，落地形态可以不含类名（例：`StripeButton` 的按钮存在于 `src/toolWindowStripes.ts` + App.vue，但名字只出现在注释里 ⇒ `[~]`）；反之名字出现也不等于落地（例多处只在解释性注释里提一次 ⇒ `[-]`）。§G 每一行的依据都写明是哪个文件、是行为还是仅对照。
 
-## A. 已移植（`[x]`，全表 22 类）
+## A. 已移植（`[x]`，全表 23 类）
 
 | 类 | 源码 | 说明 |
 |---|---|---|
@@ -47,7 +48,7 @@
 | `StatusBarEditorBasedWidgetFactory` | `impl/status/widget/StatusBarEditorBasedWidgetFactory.kt` | **2026-10-04 本轮改判 `[x]`**：`canEnableOn` = `getTextEditor(statusBar) != null`（`:14-16`）落在 `src/statusBarLifecycle.ts`（从状态栏绑定取；编辑器为空/不可见都不可开），工厂侧的 `editorBased` 标记在 `src/statusWidgets.ts`，右键勾选与「显示 <组件>」动作共用 `widgetToggleEnabled`；判据 `tests/status-widgets-registry.test.mjs` 钉住两侧同判 |
 | `WidgetRegistry` | `impl/status/WidgetRegistry.kt` | **2026-10-04 本轮改判 `[x]`**：注册表就是 `src/statusWidgets.ts` 的 `STATUS_WIDGETS`（工厂表 + "哪些是可配置/是否 EP 工厂"的分档），按 id 反查 = `findWidgetFactory`（上游 `StatusBarWidgetsManager.findWidgetFactory:139`），未知 id 不猜；判据 `tests/status-widgets-registry.test.mjs`。没有另立容器对象（`LinkedHashMap` 那层在渲染模型里不需要）是形态差异，不是行为缺口 |
 
-## B. 部分移植（`[~]`，全表 94 类）
+## B. 部分移植（`[~]`，全表 93 类）
 
 逐条写「已有」与「还差」。**每一行的 `src/` 都是真实文件**（机检 §F-2）。
 
@@ -275,7 +276,7 @@
 | `InspectionProfileWidgetFactory` | `platform/lang-impl/src/com/intellij/openapi/wm/impl/status/InspectionProfileWidgetFactory.java` | `[-]` | 本仓没有「检查配置档」（诊断来自语言服务），它管的那条状态栏组件没有对象 |
 | `LibraryDependentToolWindow` | `platform/platform-api/src/com/intellij/openapi/wm/ext/LibraryDependentToolWindow.java` | `[-]` | 依附「依赖库」（`OrderEntry` 一级的库）的工具窗口；本仓没有这个概念 |
 | `LibrarySearchHelper` | `platform/platform-api/src/com/intellij/openapi/wm/ext/LibrarySearchHelper.java` | `[-]` | 同上：它服务的是「在库里搜索」，本仓没有库 |
-| `LineSeparatorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/LineSeparatorWidgetFactory.java` | `[~]` | 行分隔符徽标 + 转换。本仓：`src/statusWidgets.ts:66` 的 `lineSeparator` 工厂位 + `status-chip`（LF/CRLF 显示、点击在两者之间切）。**缺**：上游那一组是 `ChangeLineSeparators` 动作组（`LineSeparatorPanel.java:41`），除 CRLF/LF 外还带 **CR** 与"转换行分隔符"的分档弹层。 |
+| `LineSeparatorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/LineSeparatorWidgetFactory.java` | `[x]` | 行分隔符徽标显示 CRLF/LF/CR；状态栏弹层按 `LineSeparatorPanel.java:47-53` 隐藏当前档，并提供 `SPEEDSEARCH` 键入动作文本选择；匹配与导航复用 `src/speedSearch.ts`（`src/components/LineSeparatorStatusWidget.vue`）。 |
 | `MainToolbarFocusSupport` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/MainToolbarFocusSupport.kt` | `[~]` | `src/mainToolbarFocus.ts`：`getFocusableAndEnabledItems`（`:66-70`）、`focusFirstItem`（`:51-61`）、Esc 回焦点（`:87-101`）、←/→ 遍历（`:216-224`）都已落；缺「聚焦项被禁用/移除时的焦点恢复」（`:135-186`）与「点击不把焦点带进工具栏」（`:56-58`），登记在 `docs/source-todo.md` §14 |
 | `MainToolbarQuickActions` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/MainToolbarQuickActions.kt` | `[~]` | 三条「可添加到工具栏」的快捷动作本仓都有：全部保存（`src/menus/fileMenu.ts:69` 的 `file.saveAll`）、上一步/下一步（`src/menus/navigateMenu.ts:38-39` 的 `navigate.back`/`navigate.forward`）、构建项目（`src/menus/buildMenu.ts:16` 的 `build.project`），都在动作索引 `src/menuUi.ts` 里。**缺**：`MainToolbarQuickActions.kt:10-14` 的定制入口（`ToolbarAddQuickActionInfo`/`GroupStart`/`GroupEnd`，把这三条作为可添加项喂给工具栏定制）—— 本仓工具栏是固定组，没有 `customize`（见 `MainToolbar` 行） |
 | `MemoryIndicatorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/MemoryIndicatorWidgetFactory.java` | `[~]` | 内存指示。本仓：`src/statusWidgets.ts:76` 的 `memory` 工厂位（**默认关**，去勾选清单打开）+ `status-memory` 芯片（进程工作集 + 历史峰值）。**缺**：上游单击强制 GC、双击整包 GC（`MemoryUsagePanel.java:121-138`），本仓单击只是刷新读数 —— 宿主没有 JVM 堆，也没有等价的"强制回收"API（见 §E 的差异记录）。 |

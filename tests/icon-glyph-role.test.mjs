@@ -13,6 +13,25 @@
 // 的写法会让 `<button[^>]*` 提前截断，"没报"和"没看见"就分不开了
 // （`ui-icons.test.mjs:152-159` 记的是同一个坑）。
 //
+// 2026-10-08 lane visual-leftovers 补的唯一豁免：**开关不是图标按钮**。
+//   `src/components/agent-settings/AgentSettingsSwitch.vue` 是 ZCode 开关的移植 ——
+//   上游 `.tools/ZCode/packages/ui/src/components/ui/switch.tsx`（Radix Switch = Root 轨道 + Thumb 滑块，
+//   没有图标）与 `.tools/ZCode/packages/ui/src/settings/AutomationSwitchToggle.tsx:22-38`
+//   （`<button role="switch" aria-checked aria-label>` + 轨道 + 一个绝对定位的圆形 `<span>` 滑块，同样没有图标）。
+//   开关的状态由**轨道位置 + aria-checked** 表达，上游也没有那个形状的矢量图 —— 要求它画一个就是发明形状。
+//   豁免条件写死成"`role="switch"` **且** `aria-checked`"两件齐全：想拿 role 当挡箭牌藏字形按钮，
+//   拿不到另一半（下面还钉住"这条豁免必须真的用得上"，免得它变成垃圾桶）。
+const SWITCH_ROLE = 'switch'
+/** 静态属性的字面量值（`:role` 这类绑定取不到，返回 null）。 */
+const attrOf = (node, name) => {
+  for (const p of node.props ?? []) if (p.type === NodeTypes.ATTRIBUTE && p.name === name) return p.value?.content ?? ''
+  return null
+}
+/** 有没有这个属性（静态属性或 `:x` 绑定都算）。 */
+const hasProp = (node, name) => (node.props ?? []).some(p =>
+  (p.type === NodeTypes.ATTRIBUTE && p.name === name) ||
+  (p.type === NodeTypes.DIRECTIVE && p.arg?.content === name))
+//
 // 上游依据（图标该长什么样）：
 //   · `platform/platform-api/src/com/intellij/ui/CommonActionsPanel.java:61-88` —— Buttons 枚举
 //     的每个分支都带一个 `AllIcons` / `IconUtil` 矢量图标，没有一个字形；
@@ -124,6 +143,7 @@ const BUTTON_TAGS = new Set(['button'])
 
 test('纯图标按钮必须渲染矢量图标，不能只渲染一个字符', () => {
   const bad = []
+  let switches = 0
   for (const [file, d] of PARSED) {
     const tpl = d.template?.content
     if (!tpl) continue
@@ -147,6 +167,8 @@ test('纯图标按钮必须渲染矢量图标，不能只渲染一个字符', ()
       })
       if (hasRealWord(text)) return    // 有真文字（`选择任务…`、`×3`、`Aa`）：那是文字，不是图标
       if (hasVector) return            // 已经是矢量图
+      // 开关豁免（见文件头）：`role="switch"` + `aria-checked` 两件齐全才算开关。
+      if (attrOf(node, 'role') === SWITCH_ROLE && hasProp(node, 'aria-checked')) { switches += 1; return }
       const key = text.trim()
       if (SYMBOL_TEXT_EXEMPTIONS.some(e => e.file === rel(file) && e.text === key)) return
       // 色卡按钮（`ColorChooserDialog.vue:114/115`）本来就"没有图标" —— 它整个样子就是一块
@@ -166,6 +188,9 @@ test('纯图标按钮必须渲染矢量图标，不能只渲染一个字符', ()
     })
   }
   assert.deepEqual(bad, [], `这些纯图标按钮没渲染任何矢量图标（多半是个字形）：\n${bad.join('\n')}`)
+  // 开关豁免的反向守卫（同下面「例外表不许养着空条目」的口气）：仓库里得真有开关按钮，
+  // 否则这条豁免就是垃圾桶里的空条目，该删掉。
+  assert.ok(switches >= 1, '开关豁免已经用不上了：全仓找不到 role="switch" + aria-checked 的按钮，删掉那条豁免')
 })
 
 test('例外表不许养着空条目（写进去的例外必须真的还在那儿）', () => {

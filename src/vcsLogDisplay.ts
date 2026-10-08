@@ -3,9 +3,9 @@ import { logDate } from './vcsLogGraph.ts'
 
 const MINUTE = 60_000
 
-/** `DateFormatUtil.java:130-168` 的 61 分钟窗口。 */
+/** `platform/platform-api/src/com/intellij/util/text/DateFormatUtil.java:130-168` 的 61 分钟窗口。 */
 export const PRETTY_DATE_WINDOW_MS = 61 * MINUTE
-/** `DateTimeFormatManager.java:25` 的默认值。 */
+/** `platform/platform-api/src/com/intellij/util/text/DateTimeFormatManager.java:25` 的默认值。 */
 export const PRETTY_DATE_ALLOWED_DEFAULT = true
 
 /** Java `Math.rint`：恰好 .5 时取偶数。 */
@@ -17,7 +17,7 @@ export function rint(value: number): number {
   return floor % 2 === 0 ? floor : floor + 1
 }
 
-/** `UtilBundle.properties:2` 那一行 ChoiceFormat 的四档（[0,1)/[1,2)/[2,60)/[60,∞)）。 */
+/** `platform/util/resources/messages/UtilBundle.properties:2` 那一行 ChoiceFormat 的四档（[0,1)/[1,2)/[2,60)/[60,∞)）。 */
 export function minutesAgoText(minutes: number): string {
   if (minutes < 1) return '刚刚'
   if (minutes < 2) return '1 分钟前'
@@ -30,7 +30,8 @@ function sameDay(left: Date, right: Date): boolean {
 }
 
 /**
- * VCS log 的 Date 列值（`VcsLogDefaultColumn.kt:172-177`）：求值顺序照 `DateFormatUtil.java:137-177` ——
+ * VCS log 的 Date 列值（`platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/column/VcsLogDefaultColumn.kt:172-177`）：求值顺序照
+ * `platform/platform-api/src/com/intellij/util/text/DateFormatUtil.java:137-177` ——
  * 分钟档（61 分钟窗口）→ 今天 → 昨天 → 绝对档。
  *
  * 「今天 / 昨天」后面的时刻与绝对档都走本仓日志既有的 `logDate()`（`yyyy-MM-dd HH:mm`，零填充）：

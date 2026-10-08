@@ -4,10 +4,24 @@
 // 为什么单独一个组件：`AgentPanel.vue` 顶在 900 行机检上限（`tests/module-size.test.mjs`），
 // 而这一块是自成一体的（数据来自 `src/agentSessions.ts`，动作全走 emit），拆出来不牵动别的。
 // 判定与落盘仍在 `src/agentSessions.ts`，这里只渲染 + 派发。
-import { nextTick, ref } from 'vue'
-import { Check, Pencil, Plus, Trash2, X } from 'lucide-vue-next'
+import { nextTick, onBeforeUnmount, ref } from 'vue'
+import { Pencil, Plus, Trash2, X } from 'lucide-vue-next'
+import { IdeaCheckedIcon } from './icons/toolWindowIcons'
 import { iconSize } from '../uiIcons'
 import { AGENT_SESSION_LIMIT } from '../agentSessions.ts'
+
+const renameEscapeHandlers = new WeakMap<HTMLInputElement, () => void>()
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !(event.target instanceof HTMLInputElement)) return
+    const handleEscape = renameEscapeHandlers.get(event.target)
+    if (!handleEscape) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    handleEscape()
+  }, true)
+}
 
 export interface AgentSessionRow { id: string; name: string; entries: number; updatedAt: string }
 
@@ -38,11 +52,15 @@ async function startRename(entry: AgentSessionRow) {
   renamingId.value = entry.id
   renameDraft.value = entry.name
   await nextTick()
-  renameInput.value?.focus()
-  renameInput.value?.select()
+  const input = renameInput.value
+  if (!input) return
+  renameEscapeHandlers.set(input, cancelRename)
+  input.focus()
+  input.select()
 }
 
 function cancelRename() {
+  if (renameInput.value) renameEscapeHandlers.delete(renameInput.value)
   renamingId.value = null
   renameDraft.value = ''
   compositionActive.value = false
@@ -69,6 +87,10 @@ function onRenameKeydown(event: KeyboardEvent, id: string) {
   event.preventDefault()
   confirmRename(id)
 }
+
+onBeforeUnmount(() => {
+  if (renameInput.value) renameEscapeHandlers.delete(renameInput.value)
+})
 
 /** 列表里的时间戳：`2026-10-07T09:31:22.000Z` → `10-07 09:31`。 */
 function rowMeta(entry: AgentSessionRow): string {
@@ -103,7 +125,7 @@ function rowTitle(entry: AgentSessionRow): string {
         <span class="agent-session-row-name">{{ item.name }}</span>
         <span class="agent-session-row-meta">{{ rowMeta(item) }}</span>
       </button>
-      <button v-if="renamingId === item.id" type="button" class="agent-session-action agent-session-confirm" title="确认" aria-label="确认" @click="confirmRename(item.id)"><Check :size="iconSize.inline" aria-hidden="true" /></button>
+      <button v-if="renamingId === item.id" type="button" class="agent-session-action agent-session-confirm" title="确认" aria-label="确认" @click="confirmRename(item.id)"><IdeaCheckedIcon :size="iconSize.inline" aria-hidden="true" /></button>
       <button v-if="renamingId === item.id" type="button" class="agent-session-action" title="取消" aria-label="取消" @click="cancelRename"><X :size="iconSize.inline" aria-hidden="true" /></button>
       <button v-if="renamingId !== item.id" type="button" class="agent-session-action agent-session-rename" title="重命名会话" aria-label="重命名会话" @click="startRename(item)"><Pencil :size="iconSize.inline" aria-hidden="true" /></button>
       <button v-if="renamingId !== item.id" type="button" class="agent-session-action agent-session-del" :title="`删除会话「${item.name}」`" :aria-label="`删除会话 ${item.name}`" @click="emit('remove', item.id)"><Trash2 :size="iconSize.inline" aria-hidden="true" /></button>
@@ -121,7 +143,7 @@ function rowTitle(entry: AgentSessionRow): string {
 @media (hover: hover) { .agent-session-row:not(.active):hover { background: var(--hover); } }
 .agent-session-open { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .agent-session-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-session-row-meta { color: var(--muted); font: 10px/1.4 var(--font-mono); }
+.agent-session-row-meta { color: var(--muted); font: 12px/1.4 var(--font-mono); }
 .agent-session-edit { cursor: default; }
 .agent-session-input { width: 100%; min-width: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--text); font: inherit; font-size: 12px; }
 .agent-session-input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }

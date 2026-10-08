@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Check, Copy, FileCode2, WrapText } from 'lucide-vue-next'
+import { Copy, FileCode2, WrapText } from 'lucide-vue-next'
 import { isDesktop, request, type BinaryView } from '../bridge'
 import { openExternalUrl } from '../externalLinkLauncher'
 import { recordClipboardText } from '../clipboard'
 import { renderMarkdown } from '../markdown'
 import type { AgentMessageSegment } from '../agentMessages'
 import { iconSize } from '../uiIcons'
+// 复制成功的勾选记号：本仓口径是 IDEA 的 `AllIcons.Actions.Checked` 副本（16 格，
+// `icons/toolWindowIcons.ts` 的 `IdeaCheckedIcon`），不是 lucide 的 24 格 `Check`。
+// 依据 `tests/menu-check-icon.test.mjs`（菜单行槽统一 IDEA 勾；lucide 的勾只留在
+// `SourceControl.vue` 空状态插画那一处，见判据里写明的 `CalcRawIcons`/`JBCefMenuAdapter` 上游出处）。
+import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 
 const props = defineProps<{ segments: readonly AgentMessageSegment[] }>()
 const emit = defineEmits<{ openFile: [path: string, line: number | null] }>()
@@ -120,7 +125,7 @@ onBeforeUnmount(() => {
               <WrapText :size="iconSize.control" aria-hidden="true" />
             </button>
             <button type="button" aria-label="复制代码" title="复制代码" @click="copyCode(segment.text, index)">
-              <Check v-if="copiedCodeIndex === index" :size="iconSize.control" aria-hidden="true" />
+              <IdeaCheckedIcon v-if="copiedCodeIndex === index" :size="iconSize.control" aria-hidden="true" />
               <Copy v-else :size="iconSize.control" aria-hidden="true" />
             </button>
           </div>

@@ -10,9 +10,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shellSource } from './shell-source.mjs'
+import { BridgeError } from '../src/bridgeError.ts'
 import ts from 'typescript'
 import * as vue from 'vue'
 
@@ -156,6 +158,17 @@ test('Files 与 Symbols 是两档（上游 SeFilesTab / SeSymbolsTab），各收
 const transpile = relative => ts.transpileModule(readFileSync(new URL(`../src/${relative}`, import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText
+/** 真加载裸包（`workspaceFileSearchIgnore.ts` 里的 `ignore`）—— 转译产物按 CJS 取 `require()`。 */
+const require_ = createRequire(import.meta.url)
+/**
+ * 等宿主那条链跑完。夹具的等待粒度是微任务，生产链却有一段长度：清单要过一次忽略规则
+ * （读 `.zcodeignore` → 兜底 `.gitignore` → 必要时落模板），不是"一个 await 就回来"。
+ * 原来只 `await Promise.resolve()` 一次，是照着更短的旧链写的 —— 链一长就会在响应**还没落地**
+ * 时断言，那时看的是"响应被丢弃"而不是"响应被采纳"，红得不是地方。
+ */
+const settle = async () => { for (let tick = 0; tick < 16; tick++) await Promise.resolve() }
+/** 宿主 `workspace.searchFiles` 的返回体（`src/bridge.ts` 的 `WorkspaceSearchFileList`）。 */
+const fileList = (...paths) => ({ entries: paths.map(path => ({ path, type: 'file' })), cancelled: false })
 const hostJs = transpile('searchEverywhereHost.ts')
 const classesJs = transpile('searchEverywhereClasses.ts')
 const commandSearchJs = transpile('commandSearch.ts')
@@ -168,7 +181,19 @@ function lifecycleHost(t) {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const fsChanges = vue.reactive({ version: 0, paths: [] })
   const calls = []
-  const request = (method, params) => new Promise((resolve, reject) => calls.push({ method, params, resolve, reject }))
+  // 传输桩分两类通道，理由是**下标**：用例按下标分辨"第几次清单请求/第几次符号请求"，
+  // 所以只有生命周期相关的那两条（`workspace.searchFiles`、`lsp.request`）进 `calls` 并由用例自己
+  // resolve/reject。装配期的杂项通道（读 `.zcodeignore` / `.gitignore`、写忽略模板、取工程设置、
+  // 文本档扫描）一律立即给确定答复，不占下标。
+  const request = (method, params) => {
+    if (method === 'workspace.searchFiles' || method === 'lsp.request')
+      return new Promise((resolve, reject) => calls.push({ method, params, resolve, reject }))
+    // 忽略规则文件不在（`file.read` 判 NOT_FOUND）⇒ 生产侧照常走"取 .gitignore 兜底 / 落一份模板"那条路。
+    if (method === 'file.read') return Promise.reject(new BridgeError('NOT_FOUND', 'no such file'))
+    if (method === 'search.run') return Promise.resolve({ matches: [] })
+    if (method === 'project.settings.get') return Promise.resolve({})
+    return Promise.resolve({})   // workspace.searchFiles.cancel / file.writeNew …
+  }
   // `commandSearch.ts` 除了命令表还要 `actionAliasMatch` / `aliasMatchScore`（上游 `GotoAction` 的
   // 别名/同义词匹配档，落点 `src/ideShellExtensionPoints.ts`）。那是**真实逻辑**，拿桩顶掉就等于
   // 在测一份假行为 —— 所以直接把生产的那份链加载进来。两个模块都是叶子（`ideShellExtensionPoints`
@@ -200,6 +225,15 @@ function lifecycleHost(t) {
   const history = loadTranspiled(transpile('searchEverywhereHistory.ts'), name => {
     throw new Error(`Unexpected searchEverywhereHistory dependency: ${name}`)
   })
+  // 文件来源 `src/workspaceFileSearchIgnore.ts` **真加载**：`refreshFiles` 拿的就是它按 `.zcodeignore`
+  // 过滤后的候选清单（宿主 `workspace.searchFiles`）。它只要桥的 `request` 与 `BridgeError`
+  // （真类，来自 `src/bridgeError.ts`），因此加载时就走上面那个传输桩，没有第二份假实现。
+  const workspaceFileSearch = loadTranspiled(transpile('workspaceFileSearchIgnore.ts'), name => {
+    if (name === 'ignore') return require_('ignore')
+    if (name === 'vue') return vue
+    if (name === './bridge.ts' || name === './bridge') return { BridgeError, request }
+    throw new Error(`Unexpected workspaceFileSearchIgnore dependency: ${name}`)
+  })
   new Function('require', 'exports', hostJs)(name => {
     if (name === 'vue') return vue
     if (name === './bridge' || name === './bridge.ts') return { fsChanges, request }
@@ -207,6 +241,7 @@ function lifecycleHost(t) {
     if (name === './searchEverywhereText.ts') return textTab
     if (name === './searchExclusions.ts') return exclusions
     if (name === './searchEverywhereHistory.ts') return history
+    if (name === './workspaceFileSearchIgnore.ts' || name === './workspaceFileSearchIgnore') return workspaceFileSearch
     throw new Error(`Unexpected host dependency: ${name}`)
   }, exports)
   const deps = {
@@ -252,13 +287,13 @@ test('关闭时不请求宿主，关闭和卸载均取消待发出的刷新', t 
 test('文件变化防抖刷新清单并用同一查询词独立刷新符号；清单失败保留原结果', async t => {
   const h = lifecycleHost(t)
   h.openSearchEverywhere()
-  h.calls[0].resolve({ files: ['Main.java'] })
-  await Promise.resolve()
+  h.calls[0].resolve(fileList('Main.java'))
+  await settle()
   h.onSearchEverywhereQuery(' Main ')
   t.mock.timers.tick(120)
   assert.deepEqual(h.calls[1].params, { kind: 'workspaceSymbol', path: 'Main.java', query: 'Main' })
   h.calls[1].resolve(symbolResult('Main'))
-  await Promise.resolve()
+  await settle()
   h.fsChanges.version++
   h.fsChanges.version++
   t.mock.timers.tick(119)
@@ -268,10 +303,10 @@ test('文件变化防抖刷新清单并用同一查询词独立刷新符号；�
   assert.deepEqual(h.calls[2].params, h.calls[1].params)
   t.mock.timers.tick(80)
   assert.equal(h.calls.length, 4, '连续文件事件只重取一次清单')
-  assert.equal(h.calls[3].method, 'workspace.files')
+  assert.equal(h.calls[3].method, 'workspace.searchFiles', '清单通道是宿主那一条（`workspace.searchFiles`，按 .zcodeignore 过滤）')
   h.calls[3].reject(new Error('disk unavailable'))
   h.calls[2].resolve(symbolResult('MainUpdated'))
-  await Promise.resolve()
+  await settle()
   assert.deepEqual(h.files(), ['Main.java'])
   assert.deepEqual(h.symbols(), ['MainUpdated'])
 })
@@ -284,14 +319,14 @@ test('同词重发后旧文件和符号响应不得覆盖新结果或在防抖�
   const [oldFiles, oldSymbols] = h.calls
   h.fsChanges.version++
   oldSymbols.resolve(symbolResult('stale-before-debounce'))
-  await Promise.resolve()
+  await settle()
   assert.deepEqual(h.symbols(), [], '新查询开始即作废旧符号响应')
   t.mock.timers.tick(200)
   h.calls[2].resolve(symbolResult('fresh'))
-  h.calls[3].resolve({ files: ['fresh.java'] })
-  await Promise.resolve()
-  oldFiles.resolve({ files: ['stale.java'] })
-  await Promise.resolve()
+  h.calls[3].resolve(fileList('fresh.java'))
+  await settle()
+  oldFiles.resolve(fileList('stale.java'))
+  await settle()
   assert.deepEqual(h.files(), ['fresh.java'])
   assert.deepEqual(h.symbols(), ['fresh'])
   h.onSearchEverywhereQuery('Main')
@@ -300,9 +335,9 @@ test('同词重发后旧文件和符号响应不得覆盖新结果或在防抖�
   h.onSearchEverywhereQuery('Main')
   t.mock.timers.tick(120)
   h.calls[5].resolve(symbolResult('newest'))
-  await Promise.resolve()
+  await settle()
   late.reject(new Error('obsolete failure'))
-  await Promise.resolve()
+  await settle()
   assert.deepEqual(h.symbols(), ['newest'], '旧请求失败也不得清空新结果')
 })
 
@@ -321,12 +356,12 @@ for (const transition of ['close/reopen', 'workspace replacement']) {
       h.deps.workspace.value = { root: 'project' } // Same root, different workspace identity.
     }
     t.mock.timers.tick(120)
-    h.calls[2].resolve({ files: ['current.java'] })
+    h.calls[2].resolve(fileList('current.java'))
     h.calls[3].resolve(symbolResult('current'))
-    await Promise.resolve()
-    oldFiles.resolve({ files: ['old.java'] })
+    await settle()
+    oldFiles.resolve(fileList('old.java'))
     oldSymbols.resolve(symbolResult('old'))
-    await Promise.resolve()
+    await settle()
     assert.deepEqual(h.files(), ['current.java'])
     assert.deepEqual(h.symbols(), ['current'])
   })

@@ -183,13 +183,29 @@ test('面板读写、宿主消费、宿主与前端清单同键：四处必须�
   assert.match(dialog, /runStartupFocusFlagsOf\(/, 'reset 要经由那一个读入口（缺键补默认）')
   const actions = read('src/runActions.ts')
   assert.match(actions, /runStartupFocusFlagsOf\(config\)/, 'startRun 读的必须是**这条配置**，不是全局副本')
+  // 宿主 schema 已按域拆成两份：`native/settings_schema.cpp`（编辑器/通用设置）+ 2026-10-08
+  // pf-lifecycle 拆出的 `native/settings_project_schema.cpp`（项目/运行配置）。运行配置那两个键
+  // 现在只活在后者 —— 只读老文件会假红，所以按**两份的并集**查（同
+  // `html-export`/`run-anything-recent-dir-cache`/`run-config-types` 三个判据的跟搬口径）。
+  const hostSchema = read('native/settings_schema.cpp') + read('native/settings_project_schema.cpp')
   // 键名四处同源：前端类型、前端校验、宿主白名单、本模块。少一处就是「建得出、存不下去」或「存得下、读不回」。
   for (const key of ['activateToolWindowBeforeRun', 'focusToolWindowBeforeRun']) {
     assert.ok(read('src/settingsModel.ts').includes(key), `src/settingsModel.ts 的 RunConfig 要有 ${key}`)
     assert.ok(read('src/runConfigurationSchema.ts').includes(`'${key}'`), `schema 的键清单要有 ${key}`)
-    assert.ok(read('native/settings_schema.cpp').includes(`"${key}"`), `宿主 known_keys 白名单要有 ${key}`)
+    assert.ok(hostSchema.includes(`"${key}"`), `宿主 known_keys 白名单要有 ${key}`)
     assert.ok(read('src/runStartupFocus.ts').includes(`'${key}'`), `本模块的读档键名要与上游属性名一致（:61-62）`)
   }
+  // 宿主白名单只是"认这个键"；脏值还得在宿主侧就报错。本轮实测的闸是一台**按变量**的循环
+  // （`native/settings_project_schema.cpp:551-556`）：
+  //   `for (const char* startup_flag : {"activateToolWindowBeforeRun", "focusToolWindowBeforeRun"})
+  //      if (value.contains(startup_flag) && !value.at(startup_flag).is_boolean()) fail("INVALID_SETTINGS", …)`
+  // 所以不能只要求"这两个键附近有 is_boolean()"——同文件上面 200 字符处就有
+  // `allowRunningInParallel` 的布尔闸，那种写法会误命中隔壁、本键的闸真被删了也不会红。
+  // 口径钉成两件：两个键同处一份初始列表 + 同一变量同时做 contains/at 存在性与 is_boolean 校验。
+  assert.match(hostSchema, /\{\s*"activateToolWindowBeforeRun"\s*,\s*"focusToolWindowBeforeRun"\s*\}/,
+    '宿主侧要按同一份键清单校验这两个开关（一处只写一半就是漂移的源头）')
+  assert.match(hostSchema, /contains\(startup_flag\)\s*&&\s*!value\.at\(startup_flag\)\.is_boolean\(\)/,
+    '宿主侧要对这两个键做布尔校验（非布尔必须报 INVALID_SETTINGS，不许静默吞）')
 })
 
 test('宿主与 schema 都要认这两个键：脏值报错、缺键不判坏（不许把用户锁在项目外）', () => {
@@ -219,7 +235,8 @@ test('模板那两个开关是「新配置的初值」，不是第二处存放',
 })
 
 test('默认值不写进配置记录：宿主侧只认键，补默认发生在读侧', () => {
-  // `native/settings_schema.cpp` 的 known_keys 认这两个键、也校验必须是布尔，但**不补默认**：
+  // 宿主 schema（现拆成 `native/settings_schema.cpp` + `native/settings_project_schema.cpp` 两份，
+  // 这两个键在后者）的 known_keys 认这两个键、也校验必须是布尔，但**不补默认**：
   // 补默认在读侧（`runStartupFocusFlagsOf`，上游读档 `RunnerAndConfigurationSettingsImpl.kt:243-244`）。
   const collapsed = withRunStartupFocusFlags({ name: 'n', command: 'c' }, OPEN_ONLY)
   assert.deepEqual(Object.keys(collapsed), ['name', 'command'], '两格都在默认 ⇒ 只剩原有字段')

@@ -55,12 +55,12 @@ function onNewInput(event: Event) { emit('update:newWatch', (event.target as HTM
     监视（Watches）
     <span class="debug-watch-note">跨会话保存 · {{ watches.length }}/{{ limit }}</span>
     <span class="watch-actions">
-      <button class="icon-button debug-set" :disabled="!canRemoveAllWatches(watches)" aria-label="移除所有监视" @click="emit('removeAll')"><ListX :size="iconSize.dense" /></button>
+      <button class="icon-button debug-set" :disabled="!canRemoveAllWatches(watches)" aria-label="移除所有监视" title="移除所有监视" @click="emit('removeAll')"><ListX :size="iconSize.dense" /></button>
     </span>
   </div>
   <div class="debug-watches">
     <div v-for="watch in watches" :key="watch.text" class="debug-row">
-      <button class="chip-x" :aria-label="`移除监视 ${watch.text}`" @click="emit('remove', watch.text)"><X :size="iconSize.chip" /></button>
+      <button class="chip-x" :aria-label="`移除监视 ${watch.text}`" :title="`移除监视 ${watch.text}`" @click="emit('remove', watch.text)"><X :size="iconSize.chip" /></button>
       <span class="debug-name">{{ watch.text }}</span>
       <!-- IDEA Watches 的「Set Value…」：DAP `setExpression`（表达式 + 新值）。 -->
       <template v-if="editing?.key === watch.text">
@@ -70,14 +70,14 @@ function onNewInput(event: Event) { emit('update:newWatch', (event.target as HTM
       <template v-else>
         <span class="debug-value" :class="{ 'watch-paused': watch.paused }">{{ watch.value || '—' }}</span>
         <!-- 上移/下移（XMoveWatchUp/Down）：不是第一条/最后一条才可点。 -->
-        <button class="icon-button debug-set" :disabled="!canMoveWatchUp(watches, watch.text)" :aria-label="`上移 ${watch.text}`" @click.stop="emit('move', { text: watch.text, direction: 'up' })"><ArrowUp :size="iconSize.dense" /></button>
-        <button class="icon-button debug-set" :disabled="!canMoveWatchDown(watches, watch.text)" :aria-label="`下移 ${watch.text}`" @click.stop="emit('move', { text: watch.text, direction: 'down' })"><ArrowDown :size="iconSize.dense" /></button>
+        <button class="icon-button debug-set" :disabled="!canMoveWatchUp(watches, watch.text)" :aria-label="`上移 ${watch.text}`" :title="`上移 ${watch.text}`" @click.stop="emit('move', { text: watch.text, direction: 'up' })"><ArrowUp :size="iconSize.dense" /></button>
+        <button class="icon-button debug-set" :disabled="!canMoveWatchDown(watches, watch.text)" :aria-label="`下移 ${watch.text}`" :title="`下移 ${watch.text}`" @click.stop="emit('move', { text: watch.text, direction: 'down' })"><ArrowDown :size="iconSize.dense" /></button>
         <!-- 暂停/恢复求值（XPauseWatchAction）：暂停保留已算出的值，恢复触发重算。 -->
-        <button class="icon-button debug-set" :disabled="!canPauseWatch(watch)" :class="{ 'inline-on': watch.paused }" :aria-pressed="watch.paused" :aria-label="`${pauseWatchActionLabel(watch)} ${watch.text}`" @click.stop="emit('togglePause', watch.text)"><Play v-if="watch.paused" :size="iconSize.dense" /><Pause v-else :size="iconSize.dense" /></button>
+        <button class="icon-button debug-set" :disabled="!canPauseWatch(watch)" :class="{ 'inline-on': watch.paused }" :aria-pressed="watch.paused" :aria-label="`${pauseWatchActionLabel(watch)} ${watch.text}`" :title="`${pauseWatchActionLabel(watch)} ${watch.text}`" @click.stop="emit('togglePause', watch.text)"><Play v-if="watch.paused" :size="iconSize.dense" /><Pause v-else :size="iconSize.dense" /></button>
         <!-- 行内监视（上游 InlineWatch）：画进编辑器当前帧那一行的行尾；再点一次撤掉。 -->
         <button class="icon-button debug-set" :disabled="!paused || frameLine === null" :class="{ 'inline-on': inlineShown(watch.text) }" :aria-pressed="inlineShown(watch.text)" :title="inlineShown(watch.text) ? `从编辑器第 ${frameLine} 行撤下行内监视` : `在编辑器第 ${frameLine ?? 0} 行画行内监视`" :aria-label="`行内显示 ${watch.text}`" @click.stop="emit('toggleInline', watch.text)"><Eye :size="iconSize.dense" /></button>
-        <button class="icon-button debug-set" :disabled="!paused" :aria-label="`设置 ${watch.text} 的值`" @click="emit('beginEdit', { text: watch.text, value: watch.value })"><PenLine :size="iconSize.dense" /></button>
-        <button class="icon-button debug-set" :aria-label="`复制 ${watch.text}`" @click.stop="emit('copy', { text: watch.text, value: watch.value, event: $event })"><Copy :size="iconSize.dense" /></button>
+        <button class="icon-button debug-set" :disabled="!paused" :aria-label="`设置 ${watch.text} 的值`" :title="`设置 ${watch.text} 的值`" @click="emit('beginEdit', { text: watch.text, value: watch.value })"><PenLine :size="iconSize.dense" /></button>
+        <button class="icon-button debug-set" :aria-label="`复制 ${watch.text}`" :title="`复制 ${watch.text}`" @click.stop="emit('copy', { text: watch.text, value: watch.value, event: $event })"><Copy :size="iconSize.dense" /></button>
       </template>
     </div>
     <div class="debug-watch-add">

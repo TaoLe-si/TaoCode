@@ -176,18 +176,56 @@ export function parseStackFrame(text: string): StackFrameParts | null {
 }
 
 const FRAME_LINE = /^\tat .*$|^\t\.\.\. \d+ more$/
+/** 上游 `StackTraceFolding.kt:12` 的同一个常量（占位文案的「包括异步堆栈跟踪」那一档靠它）。 */
 const ASYNC_STACK_TRACE_PREFIX = '\tat --- Async.Stack.Trace --- '
+
+/**
+ * 折叠段展开状态的坐标换算（纯函数）。
+ *
+ * 上游的展开态挂在 `FoldRegion` 上（`ConsoleViewImpl.kt:1000-1008` 的 `reconstructFoldingInfo` 读
+ * `region.isExpanded`，`:1104-1120` 的 `addFoldRegion` 在区段长高后重新写回），而 `FoldRegion` 是
+ * RangeMarker 支撑的：控制台从头部裁掉旧行时区段跟着前移（`ConsoleViewImpl.kt:855-856` 的循环缓冲 +
+ * 编辑器的 marker 维护）。本仓的镜像（`src/runInstances.ts` 的 `runOutput` / `RUN_OUTPUT_LIMIT`）
+ * 同样会从头部裁行，所以展开态**不能**按「当时那一遍数组里的下标」记账 ——
+ * 记账坐标用**流内行号**（= 点开那一遍的镜像行号 + 当时已裁掉的行数，`runOutputDropped`），
+ * 比对时再换算回当前一遍的下标。两个方向都在这里，面板只管调用。
+ */
+export function stackFoldSegmentKey(localIndex: number, droppedLines: number): number {
+  return localIndex + Math.max(0, droppedLines)
+}
+
+/** 流内行号 → 当前一遍数组的下标；已经被裁掉的段（`key < dropped`）不返回。 */
+export function stackFoldSegmentsLocally(keys: ReadonlySet<number>, droppedLines: number): Set<number> {
+  const dropped = Math.max(0, droppedLines)
+  const local = new Set<number>()
+  for (const key of keys) if (key >= dropped) local.add(key - dropped)
+  return local
+}
+
+/** 头部裁行后丢弃已经离开镜像的段（上游：区段连同它的 `isExpanded` 一起消失）。 */
+export function pruneStackFoldSegments(keys: ReadonlySet<number>, droppedLines: number): Set<number> {
+  const dropped = Math.max(0, droppedLines)
+  const kept = new Set<number>()
+  for (const key of keys) if (key >= dropped) kept.add(key)
+  return kept
+}
 
 export interface StackFoldableLine { text: string }
 
 /**
- * Java 栈帧折叠（`StackTraceFolding.shouldFoldLine`）：以 Tab + `at ` 开头的行与格式为 Tab + `... N more` 的行属于连续栈帧，其他行会重置计数。
- * 阈值后的帧并为独立占位行；async sentinel 位于被折叠段时使用上游异步占位文案。
- * `expanded` 为 true 时原样返回。
+ * Java 栈帧折叠（上游 `StackTraceFolding.shouldFoldLine`，`StackTraceFolding.kt:26-37`）：
+ * 以 Tab + `at ` 开头的行与 Tab + `... N more` 的行算连续栈帧（两种都计数，`::29`），其他行把计数**复位**（`::35`）；
+ * 计数超过阈值（本仓 `keep` = 设置 `foldJavaStackTraceGreaterThan`，上游默认 8，`StackTraceFoldingSettings.kt:24`）
+ * 的帧并为一条独立占位行（上游 `shouldBeAttachedToThePreviousLine() = false`，`::48-49`），
+ * 占位文案里的「包括异步堆栈跟踪」按被折叠段里有没有 async sentinel 决定（`::39-46` + `ExecutionBundle.properties:702-703`）。
+ * `expanded` 为 true 时原样返回（整体展开）。
+ *
+ * `expandedSegments` 是**本遍数组的下标**集合（点开的那一段的 `foldedStartIndex`）；跨「头部裁行」的
+ * 记账请走 `stackFoldSegmentKey` / `stackFoldSegmentsLocally`。
  */
 export function foldJavaStackFrames<T extends StackFoldableLine>(
-  lines: readonly T[], expanded: boolean, keep = 2,
-): Array<T & { foldedFrames?: number }> {
+  lines: readonly T[], expanded: boolean, keep = 8, expandedSegments: ReadonlySet<number> = new Set(),
+): Array<T & { foldedFrames?: number; foldedStartIndex?: number }> {
   if (expanded) return lines.map(line => ({ ...line }))
   const out: Array<T & { foldedFrames?: number }> = []
   let index = 0
@@ -200,12 +238,18 @@ export function foldJavaStackFrames<T extends StackFoldableLine>(
     if (run.length <= keep) { for (const entry of run) out.push({ ...entry }); index = end; continue }
     for (let i = 0; i < keep; i++) out.push({ ...run[i]! })
     const folded = run.slice(keep)
+    const foldedStartIndex = index + keep
+    if (expandedSegments.has(foldedStartIndex)) {
+      for (const entry of folded) out.push({ ...entry })
+      index = end
+      continue
+    }
     const foldedFrames = folded.length
     const includesAsync = folded.some(entry => entry.text.startsWith(ASYNC_STACK_TRACE_PREFIX))
     const text = includesAsync
       ? `\t<${foldedFrames} 个折叠帧(包括异步堆栈跟踪)>`
       : `\t<${foldedFrames} 个折叠帧>`
-    out.push({ ...folded[0]!, text, foldedFrames })
+    out.push({ ...folded[0]!, text, foldedFrames, foldedStartIndex })
     index = end
   }
   return out

@@ -243,8 +243,17 @@ test('写了 gap / justify-content 的类必须真的是 flex 容器（inline-bl
   // `<button>` 的 UA 默认是 inline-block，那两条声明静默失效，图标和文字挤在一起、gap 是 0。
   // 判定按**类**而不是按规则：CSS 常把 display 和 gap 拆成两条写（`.settings-tab` 就是），
   // 要求同一条规则里成对出现会误报一大片。
+  //
+  // 但**拿哪几个类**去登记必须是"这条规则真正作用的那一个复合选择器"（`subject`）：
+  // `.dropdown > .menu-item` 作用在 `.menu-item` 上，`.a .b { gap }` 作用在 `.b` 上 ——
+  // **祖先不是主体**。原来只按 `>+~` 切、不按后代空格切，于是
+  // `ModelMetadataSection.vue:186` 的 `.model-metadata .settings-fields .model-metadata-block { gap: … }`
+  // 把 `.model-metadata`（外层 wrapper，只有 margin-top）也算成"写了 gap 的类"，
+  // 报出一个不存在的缺陷（2026-10-08 lane visual-leftovers 实证：那个 gap 归 `.model-metadata-block`，
+  // 而它总是与 `.input-row` 同元素出现、由 `.agent-settings-body .input-row` 给 `display: grid`）。
+  // 只取最后一个复合选择器同时**收紧**另一个方向：祖先类不再被误记为 flex 容器。
   const rules = css => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .map(m => ({ selector: m[1].trim(), body: m[2], subject: m[1].trim().split(/\s*[>+~]\s*/).pop() }))
+    .map(m => ({ selector: m[1].trim(), body: m[2], subject: m[1].trim().split(/\s*[>+~]\s*/).pop().split(/\s+/).pop() }))
   const classesIn = subject => [...subject.matchAll(/\.([a-zA-Z][\w-]*)/g)].map(c => c[1])
   /** 类 -> 该类是否声明过 flex 容器 / 是否声明过 gap|justify-content。 */
   const flexed = new Map(), gapped = new Map()

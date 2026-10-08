@@ -64,6 +64,18 @@ public:
     // thread drains the queue in order. Input for a child that is gone is dropped.
     void write_line(const std::string& line);
     void stop() noexcept;
+    /**
+     * 优雅停止请求（上游 `KillableProcessHandler.destroyProcessGracefully()`）：给子进程自己的
+     * 控制台发 Ctrl+C，并给树里可见的顶层窗口发 WM_CLOSE。**只请求，不等待、不强杀** ——
+     * 退不退是对方的事，这正是上游的语义：第一次按 Stop 优雅、之后再按才强杀
+     * （`KillableProcessHandler.java:26-30` 的类注释）。
+     *
+     * 返回 true = 请求发出去了（进程可能还活着，`running()` 仍为真）；false = 这条宿主/这个进程上
+     * 没法优雅通知（本进程已挂控制台、或子进程既无控制台也无窗口）⇒ 调用方按上游同一分支直接强杀
+     * （`KillableProcessHandler.java:119-123`：`gracefulTerminationAttempted == false` 就回默认销毁）。
+     * 实现在 native/win_graceful_stop.cpp。
+     */
+    bool request_graceful_exit() noexcept;
     bool running() const { return running_.load(); }
     // OS process id of the live child, or 0 when nothing is running. The DAP
     // `runInTerminal` answer carries it so an adapter can attach to — or kill —

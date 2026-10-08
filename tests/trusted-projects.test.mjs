@@ -86,7 +86,13 @@ test('执行侧真的接上：宿主硬边界 + runActions 的每个执行入口
   const host = read('native/main.cpp')
   assert.match(host, /trusted::require_trusted\(general_settings\(\), current_root, "构建 \/ 运行"\)/, 'run.start 没有门')
   assert.match(host, /trusted::require_trusted\(general_settings\(\), current_root, "打开终端"\)/, 'term.create 没有门')
-  assert.match(host, /trusted::require_trusted\(general_settings\(\), current_root, "调试"\)/, '调试没有门')
+  // 调试那条通道 2026-10-08 拆进了 `native/dap_host.cpp`（main.cpp 贴 2000 行硬上限，见
+  // `Platforms` 的宿主面：dap_routes/dap_host 两个模块）。门在 `Host::require_client()`
+  // （dap_host.cpp 里那一行 `require_trusted(..., "调试")`），而所有需要客户端的 `dap.*`
+  // 路由都经 `route_client()` 走它 ⇒ 判据钉**两半**：门还在，且路由不许绕过它。
+  const dapHost = read('native/dap_host.cpp')
+  assert.match(dapHost, /trusted::require_trusted\(ports_\.general_settings\(\), root, "调试"\)/, '调试没有门')
+  assert.match(dapHost, /dap::Client& Host::route_client\(\) \{ return require_client\(\); \}/, '调试路由绕过了带门的 require_client()')
   assert.match(read('native/trusted_paths.cpp'), /UNTRUSTED_PROJECT/, 'native 门没有可辨识的错误码')
   const actions = read('src/runActions.ts')
   for (const action of ['构建 / 运行', '构建', '运行', '调试', '外部工具']) {

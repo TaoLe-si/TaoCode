@@ -70,6 +70,11 @@ export interface AgentModelInputFormat {
   supportsPdf: boolean
 }
 
+/** ZCode sparse model `outputFormat` property. */
+export interface AgentModelOutputFormat {
+  supportsText?: boolean
+}
+
 // 一个模型在设置页里可编辑的全部字段。真源：ProviderModelMetadata.ts:13-29 `ProviderModelDraftValues`
 // 逐字段对应 + ProviderModelMetadataDialog.tsx 的控件。其中 id/name/enabled 就是
 // `src/agentSettings.ts` 的 `AgentModelProvider.models` 的元素形状（那边直接采用本类型），
@@ -85,10 +90,18 @@ export interface AgentProviderModelConfig {
   contextWindow?: number
   /** ProviderModelMetadata.ts:16 → optionSpecs.maxOutputTokens.max（model-config.ts:39）。 */
   maxOutputTokens?: number
+  /** ZCode `optionSpecs.maxOutputTokens.map`：随 provider/model 元数据保留，并在请求期应用。 */
+  maxOutputTokensMap?: string
   /** ProviderModelMetadata.ts:17 `inputFormatValue`。 */
   inputFormat?: AgentModelInputFormat
+  /** shared/src/model-config.ts:83; retained when editing other model metadata. */
+  outputFormat?: AgentModelOutputFormat | null
   /** ProviderModelMetadata.ts:23（model-config.ts:76）。 */
   supportsJsonSchemaOutput?: boolean
+  /** 模型能力：工具调用（model-config.ts:79；空模型初值见 ProviderCardSections.tsx:338）。 */
+  supportsToolCall?: boolean
+  /** provider tool schema 需要 MFJS 形状时启用（model-config.ts:70；adapter/tool-transform.ts）。 */
+  requiresMfjsToolSchema?: boolean
   /** ProviderModelMetadata.ts:24（model-config.ts:77）。 */
   supportsNativeWebSearch?: boolean
   /** ProviderModelMetadata.ts:25（model-config.ts:78）。 */
@@ -624,7 +637,7 @@ export function resolveAgentModelMetadataInvalidMessage(field: AgentProviderMode
 
 // ProviderCardSections.tsx:495-539 / ProviderFormControls.tsx:262-268 的「配置完整性」判据：
 // contextWindow、inputFormat 五项、outputFormat.supportsText 都有值才算完整。本仓没有 outputFormat
-//（不落盘），因此只判前两组（差异如实记录）。
+// Output Format 没有编辑控件；仅按上游原样参与完整性判定。
 export function isAgentModelConfigComplete(model: AgentProviderModelConfig): boolean {
   const input = model.inputFormat
   return (
@@ -633,7 +646,8 @@ export function isAgentModelConfigComplete(model: AgentProviderModelConfig): boo
     input.supportsImage != null &&
     input.supportsVideo != null &&
     input.supportsAudio != null &&
-    input.supportsPdf != null
+    input.supportsPdf != null &&
+    model.outputFormat?.supportsText != null
   )
 }
 
@@ -678,6 +692,22 @@ export function validateAgentModelProvider(provider: AgentModelProviderRecord): 
       return
     }
     seen.add(id)
+    if (typeof model.maxOutputTokensMap === 'string' && model.maxOutputTokensMap.trim()) {
+      if (!Number.isInteger(model.maxOutputTokens) || (model.maxOutputTokens ?? 0) <= 0) {
+        issues.push({
+          path: ['models', String(index), 'maxOutputTokens'],
+          message: AGENT_MODEL_PROVIDER_MESSAGES.invalidMaxOutputTokens,
+        })
+      }
+      try {
+        compileModelOptionMap(model.maxOutputTokensMap, 'maxOutputTokens')
+      } catch (error) {
+        issues.push({
+          path: ['models', String(index), 'maxOutputTokensMap'],
+          message: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
   })
   return issues
 }
@@ -772,6 +802,7 @@ export function createEmptyAgentProviderModel(): AgentProviderModelConfig {
     id: '',
     name: '',
     enabled: true,
+    supportsToolCall: true,
     // 空 ID 尚未解析模型配置，硬编码档位会被误认为智能推荐（:336 注释）。
     inputFormat: { ...AGENT_DEFAULT_MODEL_INPUT_FORMAT },
   }

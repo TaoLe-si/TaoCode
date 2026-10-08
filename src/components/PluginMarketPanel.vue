@@ -3,9 +3,12 @@
 // 两个标签页在 `PluginManagerConfigurable` 里并排）。规则全在 `src/pluginMarket.ts`（纯函数 + 单测），
 // 这里只做：读仓库（工作区本地目录）、画列表、把「安装/更新」落到既有 `plugin.*` 通道。
 //
-// 数据来源如实写在界面上：清单 `repository.json` 走 `file.read`（工作区相对），包走
-// `plugin.install`（工作区根拼绝对路径）；**远程仓库**没有通道（CSP `connect-src 'self'` +
-// 宿主 Method 清单无网络），所以这里没有"在线搜索"这种点不动的假入口。
+// 数据来源如实写在界面上：本地清单 `repository.json` 走 `file.read`（工作区相对），包走
+// `plugin.install`（工作区根拼绝对路径）；**远程仓库的清单**走宿主 `http.get`
+// （`src/pluginMarketRemote.ts` → `native/http_client.cpp` 的 WinHTTP，`index.html` 的 CSP 也
+// 为市场主机放开了 `connect-src`），取到的是只读条目 —— **远程安装仍没有落点**（要先把包下载进
+// 工作区，且缺 `PluginSignatureVerifier.kt` 那套验签），所以远程条目的安装按钮一律禁用并写明原因，
+// 而不是"在线搜索"那种点不动的假入口。两档来源的合并与可安装判定见 `src/pluginMarketSources.ts`。
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { Blocks, Download, Loader2, PackageSearch, RefreshCw, Search, Star, X } from 'lucide-vue-next'
 import { isDesktop, request, type PluginList } from '../bridge'
@@ -61,6 +64,18 @@ import {
 // 签名判定与 bundled 登记（`PluginSignatureVerifier.kt` / `PluginUiModel.isBundled` 的可移植一半）：
 // 本仓没有验签通道 ⇒ 判定如实返回「未校验」，界面照实显示而不是画一个点不动的按钮。
 import { EMPTY_BUNDLED_REGISTRY, SIGNATURE_RESULT_LABELS, declaredSignatureOf, isBundledPlugin, verifyPluginSignature } from '../pluginSignature'
+// 两个市场来源的合并（工作区仓库 + 远程仓库）与「能不能装」判定：纯函数，`src/pluginMarketSources.ts`。
+import {
+  MARKETPLACE_ORIGIN_LABELS,
+  REMOTE_INSTALL_BLOCKED,
+  combineMarketplaceEntries,
+  marketplaceOriginIndex,
+  marketplaceOriginSummary,
+  type MarketplaceOrigin,
+} from '../pluginMarketSources'
+// 远程仓库的**清单取数**（`MarketplaceRequests.searchPlugins` 的可移植一半，见文件头）：
+// 走宿主 `http.get`（浏览器预览档会被 bridge 如实拒绝）。
+import { loadRemoteMarketplace, type RemoteMarketplaceResult } from '../pluginMarketRemote'
 
 const props = defineProps<{
   /** 已安装插件（父组件持有；安装/更新后由父组件刷新）。 */
@@ -101,6 +116,15 @@ const sort = ref<MarketplaceSort>('relevance')
 const loading = ref(false)
 const installing = ref('')
 const loadResult = ref<MarketplaceLoadResult | null>(null)
+// 远程仓库那一档：地址存 localStorage（与更新检查的时间戳同前缀），清单取数走宿主 `http.get`。
+const REMOTE_REPO_KEY = 'taocode.pluginMarketRemoteRepository'
+function storedRemoteRepo(): string {
+  try { return localStorage.getItem(REMOTE_REPO_KEY) ?? '' } catch { return '' }
+}
+const remoteRepo = ref(storedRemoteRepo())
+/** 取到的远程清单（null = 没填地址 / 取失败 —— 失败原因在 `failure`）。 */
+const remoteResult = ref<RemoteMarketplaceResult | null>(null)
+const remoteBusy = ref(false)
 const note = ref('')
 const failure = ref('')
 // 工作区根（`app.state.lastProject` 就是当前打开的工程根；`workspace.close` 会清空）。
@@ -117,7 +141,27 @@ const effectiveSortModel = computed<MarketplaceSort>({
   set: (value: MarketplaceSort) => { sort.value = value },
 })
 
-const catalog = computed(() => loadResult.value?.entries ?? [])
+// 两个来源合成一份清单：本地在前、远程独有的条目接在后面（同 id 本地优先，见 `pluginMarketSources.ts`）。
+const sourcedCatalog = computed(() => combineMarketplaceEntries(loadResult.value?.entries ?? [], remoteResult.value?.plugins ?? []))
+/** 画出来的清单（含只读的远程条目）。 */
+const catalog = computed(() => sourcedCatalog.value.map(item => item.entry))
+/** 条目 id → 来源那一格（徽章与安装按钮按它查）。 */
+const originIndex = computed(() => marketplaceOriginIndex(sourcedCatalog.value))
+/**
+ * 能真的装 / 更新的那一份（= 工作区仓库的条目）：上报给已安装页的 `/outdated` 与更新检查的只有它 ——
+ * 远程条目装不了（`REMOTE_INSTALL_BLOCKED`），喂进去只会让「可更新到 vX」指到一个动不了的版本。
+ */
+const installableCatalog = computed(() => sourcedCatalog.value.filter(item => item.installable).map(item => item.entry))
+const installableIds = computed(() => new Set(installableCatalog.value.map(entry => entry.id)))
+/** 条目的来源（`sourcedCatalog` 里没有的 id —— 理论上不会有 —— 按本地算，宁可不误标）。 */
+function originOf(entry: MarketplacePlugin): MarketplaceOrigin {
+  return originIndex.value.get(entry.id)?.origin ?? 'local'
+}
+function isRemoteEntry(entry: MarketplacePlugin): boolean {
+  return originOf(entry) === 'remote'
+}
+/** 来源行：`工作区仓库 3 条 · 远程仓库 2 条`。 */
+const originSummary = computed(() => marketplaceOriginSummary(sourcedCatalog.value))
 const categories = computed(() => marketplaceCategories(catalog.value))
 /** 范围按钮的顺序（全部 / 可更新 / 已安装）。 */
 const scopes = Object.keys(MARKETPLACE_SCOPE_LABELS) as Array<MarketplaceQuery['scope']>

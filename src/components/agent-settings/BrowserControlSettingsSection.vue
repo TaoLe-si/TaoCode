@@ -34,10 +34,13 @@ const availability = computed(() => browserControlAvailability(platformProbe(), 
   // 于是 `isRemoteWorkspaceIdentity` 只在真拿到 `remote:...` 形态时为真。
   workspaceIdentity: props.workspacePath ?? null,
 }))
+
+/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
+const SECTION_DESCRIPTION = '由官方 Browser Use 插件决定；内置浏览器数据的清理在「设置 › 常规 › 浏览器」里。'
 </script>
 
 <template>
-  <AgentSettingsSectionShell>
+  <AgentSettingsSectionShell title="浏览器控制" :description="SECTION_DESCRIPTION">
     <section class="settings-box">
       <h3 class="settings-box-title">可用性</h3>
       <p class="settings-status" role="status">{{ availability.reason }}</p>

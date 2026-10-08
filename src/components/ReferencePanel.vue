@@ -247,7 +247,7 @@ async function exportToFile() {
 .ref-row:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .ref-note { margin: 0; padding: 2px var(--space-3); color: var(--muted); font-size: 11px; }
 .ref-row .ref-item { padding-left: 0; }
-.ref-caret { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0; border: 0; padding: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.ref-caret { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0; border: 0; padding: 0; background: transparent; color: var(--muted); cursor: pointer; transition: color var(--dur-1) var(--ease); }
 .ref-caret:hover { color: var(--bright); }
 .ref-caret-empty { cursor: default; }
 </style>

@@ -857,7 +857,7 @@ onBeforeUnmount(() => {
 .terminal-tabs { align-self: stretch; flex: 1; min-width: 0; display: flex; gap: 0; overflow-x: auto; }
 .terminal-tab { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; min-height: calc(var(--ctrl-height-sm) + var(--space-1)); margin: auto 0; padding: var(--space-1) var(--space-2); border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--secondary); font: 12px var(--font-mono); transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
 .terminal-tab:hover { background: var(--hover); color: var(--bright); }
-.terminal-tab.selected { border-bottom-color: var(--accent); color: var(--bright); }
+.terminal-tab.selected { border-bottom-color: var(--accent); color: var(--bright); transition: background-color var(--dur-1) var(--ease); }
 .terminal-tab.selected:hover { background: var(--selected); }
 .terminal-tab.exited { opacity: 0.75; }
 .terminal-exit { color: var(--muted); font-size: 10px; }

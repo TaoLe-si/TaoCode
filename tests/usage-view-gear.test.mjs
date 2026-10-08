@@ -13,9 +13,10 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  USAGE_OPEN_IN_NEW_TAB_TITLE, USAGE_SORT_TITLE, USAGE_VIEW_OPTIONS_TITLE,
-  closeAllReferences, finishReferences, references, referencesInNewTab, referencesSortAlphabetically,
-  sortUsages, startReferences,
+  USAGE_NAVIGATE_ON_SINGLE_CLICK_TITLE, USAGE_OPEN_IN_NEW_TAB_TITLE, USAGE_SORT_TITLE,
+  USAGE_VIEW_OPTIONS_TITLE,
+  closeAllReferences, finishReferences, references, referencesInNewTab, referencesNavigateOnSingleClick,
+  referencesSortAlphabetically, sortUsages, startReferences,
 } from '../src/referenceContents.ts'
 import { isUsageView, usageViewGearRows } from '../src/usageViewGear.ts'
 import { TOOL_WINDOW_GEAR_SPEC, toolWindowGearRows } from '../src/menus/toolWindowGear.ts'
@@ -50,7 +51,7 @@ test('「按字母顺序排列成员」真的改面板里的顺序', () => {
   }
 })
 
-test('齿轮组只在用法视图上出现，两条成员都是真的开关', () => {
+test('齿轮组只在用法视图上出现，三条成员都是真的开关', () => {
   assert.equal(isUsageView('references'), true)
   for (const other of ['output', 'run', 'problems', 'terminal']) assert.equal(isUsageView(other), false, `${other} 不是用法视图`)
   assert.deepEqual(usageViewGearRows('output'), {}, '不是用法视图 ⇒ 整组不给（不留点了没用的行）')
@@ -59,32 +60,41 @@ test('齿轮组只在用法视图上出现，两条成员都是真的开关', ()
   const group = rows['usage.viewOptions']
   assert.ok(group, '用法视图要有「视图选项」这一组')
   assert.equal(group.title, USAGE_VIEW_OPTIONS_TITLE, 'group.view.options = 视图选项')
-  assert.deepEqual(group.children.map(child => child.id), ['usage.sortAlphabetically', 'usage.openInNewTab'],
-    '顺序照 :114-116 的 addAll（排序在"新标签页"之前）')
-  assert.deepEqual(group.children.map(child => child.title), [USAGE_SORT_TITLE, USAGE_OPEN_IN_NEW_TAB_TITLE],
-    '文案取随 IDE 发货的语言包：按字母顺序排列成员 / 在新标签页中打开结果')
+  assert.deepEqual(group.children.map(child => child.id),
+    ['usage.navigateOnSingleClick', 'usage.sortAlphabetically', 'usage.openInNewTab'],
+    '顺序照 :114-116 的 addAll（一键导航在最前，排序在"新标签页"之前）')
+  assert.deepEqual(group.children.map(child => child.title),
+    [USAGE_NAVIGATE_ON_SINGLE_CLICK_TITLE, USAGE_SORT_TITLE, USAGE_OPEN_IN_NEW_TAB_TITLE],
+    '文案取随 IDE 发货的语言包：单击导航 / 按字母顺序排列成员 / 在新标签页中打开结果')
 
-  const sortRow = group.children[0]
-  const before = referencesSortAlphabetically.value
-  sortRow.run()
-  assert.equal(referencesSortAlphabetically.value, !before, '点一下要真的翻状态')
-  assert.equal(sortRow.checked(), !before, '勾选态跟着同一份状态')
-  sortRow.run()
-  assert.equal(referencesSortAlphabetically.value, before, '再点一下回来')
-
-  const newTabRow = group.children[1]
-  const wasNewTab = referencesInNewTab.value
-  newTabRow.run()
-  assert.equal(referencesInNewTab.value, !wasNewTab, '与 Window 菜单那一行是**同一份**状态')
-  newTabRow.run()
+  const toggleProbe = child => {
+    const before = child.checked()
+    child.run()
+    assert.equal(child.checked(), !before, `${child.id} 点一下要真的翻状态`)
+    child.run()
+    assert.equal(child.checked(), before, `${child.id} 再点一下回来`)
+  }
+  // 三条都是开关：勾选态与状态、点击与翻转走同一条链（上游三条都是 `DumbAwareToggleAction`）。
+  for (const child of group.children) toggleProbe(child)
+  assert.equal(group.children[0].checked(), referencesNavigateOnSingleClick.value, '勾选态跟着单击导航偏好')
+  assert.equal(group.children[1].checked(), referencesSortAlphabetically.value, '勾选态跟着排序偏好')
+  assert.equal(group.children[2].checked(), referencesInNewTab.value, '与 Window 菜单那一行是**同一份**状态')
 })
 
-test('「一键导航」没接 —— 它在登记表里，不是被忘掉的', () => {
+test('「一键导航」已接 —— 单击偏好由结果选择模型消费，来源边界登记在册', () => {
   const todo = read('docs/source-todo.md')
   const section = todo.split('## 10.')[1] ?? ''
-  assert.match(section, /一键导航|Navigate with Single Click/, '要逐条登记理由')
-  assert.match(section, /选择模型/, '理由：本仓结果行单击即导航，缺选择态')
-  assert.ok(!read('src/usageViewGear.ts').includes('autoscroll'), '不许在代码里留一个点了没反应的勾选项')
+  assert.match(section, /一键导航|Navigate with Single Click/, '要逐条登记')
+  assert.match(section, /结果选择态|选择模型/, '理由：本仓结果行有选择态，单击导航偏好由它消费')
+  assert.match(section, /AutoScrollToSourceHandler/, '来源边界（上游 UsageView 没装单击 handler）要留痕')
+  // 真状态、真消费链：偏好可持久化（localStorage 键），选择模型读它（面板 prop 由宿主给）。
+  const contents = read('src/referenceContents.ts')
+  assert.match(contents, /referencesNavigateOnSingleClick = ref\(readStoredFlag\(/, '偏好是有存档的 ref')
+  assert.match(contents, /persistFlag\(NAVIGATE_ON_SINGLE_CLICK_KEY/, '翻转要写回存档')
+  assert.match(read('src/components/ReferencePanel.vue'), /if \(props\.navigateOnSingleClick\) openUsage\(row\)/,
+    '选择模型消费：开着时选中即导航')
+  assert.match(read('src/components/ToolWindowView.vue'), /:navigate-on-single-click="referencesNavigateOnSingleClickEnabled\(\)"/,
+    '宿主把偏好传给面板（不是死值）')
 })
 
 test('additionalGearActions 排在齿轮组最前，且只在挂内容的窗口上给', () => {

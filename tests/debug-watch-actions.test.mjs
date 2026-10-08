@@ -103,9 +103,25 @@ test('接线：面板挂 DebugWatchesPane，四个动作都有按钮', () => {
   assert.match(panel, /@move="\$event => moveWatch\(\$event\.text, \$event\.direction\)"/)
   assert.match(panel, /@remove-all="removeAllWatchEntries"/)
   assert.match(panel, /@toggle-pause="toggleWatchPauseEntry"/)
+  // 四个动作的**上游类名**钉在规则层（`src/debugWatchActions.ts:1-14` 的模块头）：界面文案是本仓的
+  // 中文（与工具窗口其余按钮同一套 UI 语言），英文动作名不冒充可见文案 —— 两处分开核。
+  const rules = read('src/debugWatchActions.ts')
+  for (const upstream of [/XMoveWatchUp/, /XMoveWatchDown/, /XRemoveAllWatchesAction/, /XPauseWatchAction/]) {
+    assert.match(rules, upstream, `${upstream.source} 的上游依据不在规则层`)
+  }
   const pane = read('src/components/DebugWatchesPane.vue')
-  assert.match(pane, /Move Watch Up/)
-  assert.match(pane, /Move Watch Down/)
-  assert.match(pane, /Remove All Watches/)
+  // 四个按钮各接规则层的谓词 + 自己的事件（两格共用一个处理器 = 上移/下移会串味）。
+  assert.match(pane, /:disabled="!canMoveWatchUp\(watches, watch\.text\)"/)
+  assert.match(pane, /emit\('move', \{ text: watch\.text, direction: 'up' \}\)/)
+  assert.match(pane, /:disabled="!canMoveWatchDown\(watches, watch\.text\)"/)
+  assert.match(pane, /emit\('move', \{ text: watch\.text, direction: 'down' \}\)/)
+  assert.match(pane, /:disabled="!canRemoveAllWatches\(watches\)"/)
+  assert.match(pane, /emit\('removeAll'\)/)
+  assert.match(pane, /:disabled="!canPauseWatch\(watch\)"/)
+  assert.match(pane, /emit\('togglePause', watch\.text\)/)
   assert.match(pane, /pauseWatchActionLabel/)
+  // 声明也要在（只写模板不声明 emit ⇒ Vue 会把事件当原生监听器挂到根元素上，点了没反应）。
+  assert.match(pane, /move: \[payload: \{ text: string; direction: 'up' \| 'down' \}\]/)
+  assert.match(pane, /removeAll: \[\]/)
+  assert.match(pane, /togglePause: \[text: string\]/)
 })

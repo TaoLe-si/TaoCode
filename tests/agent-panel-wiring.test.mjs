@@ -18,7 +18,8 @@ const agentSettings = readFileSync(new URL('../src/components/AgentSettingsPage.
 const sessionPop = readFileSync(new URL('../src/components/AgentSessionPop.vue', import.meta.url), 'utf8')
 
 test('面板消费会话库：建库、每轮存档、切场把转写装回活会话', () => {
-  assert.match(panel, /createAgentSessionStore\(\)/, '面板要真的建一份会话库')
+  // 建库现在带工作区根（`createAgentSessionStore(undefined, undefined, projectRoot)`，「自动读取当前项目」就是它）
+  assert.match(panel, /createAgentSessionStore\(/, '面板要真的建一份会话库')
   assert.match(panel, /saveTranscript\(/)
   assert.match(panel, /sessions\.open\(id\)/, '切场要走会话库的 open')
   assert.match(panel, /session\(\)\.restore\(sessions\.activeEntries\(\)\)/,
@@ -26,8 +27,12 @@ test('面板消费会话库：建库、每轮存档、切场把转写装回活�
   assert.match(panel, /sessions\.remove\(id\)/, '删场要走会话库的 remove')
   // 阳性对照：下面这条 doesNotMatch 只有在本文件真的含 `<script setup` 时才有意义。
   assert.match(panel, /<script setup lang="ts">/, '阳性对照：本文件确实是个 SFC')
-  assert.doesNotMatch(panel, /createAgentSessionStore[\s\S]*?createAgentSessionStore[\s\S]*?createAgentSessionStore/,
-    '别在面板里建三份库（每份一份 localStorage 副本，彼此看不见）')
+  // 数**代码行**里的调用点（注释里提到这个名字不算）——上限 2：初始一份 + 换工作区一份。
+  const storeCalls = panel.split('\n')
+    .filter(line => !line.trim().startsWith('//'))
+    .join('\n').match(/createAgentSessionStore\(/g) ?? []
+  assert.ok(storeCalls.length <= 2,
+    `面板里建了 ${storeCalls.length} 份库：初始一份 + 换工作区一份就是上限（每份一份 localStorage 副本，彼此看不见）`)
 })
 
 test('面板头部有会话按钮与弹层（用户看得见的部分，不能只在 script 里接线）', () => {
@@ -45,7 +50,10 @@ test('斜杠命令：send 拦 `/` 走命令表，认不出来的原样按消息�
   // 阳性对照：runCommand 必须在「认不出命令时返回 false」——那条是「不吞用户输入」的实现。
   assert.match(panel, /if \(!parsed\) return false\s*\n\s*const command = AGENT_COMMANDS\.find/,
     '认不出来的命令要 return false（继续按普通文本发出）')
-  assert.match(panel, /placeholder="[^"]*\/[^"]*面板命令/, '输入框的提示要说清 `/` 开头是面板命令')
+  // 提示文案来自 copy 表（模板里是 `:placeholder="composerPlaceholder"`）——判据读那份真源：
+  const composerCopy = readFileSync(new URL('../src/agentComposerLayout.ts', import.meta.url), 'utf8')
+  assert.match(composerCopy, /chat\.placeholder\.newTask'[^}]*\/[^}]*命令/, '输入框的提示要说清 / 开头是命令')
+  assert.match(panel, /:placeholder="composerPlaceholder"/, '输入框要用那份提示，不在模板里另写一份')
 })
 
 test('斜杠命令的五条真命令都有派发出口（表里有的，面板里不许漏）', () => {

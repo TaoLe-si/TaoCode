@@ -3,7 +3,7 @@
 // 成员先用 any（参数逆变 + 内部类型未提取），随批次收紧。
 import type { MenuRow } from './types'
 import { createInspectCodeInCodeMenuRows, type AnalyzeGroupContext } from './analyzeMenu.ts'
-import { createSaveAsTemplateHost, type SaveAsTemplateHostDeps } from '../saveAsTemplateHost'
+import { createSaveAsTemplateHost, type SaveAsTemplateHostDeps } from '../saveAsTemplateHost.ts'
 // 「比较对象…」的标题常量（上游 `action.compare.with.text`，中文包取值）。
 import { COMPARE_WITH_TEXT } from '../compareFiles.ts'
 // 键位显示的两个现成真源：`foldingLevelChords` 是「展开到级别」那五条 chord 的**权威表**

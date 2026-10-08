@@ -5,7 +5,7 @@
 // 个会把相对 TS/Vue 依赖也转译执行的 require 桩装起来，从而在 SSR 下渲染真实组件。
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, resolve } from 'node:path'
+import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse as parseSfc, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
@@ -42,6 +42,10 @@ function evaluate(source, filename, loader) {
   return exports
 }
 
+/** 会被求值的代码扩展名。其余（`.svg`/`.png`/`.css`…）是资源，按打包器语义给 URL 字符串。 */
+const CODE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']
+const isCodeModule = candidate => CODE_EXTENSIONS.some(extension => candidate.endsWith(extension))
+
 /** 真实的相对依赖（.ts/.vue）会被转译后求值；第三方 bare 模块与子组件一律替换成占位组件。 */
 function loader(file) {
   return name => {
@@ -53,6 +57,12 @@ function loader(file) {
       let source
       try { source = readFileSync(candidate, 'utf8') } catch { continue }
       if (candidate.endsWith('.vue')) return { default: loadSfc(candidate).component }
+      // 资源 import（`import logo from '../assets/x.svg'`）在打包器里得到的是一个 URL 字符串。
+      // 早先这里把 SVG 当 .ts 求值 ⇒ `new Function` 在 `fill="url(#…)"` 上报语法错，
+      // 整条 import 链（ToolWindowView → AgentPanel）连同测试文件一起炸。
+      if (!isCodeModule(candidate)) {
+        return { default: `/${relative(root, candidate).split('\\').join('/')}` }
+      }
       // 同一个 .ts 被多个组件 import 时只转译并求值一次（求值有副作用：模块级 ref / 常量表）。
       if (!modules.has(candidate)) modules.set(candidate, evaluate(source, candidate, loader(candidate)))
       return modules.get(candidate)

@@ -190,9 +190,9 @@ const unconsumedFields = computed(() => EXTERNAL_TOOL_FIELDS.filter(field => !fi
         >{{ macro.name }}</button>
       </div>
       <div class="tools-row-actions">
-        <button class="icon-button" type="button" :disabled="busy || index === 0" aria-label="上移这条工具" @click="move(index, -1)"><ArrowUp :size="iconSize.dense" /></button>
-        <button class="icon-button" type="button" :disabled="busy || index === rows.length - 1" aria-label="下移这条工具" @click="move(index, 1)"><ArrowDown :size="iconSize.dense" /></button>
-        <button class="icon-button" type="button" :disabled="busy" aria-label="删除这条工具" @click="removeAt(index)"><Trash2 :size="iconSize.dense" /></button>
+        <button class="icon-button" type="button" :disabled="busy || index === 0" aria-label="上移这条工具" title="上移这条工具" @click="move(index, -1)"><ArrowUp :size="iconSize.dense" /></button>
+        <button class="icon-button" type="button" :disabled="busy || index === rows.length - 1" aria-label="下移这条工具" title="下移这条工具" @click="move(index, 1)"><ArrowDown :size="iconSize.dense" /></button>
+        <button class="icon-button" type="button" :disabled="busy" aria-label="删除这条工具" title="删除这条工具" @click="removeAt(index)"><Trash2 :size="iconSize.dense" /></button>
       </div>
       <p v-if="row.validation.problems.length" class="tools-error" role="alert">{{ row.validation.problems.map(problem => problem.message).join(' ') }}</p>
       <p v-else-if="row.validation.unknownMacros.length" class="tools-warn" role="status">未知宏会按原文传给命令：{{ row.validation.unknownMacros.map(name => `$${name}$`).join('、') }}</p>
@@ -234,7 +234,7 @@ const unconsumedFields = computed(() => EXTERNAL_TOOL_FIELDS.filter(field => !fi
       <ul v-if="selectedRecord.outputFilters.length">
         <li v-for="(filter, at) in selectedRecord.outputFilters" :key="`${filter}-${at}`">
           <code :class="{ 'tool-filter-bad': outputFiltersMissingFilePathMacro([filter]).length }">{{ filter }}</code>
-          <button class="icon-button" type="button" :disabled="busy" :aria-label="`删除第 ${at + 1} 条过滤式`" @click="removeFilter(at)"><Trash2 :size="iconSize.dense" /></button>
+          <button class="icon-button" type="button" :disabled="busy" :aria-label="`删除第 ${at + 1} 条过滤式`" :title="`删除第 ${at + 1} 条过滤式`" @click="removeFilter(at)"><Trash2 :size="iconSize.dense" /></button>
         </li>
       </ul>
       <p v-else class="tool-hint">还没有过滤式。</p>

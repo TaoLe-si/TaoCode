@@ -118,18 +118,20 @@ function setPreferCommitDate(value: boolean) {
   try { localStorage.setItem('taocode.vcs.log.preferCommitDate', String(value)) } catch { /* Session-only. */ }
 }
 // 「视图选项」的偏好按上游作用域分开：`preferCommitDate` 在应用级单独存；其余本窗口排布按仓库根存。
-// 上游把其余值再分两层：`compactReferences` / `alignLabels` / `showChangesFromParents` / `diffPreviewAtBottom`
-// 在应用级 `VcsLogApplicationSettings.kt`，而 `showLongEdges` 在日志 UI 级 `VcsLogUiPropertiesImpl.kt:121-122`。
+// 上游把其余值再分两层：紧凑引用 / 左侧引用 / 父项更改 / 预览位置在应用级 `VcsLogApplicationSettings.kt`；
+// 长边在日志 UI 级 `VcsLogUiPropertiesImpl.kt:121-122`，highlighter 状态同在日志 UI 的 `State.highlighters`
+// （缺失项默认 true，`VcsLogUiPropertiesImpl.kt:30`）。
 // **订正留痕**：这一段原写"这些值都在 `VcsLogApplicationSettings.kt:106-122`"—— 长边那一条不在那份 State 里，
-// 收尾复核按两个文件逐行打开后分开写。本仓五档一律按仓库根存（作用域与上游不同一条，已登记在归属报告）。
+// 收尾复核按两个文件逐行打开后分开写。本仓六档一律按仓库根存（作用域与上游不同一条，已登记在归属报告）。
 // 缺省值抄 `LOG_PRESENTATION_DEFAULTS`；旧存档缺键 = 用缺省，**不按字段数量判损坏**（这一族本来就是可缺的视图偏好）。
 const viewPrefs = ref<{ compactReferences: boolean; showLongEdges: boolean; alignLabels: boolean;
-  diffPreviewAtBottom: boolean; showChangesFromParents: boolean }>({
+  diffPreviewAtBottom: boolean; showChangesFromParents: boolean; highlightMergeCommits: boolean }>({
   compactReferences: LOG_PRESENTATION_DEFAULTS.compactReferences,
   showLongEdges: LOG_PRESENTATION_DEFAULTS.showLongEdges,
   alignLabels: LOG_PRESENTATION_DEFAULTS.alignLabels,
   diffPreviewAtBottom: LOG_PRESENTATION_DEFAULTS.diffPreviewAtBottom,
   showChangesFromParents: LOG_PRESENTATION_DEFAULTS.showChangesFromParents,
+  highlightMergeCommits: LOG_PRESENTATION_DEFAULTS.highlightMergeCommits,
 })
 function viewPrefKey(id: string) { return `taocode.vcs.log.${encodeURIComponent(props.root)}.${id}` }
 function readViewPref(id: string, fallback: boolean): boolean {
@@ -138,7 +140,7 @@ function readViewPref(id: string, fallback: boolean): boolean {
     return raw === null ? fallback : raw === 'true'
   } catch { return fallback }
 }
-const viewPrefKeys = ['compactReferences', 'showLongEdges', 'alignLabels', 'diffPreviewAtBottom', 'showChangesFromParents'] as const
+const viewPrefKeys = ['compactReferences', 'showLongEdges', 'alignLabels', 'diffPreviewAtBottom', 'showChangesFromParents', 'highlightMergeCommits'] as const
 // 「收起线性分支」的状态 = **收起着的那几条链**（不是一句布尔）：菜单里那两条按钮收全部/展全部
 // （上游 `Vcs.Log.CollapseAll` / `Vcs.Log.ExpandAll`），在图形上点一次只动那一条
 // （上游 `GraphCommitCellController.java:58-64` 的 MOUSE_CLICK ⇒ `LINEAR_COLLAPSE_CASE` / `LINEAR_EXPAND_CASE`）。
@@ -171,7 +173,8 @@ const presentationRows = computed(() => logPresentationModel(
     setShowLongEdges: value => setViewPref('showLongEdges', value),
     setAlignLabels: value => setViewPref('alignLabels', value),
     setDiffPreviewAtBottom: value => setViewPref('diffPreviewAtBottom', value),
-    setShowChangesFromParents: value => setViewPref('showChangesFromParents', value) }))
+    setShowChangesFromParents: value => setViewPref('showChangesFromParents', value),
+    setHighlightMergeCommits: value => setViewPref('highlightMergeCommits', value) }))
 function pickPresentation(row: { run?: () => void }) { row.run?.() }
 watch([() => props.root, selected, changes], () => { previewChange.value = null }, { flush: 'sync' })
 const table = ref<InstanceType<typeof VcsLogTable>>()
@@ -266,7 +269,7 @@ async function jump(hash: string) {
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <p v-if="navigating" class="note" role="status">正在定位提交…</p>
         <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :date-format="dateFormat" :prefer-commit-date="preferCommitDate" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden" :current-branch="currentBranch" :branch-track-infos="branchTrackInfos" :is-on-branch="isOnBranch"
-          :compact-references="viewPrefs.compactReferences" :align-labels="viewPrefs.alignLabels" :show-long-edges="viewPrefs.showLongEdges" :collapsed="collapsedSpans"
+          :compact-references="viewPrefs.compactReferences" :align-labels="viewPrefs.alignLabels" :show-long-edges="viewPrefs.showLongEdges" :highlight-merge-commits="viewPrefs.highlightMergeCommits" :collapsed="collapsedSpans"
           @select="select" @copy="copyRowText" @copy-revision="copyHash" @fold="foldFragment" @more="more" @menu="openMenu" @ref-menu="openRefMenu">
           <div v-if="loading" class="empty" role="status">加载中…</div>
           <!-- `vcs.log.no.commits.matching.status` + `vcs.log.reset.filters.status.action`

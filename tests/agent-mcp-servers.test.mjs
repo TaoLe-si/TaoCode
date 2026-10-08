@@ -41,6 +41,9 @@ function httpServer(overrides = {}) {
     url: 'https://mcp.example.com/mcp',
     env: {},
     headers: {},
+    // 条目形状里 `cwd` 是必带字段（缺项归一成空串）—— 这里补齐，好让下面的「读回逐字段相同」
+    // 仍然对着**完整形状**比，而不是只比一多半字段。
+    cwd: '',
     timeoutMs: 0,
     protocolVersion: '',
     scope: 'user',

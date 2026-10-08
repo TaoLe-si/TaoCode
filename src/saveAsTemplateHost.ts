@@ -1,4 +1,4 @@
-import { buildTemplateDraft, saveAsTemplateAvailable, suggestAbbreviation } from './saveAsTemplate'
+import { buildTemplateDraft, saveAsTemplateAvailable, suggestAbbreviation } from './saveAsTemplate.ts'
 import type { TemplateSettings } from './templates'
 
 export interface SaveAsTemplateHostDeps {

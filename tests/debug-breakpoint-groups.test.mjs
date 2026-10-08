@@ -249,13 +249,30 @@ test('「新建…」的输入是三态，不是两态：取消 = 上游的 retu
 
 test('接线：两处「新建…」都走同一个取消判据（原来组节点那条把取消当成搬到无组）', () => {
   const view = readFileSync('src/components/BreakpointsDialog.vue', 'utf8')
-  const calls = view.match(/resolveNewGroupName\(window\.prompt\('新建组名称', ''\)\)/g) ?? []
-  assert.equal(calls.length, 2, '逐条的「所在组」与组节点的「移至组」两处都要问同一个判据')
-  const returns = view.match(/if \(name === null\) return/g) ?? []
-  assert.equal(returns.length, 2, '拿到取消后必须当场 return（上游 `:547-549` 那两行）')
-  // 旧形状：把取消折成空串（`?? ''`）= 按一次 Esc 整组搬去「无组」；`?.trim()` 后 `if (!name)` = 空名按确定也不动。
-  assert.doesNotMatch(view, /window\.prompt\([^)]*\)\?\.trim\(\)/, '又回到自己 trim ⇒ 取消与空名糊成一团')
-  assert.doesNotMatch(view, /window\.prompt\([^)]*\)\?\.trim\(\) \?\? ''/, '组节点那条又开始把取消当空名')
+  // 2026-10-08 起两处入口（逐条的「所在组」/ 组节点的「移至组」）共用**一个**输入对话框与一个提交口
+  // （`openNewGroup({ kind })` → `submitNewGroup()`）⇒「同一个取消判据」是构造上成立的：
+  // 取消判据只许有**一处**调用（两处各问一次就是两条会漂的口径）。
+  const calls = view.match(/resolveNewGroupName\(/g) ?? []
+  assert.equal(calls.length, 1, '取消判据必须只有一处（上游只有 BreakpointsDialog.java:547-549 那两行）')
+  assert.match(view, /const name = resolveNewGroupName\(newGroupName\.value\)/, '判据读的是这一个输入框的值')
+  const entries = view.match(/openNewGroup\(\{ kind: 'item', ref \}\)|openNewGroup\(\{ kind: 'group', node \}\)/g) ?? []
+  assert.equal(entries.length, 2, '逐条的「所在组」与组节点的「移至组」两处都要进同一个提交口')
+  const branches = view.match(/if \(value === NEW_GROUP\) \{/g) ?? []
+  assert.equal(branches.length, 2, '两个「新建…」选项分别是两条 select 的分支（少一条 = 那一处没入口）')
+  assert.match(view, /@change="moveToGroup\(row\.item\.id, \(\$event\.target as HTMLSelectElement\)\.value\)"/,
+    '逐条那条 select 仍是「所在组」')
+  assert.match(view, /@change="moveWholeGroup\(row\.node, \(\$event\.target as HTMLSelectElement\)\.value\)"/,
+    '组节点那条 select 仍是整组「移至组」')
+  assert.match(view, /if \(name === null\) return/, '拿到取消后必须当场 return（上游 `:547-549` 那两行）')
+  // 取消判据必须早于**任何写回**：折完名先 closeNewGroup（焦点回原处），但 return 要排在
+  // `assignBreakpointsToGroup` / `moveGroupContents` 之前 —— 否则按一次 Esc 就动数据。
+  const submit = view.slice(view.indexOf('function submitNewGroup'), view.indexOf('function resend'))
+  const cancel = submit.indexOf('if (name === null) return')
+  const firstWrite = submit.indexOf('assignBreakpointsToGroup(')
+  assert.ok(cancel > 0 && firstWrite > cancel, '取消判据排在了写回之后（Esc 会动手）')
+  // 旧形状：把取消折成空串（`?? ''`）= 按一次 Esc 整组搬去「无组」；自己 trim 后 `if (!name)` = 空名按确定也不动。
+  assert.doesNotMatch(view, /\?\.trim\(\) \?\? ''/, '组节点那条又开始把取消当空名')
+  assert.doesNotMatch(view, /window\.prompt\(/, '又回到 window.prompt（取消与空名糊成一团，且弹的不是本仓对话框）')
   assert.match(view, /import \{[\s\S]*?resolveNewGroupName[\s\S]*?\} from '\.\.\/breakpointGroups'/, '没从规则层 import')
 })
 

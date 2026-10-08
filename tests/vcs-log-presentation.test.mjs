@@ -17,7 +17,7 @@ import { speedSearchMatches } from '../src/speedSearch.ts'
 import { collapseLinearBranches, collapsedLinearHashes, canCollapseLinearBranches, buildLogGraph } from '../src/vcsLogGraph.ts'
 import {
   LOG_ALIGN_LABELS_TITLE, LOG_CHANGES_FROM_PARENTS_TITLE, LOG_COLUMNS_TITLE, LOG_COLUMN_TITLES, LOG_DYNAMIC_COLUMNS,
-  LOG_COMPACT_REFERENCES_TITLE, LOG_LONG_EDGES_TITLE, LOG_PRESENTATION_DEFAULTS, LOG_PRESENTATION_GAPS,
+  LOG_COMPACT_REFERENCES_TITLE, LOG_LONG_EDGES_TITLE, LOG_MERGE_COMMITS_TITLE, LOG_PRESENTATION_DEFAULTS, LOG_PRESENTATION_GAPS,
   LOG_TAG_NAMES_TITLE, LOG_VIEW_OPTIONS_TITLE, LOG_PREVIEW_BOTTOM_TITLE, LOG_PREVIEW_RIGHT_TITLE, LOG_COMMIT_DATE_TITLE,
   LOG_REF_TIERS, LOG_REF_TOOLTIP_LIMIT, compareLogRefs, logCommitTooltip, logPresentationModel, logRefGroups, logRefTier,
   logRefTooltip, logRowCopyText, logRowsCopyText, logSpeedSearchColumns, naturalCompareRefNames,
@@ -60,13 +60,14 @@ test('模型：视图选项的禁用项与动作状态，`列` 与 `差异预览
     setAlignLabels: value => calls.push(['labels', value]),
     setDiffPreviewAtBottom: value => calls.push(['preview', value]),
     setShowChangesFromParents: value => calls.push(['parents', value]),
+    setHighlightMergeCommits: value => calls.push(['merge', value]),
   }
   const state = { showTagNames: true, hidden: ['date'], preferCommitDate: false, compactReferences: true, showLongEdges: true,
-    alignLabels: false, diffPreviewAtBottom: true, showChangesFromParents: false }
+    alignLabels: false, diffPreviewAtBottom: true, showChangesFromParents: false, highlightMergeCommits: true }
   const model = logPresentationModel(state, actions)
   assert.deepEqual(model.map(row => row.id), [
     'vcs.log.compactReferences', 'vcs.log.showTagNames', 'vcs.log.longEdges', 'vcs.log.preferCommitDate', 'vcs.log.alignLabels',
-    'vcs.log.columns', 'vcs.log.changesFromParents', 'vcs.log.diffPreviewLocation',
+    'vcs.log.columns', 'vcs.log.highlighter.MERGE_COMMITS', 'vcs.log.changesFromParents', 'vcs.log.diffPreviewLocation',
   ], '顺序照上游 PresentationSettings（xml:253-266）+ 齿轮弹层尾部那两条（xml:386-392）')
   assert.equal(model[0].title, LOG_COMPACT_REFERENCES_TITLE, 'action.Vcs.Log.CompactReferencesView.text')
   assert.equal(model[0].checked, true, '上游缺省就是紧凑（VcsLogApplicationSettings.kt:106-107）')
@@ -102,11 +103,11 @@ test('模型：视图选项的禁用项与动作状态，`列` 与 `差异预览
   assert.deepEqual(calls[4], ['column', 'date'])
   assert.equal(LOG_COLUMN_TITLES.commit, '提交', '列名与表头同一份文案（VcsLogColumns 读它）')
 
-  assert.equal(model[6].title, LOG_CHANGES_FROM_PARENTS_TITLE, 'action.Vcs.Log.ShowChangesFromParents.text')
-  model[6].run?.()
+  assert.equal(model[7].title, LOG_CHANGES_FROM_PARENTS_TITLE, 'action.Vcs.Log.ShowChangesFromParents.text')
+  model[7].run?.()
   assert.deepEqual(calls[5], ['parents', true])
 
-  const location = model[7]
+  const location = model[8]
   assert.equal(location.group, true)
   assert.deepEqual(location.children.map(row => row.title), [LOG_PREVIEW_BOTTOM_TITLE, LOG_PREVIEW_RIGHT_TITLE],
     '两档文案 = MoveDiffPreviewToBottom/Right.text（底部 / 右侧）')
@@ -115,28 +116,28 @@ test('模型：视图选项的禁用项与动作状态，`列` 与 `差异预览
   assert.deepEqual(calls[6], ['preview', false], '点「右侧」= 纵向分栏关掉')
 })
 
-test('不做的两条留在登记里，接住的七条从登记里移出且真的出现在行里', () => {
+test('不做的两条留在登记里，接住的八条从登记里移出且真的出现在行里', () => {
   assert.deepEqual(LOG_PRESENTATION_GAPS.map(gap => gap.id), [
     'Vcs.Log.ShowRootsColumnAction', 'Vcs.Log.HighlightersActionGroup',
   ], '原写六条：CompactReferencesView / ShowLongEdges / AlignLabels 三条本批接住了（文件头逐条留痕）')
   for (const gap of LOG_PRESENTATION_GAPS) assert.ok(gap.why.length > 8, `${gap.id} 要写清为什么不接`)
   const actions = { setShowTagNames: () => {}, setPreferCommitDate: () => {}, toggleColumn: () => {}, setCompactReferences: () => {},
-    setShowLongEdges: () => {}, setAlignLabels: () => {}, setDiffPreviewAtBottom: () => {}, setShowChangesFromParents: () => {} }
+    setShowLongEdges: () => {}, setAlignLabels: () => {}, setDiffPreviewAtBottom: () => {}, setShowChangesFromParents: () => {}, setHighlightMergeCommits: () => {} }
   const model = logPresentationModel({ showTagNames: true, hidden: [], ...LOG_PRESENTATION_DEFAULTS }, actions)
   const ids = JSON.stringify(model)
   for (const gap of LOG_PRESENTATION_GAPS) assert.ok(!ids.includes(gap.title), `${gap.title} 不该出现在可点的行里`)
   for (const title of [LOG_COMPACT_REFERENCES_TITLE, LOG_LONG_EDGES_TITLE, LOG_COMMIT_DATE_TITLE, LOG_ALIGN_LABELS_TITLE,
-    LOG_CHANGES_FROM_PARENTS_TITLE, LOG_PREVIEW_BOTTOM_TITLE, LOG_PREVIEW_RIGHT_TITLE]) {
+    LOG_MERGE_COMMITS_TITLE, LOG_CHANGES_FROM_PARENTS_TITLE, LOG_PREVIEW_BOTTOM_TITLE, LOG_PREVIEW_RIGHT_TITLE]) {
     assert.ok(ids.includes(title), `${title} 要真的能点`)
   }
   const todo = read('docs/source-todo.md')
   assert.match(todo.split('## 11.')[1] ?? '', /提交时间戳/, '逐条不做项要登记在 docs/source-todo.md §11')
 })
 
-test('上游缺省档逐条对得上（紧凑开 / 长边**关** / 提交日期关 / 左侧引用关 / 预览在下方 / 对父项更改关）', () => {
+test('上游缺省档逐条对得上（紧凑开 / 长边**关** / 提交日期关 / 左侧引用关 / 预览在下方 / 对父项更改关 / 合并提交高亮开）', () => {
   assert.deepEqual({ ...LOG_PRESENTATION_DEFAULTS }, {
     compactReferences: true, showLongEdges: false, preferCommitDate: false, alignLabels: false, diffPreviewAtBottom: true,
-    showChangesFromParents: false,
+    showChangesFromParents: false, highlightMergeCommits: true,
   })
   // 长边那一档原写"开"：那是没读过 State。上游两处都写着 false ——
   // platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogUiPropertiesImpl.kt:121-122（LONG_EDGES_VISIBLE）

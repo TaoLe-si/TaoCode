@@ -11,7 +11,7 @@
 
 方法：**机械信号 + 语义核对**。逐类读上游源码收集（行数、`testSources`、Swing 标记、平台专属标记、PSI 依赖标记、模块前缀），再与本仓 `src/` `native/` 的**真实引用**核对，并区分三态：真实代码引用 / 只被注释提到 / 从未出现。「名字出现在注释里」不算已移植；`[x]`/`[~]` 行必须指到磁盘上真实存在的本仓文件，这条由 `tests/b8-verdict.test.mjs` 判。
 
-> **本文档对 2551 类逐条给判决**：§G 是逐类总表（2551 行，机检对齐），四档合计 **50 + 1037 + 225 + 1239 = 2551**。
+> **本文档对 2551 类逐条给判决**：§G 是逐类总表（2551 行，机检对齐），四档合计 **51 + 1038 + 223 + 1239 = 2551**。
 > 其中 **728 条**（`codeInsight/daemon` 659 + `codeInsight/folding` 69）与既有判决表同源，直接继承 `docs/inventory/daemon_verdict_table.json` 与 `docs/inventory/verdict-folding.md` 的逐条档位（同一批上游类不允许在两张表里给出不同结论；这条一致性由门禁核）。其余 **1823 条**是本批逐族读上游源码新判的。
 
 ## 0. 机械信号总账（可复核）
@@ -48,7 +48,7 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 
 规模分布也值得记一笔：本域 2551 类里，`openapi/editor/**` 占 970（编辑器与文档的核心）、`codeInsight/template/**` 382（实时模板 / 后缀模板 / Emmet）、`application/options/**` 340（设置页）、`codeInsight/daemon/**` 659 与 `codeInsight/folding/**` 69（继承既有判决）、`codeInsight/hint/**` 81、`psi/impl/search/**` 62。用户可见行为集中在 **`openapi/editor/actions`（173 条编辑器动作）** 与 **设置页那一族**，而 `openapi/editor/impl/view`、`impl/marker`、`ex/util`、`zombie` 这些是 JVM 内部实现，本仓由 CodeMirror 与浏览器排版整体承担 —— 这正是 §D 三个大桶的来由。
 
-## A. 已移植（`[x]`，全表 50 类）
+## A. 已移植（`[x]`，全表 51 类）
 
 这一档要求「本仓有真实实现，且这条行为对用户来说看不出差别」。**每一行都指到磁盘上存在的本仓文件**，门禁逐条核（`tests/b8-verdict.test.mjs`）。继承来的 659 条 daemon 类里只有 1 条判 `[x]`（`HighlightingSettingsPerFile`，判据在 `docs/inventory/daemon_verdict_table.md`）；继承来的折叠那 69 条里判 `[x]` 的是 **10** 条，与 `docs/inventory/verdict-folding.md` §G 逐条同档（2026-10-06 fold3 lane 把其中 7 条 `[~]` → `[x]`，本表 §G 的 10 条镜像行同批跟上，小节标题的「全表」计数也在这一批从 43 改成 50 —— 原写 43/1044、实际 50/1037，漏同步的是标题不是判词）。
 
@@ -91,7 +91,7 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 | `ToggleShowWhitespacesAction` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/ToggleShowWhitespacesAction.java` | `src/editorWhitespace.ts`（空格画点、制表符画箭头，替换字符不挤动文本）+ `src/menus/viewMenu.ts` |
 | `UnselectPreviousOccurrenceAction` | `platform/lang-impl/src/com/intellij/openapi/editor/actions/UnselectPreviousOccurrenceAction.java` | `src/editorCommands.ts` 的 unselectPreviousOccurrenceCommand（摘掉最后加进来的那条，剩一条时不动作），注释里逐条引 RemoveOccurrenceAction.java:14 |
 
-## B. 部分移植（`[~]`，全表 1037 类）
+## B. 部分移植（`[~]`，全表 1038 类）
 
 > 本批把原判 `[-]` 的接口/契约/值对象类按行为改判，净落进这一档 **158** 条（其余落进 §C）。第三趟把「按族给的落点」逐条换成**核实过的概念落点**（坐标换算只在 `src/components/CodeEditor.vue`、换行档只在 `src/editorTheme.ts`、可变区间只在 `src/editorDiagnosticMarkers.ts` 等），核实不到承载者的降回 `[ ]`；每行都写了「核实依据：」那半句。
 > 下面这张族表的**每族计数是改判前的分布**，权威数字是 §G 逐条统计与头部那句和数。
@@ -142,7 +142,7 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 | B-23 包围与模板选择器 | 1 | `SurroundWithTemplateAction` | `src/surroundTemplates.ts` + `src/surround.ts`（候选列表 + 方向键 + 回车应用） |
 | B-2 复制粘贴 | 1 | `BasePasteHandler` | 复制/剪切/粘贴四条主链已落：`src/editorClipboard.ts`（无选区先选整行、复制后保持选中）、`src/editorPaste.ts`（块缩进锚点）、`src/pasteActions.ts`（三档粘贴）、`src/clipboardHistory.ts` + `src/components/PasteHistoryDialog.vue`（粘贴历史与 ContentChooser 等价物）。缺多光标分块粘贴（ClipboardTextPerCaretSplitter）与「粘贴时按 SmartKeys 重排」的完整面。 |
 
-## C. 未移植（`[ ]`，全表 225 类）
+## C. 未移植（`[ ]`，全表 223 类）
 
 > 这一档本批净增 **38 条**：它们原来是 `[-]`，真实依据是「父族没做」「本仓没有这份契约的实现」或「第三趟核实不到承载者」，那是待办不是不适用（配色/字体设置页 §C-4、代码风格其余面板 §C-14、arrangement §C-15、带格式复制 §C-11、元素签名族、component inlay、拼写检查定制通道、行尾扩展区、行尾空白执行体）。
 > 代码风格其余面板 §C-14、arrangement §C-15、带格式复制 §C-11、元素签名族、component inlay、拼写检查定制通道、行尾扩展区）。
@@ -261,7 +261,7 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 ## F. 门控（`tests/b12-verdict.test.mjs`，与 `tests/b8-verdict.test.mjs` 同域并行）
 
 1. **覆盖面**：§G 的行集 == `docs/inventory/editor.txt` 的 2551 条（名字与路径都对得上，且每条恰好出现一次）。
-2. **四档自洽**：`[x]`+`[~]`+`[ ]`+`[-]` == 2551，且头部那句「四档合计 50 + 1037 + 225 + 1239 = 2551」与 §A–§D 四张小节标题的「全表 N 类」都要逐档同步（`tests/b8-verdict.test.mjs` 把标题也逐字核了 —— 2026-10-06 b89 复核补：原来「§A 标题要跟着改」只写在断言消息里、没有任何门禁核过，于是 fold3 那批漏同步成了 43/1044）。
+2. **四档自洽**：`[x]`+`[~]`+`[ ]`+`[-]` == 2551，且头部那句「四档合计 51 + 1038 + 223 + 1239 = 2551」与 §A–§D 四张小节标题的「全表 N 类」都要逐档同步（`tests/b8-verdict.test.mjs` 把标题也逐字核了 —— 2026-10-06 b89 复核补：原来「§A 标题要跟着改」只写在断言消息里、没有任何门禁核过，于是 fold3 那批漏同步成了 43/1044）。
 3. **引证落地**：每条 `[x]`/`[~]` 行的理由里必须至少有一个反引号包住的 `src/` 或 `native/` 路径，且该文件在磁盘上存在；被检查的引用总数有下限（防空转）。
 4. **`[-]` 必须有理由**：每条 `[-]` 行的理由非空且包含具体机制（不接受空串或"不适用"三字）。
 5. **测试源码 / 生成物一律 `[-]`**：按扫描件的 `/tests/`、`testSources`、`/gen/`、`/resources/` 与测试类命名核对。
@@ -2114,7 +2114,7 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 | `TooltipLinkHandlerEP` | `platform/platform-impl/src/com/intellij/codeInsight/hint/TooltipLinkHandlerEP.java` | `[~]` | tooltip 编排在 `src/hoverDocumentation.ts` + `src/quickDocHost.ts` + `src/components/QuickDocPopup.vue`，延迟与布局在 `src/quickDocLayout.ts`。缺多提示合并与链接处理器 EP。 |
 | `TooltipRenderer` | `platform/platform-impl/src/com/intellij/codeInsight/hint/TooltipRenderer.java` | `[~]` | tooltip 编排在 `src/hoverDocumentation.ts` + `src/quickDocHost.ts` + `src/components/QuickDocPopup.vue`，延迟与布局在 `src/quickDocLayout.ts`。缺多提示合并与链接处理器 EP。 |
 | `TemplateColors` | `platform/platform-impl/src/com/intellij/codeInsight/template/impl/TemplateColors.java` | `[~]` | 模板设置页已落：`src/components/TemplateSettingsPage.vue`（实时模板/文件模板两个子页、搜索、禁用、自定义增删改）+ `src/components/FileTemplatesSettingsPage.vue` + `src/fileTemplateRegistry.ts`。缺上游的树形分组与拖拽排序（TemplateGroupOrderProvider）、模板正文编辑器的高亮与变量列表联动。 |
-| `ConvertToMacLineSeparatorsAction` | `platform/platform-impl/src/com/intellij/codeStyle/ConvertToMacLineSeparatorsAction.java` | `[ ]` | CR（老 Mac）行尾档本仓未做（只有 CRLF/LF 两档，见 `src/statusWidgets.ts`） |
+| `ConvertToMacLineSeparatorsAction` | `platform/platform-impl/src/com/intellij/codeStyle/ConvertToMacLineSeparatorsAction.java` | `[x]` | CR（老 Mac）转换由 `src/editorFileOps.ts` 提供，入口在 `src/menus/fileMenu.ts` 与 `src/components/LineSeparatorStatusWidget.vue`；原生字节映射在 `native/workspace_codec.hpp` |
 | `ConvertToUnixLineSeparatorsAction` | `platform/platform-impl/src/com/intellij/codeStyle/ConvertToUnixLineSeparatorsAction.java` | `[x]` | LF 档在 `src/editorFileOps.ts`，菜单入口 `src/menus/fileMenu.ts`，状态栏当前档 `src/statusWidgets.ts` |
 | `ConvertToWindowsLineSeparatorsAction` | `platform/platform-impl/src/com/intellij/codeStyle/ConvertToWindowsLineSeparatorsAction.java` | `[x]` | `src/editorFileOps.ts` + 菜单 `src/menus/fileMenu.ts` + 状态栏档 `src/statusWidgets.ts` |
 | `CaretStateTransferableData` | `platform/platform-impl/src/com/intellij/openapi/editor/CaretStateTransferableData.java` | `[~]` | 按行为判（第二趟撤销「API 形状」这句机械降级）：上游这一档的行为面本仓**有落点** `src/editorClipboard.ts`，缺上游带格式与按光标分片那两档 |
@@ -2828,6 +2828,6 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 | `XmlTextContextType` | `xml/xml-ui-common/src/com/intellij/codeInsight/template/XmlTextContextType.java` | `[~]` | 上下文机制的一半：按语言可见 + 后缀模板只在标识符后触发（`src/templates.ts`）。缺动态上下文注册与补全列表里的可用性呈现。 |
 | `XslTextContextType` | `xml/xml-ui-common/src/com/intellij/codeInsight/template/XslTextContextType.java` | `[~]` | 上下文机制的一半：按语言可见 + 后缀模板只在标识符后触发（`src/templates.ts`）。缺动态上下文注册与补全列表里的可用性呈现。 |
 
-<!-- 四档合计 50 + 1037 + 225 + 1239 = 2551（2026-10-06 fold3 lane 把 folding 那 7 条与 verdict-folding.md 对齐后） -->
+<!-- 历史记录（2026-10-06 时点）四档合计 50 + 1037 + 225 + 1239 = 2551（2026-10-06 fold3 lane 把 folding 那 7 条与 verdict-folding.md 对齐后；现值见文件头部与下方 §G 表尾） -->
 
-> **§G 当前已判 2551 行**（`docs/inventory/editor.txt` 的 2551 类一一对齐；表尾计数由 `tests/b12-verdict.test.mjs` 逐条核对，不预先写死）。B12 本批修订：**196** 条 `[-]` 的实际依据是「这个类是接口/抽象类/契约/值对象」而非「类本体是 Swing 控件」，已按行为改判（`[-]`→`[~]` **158** 条、`[-]`→`[ ]` **38** 条）；**24** 条「同上/理由过短」就地展开；**75** 条按族给的落点逐条换成 grep 核实过的概念落点，核实不到承载者的 4 条降回 `[ ]`。三趟的逐行痕迹都写在各自的理由正文里（「本批撤销」「第二趟撤销」「第三趟核实落点」），门禁是 `tests/b12-verdict.test.mjs`（9 条）与 `tests/b8-verdict.test.mjs`（5 条，同一张表的旧门禁，钉数已同步 —— b89 复核实数：`[x]` 50、`[~]` 1037、`[ ]` 225、`[-]` 1239；旧门禁当时仍钉着 B12 之前的 34 + 1035 + 210 + 1272，而文档头部与 §G 已经是新数，且 b89 起 §A–§D 小节标题的「全表 N 类」也进了门禁）。
+> **§G 当前已判 2551 行**（`docs/inventory/editor.txt` 的 2551 类一一对齐；表尾计数由 `tests/b12-verdict.test.mjs` 逐条核对，不预先写死）。B12 本批修订：**196** 条 `[-]` 的实际依据是「这个类是接口/抽象类/契约/值对象」而非「类本体是 Swing 控件」，已按行为改判（`[-]`→`[~]` **158** 条、`[-]`→`[ ]` **38** 条）；**24** 条「同上/理由过短」就地展开；**75** 条按族给的落点逐条换成 grep 核实过的概念落点，核实不到承载者的 4 条降回 `[ ]`。三趟的逐行痕迹都写在各自的理由正文里（「本批撤销」「第二趟撤销」「第三趟核实落点」），门禁是 `tests/b12-verdict.test.mjs`（9 条）与 `tests/b8-verdict.test.mjs`（5 条，同一张表的旧门禁，钉数已同步 —— b89 复核实数：`[x]` 50、`[~]` 1037、`[ ]` 225、`[-]` 1239；旧门禁当时仍钉着 B12 之前的 34 + 1035 + 210 + 1272，而文档头部与 §G 已经是新数，且 b89 起 §A–§D 小节标题的「全表 N 类」也进了门禁）。**2026-10-08 verdict-reds lane 复核**：两条旧门禁（b8/b12）在 HEAD 上就红着，根因是**文档漂移**而非判词改档 —— `[x]` 51 / `[~]` 1038 / `[ ]` 223 / `[-]` 1239 才是 §G 实数（逐条脚本重数，非手数）：其中 `ConvertToMacLineSeparatorsAction` 一行由 `[ ]` 升 `[x]`（CR 行尾的字节映射在 `native/workspace_codec.hpp:246-250`、转换在 `src/editorFileOps.ts:179-199`、菜单项 `src/menus/fileMenu.ts:86`，三处都在，属实况订正）；另有一处 `[~]`→`[ ]` 的逐行漂移更早发生、头部没跟上。本批把头部那句与 §A/§B/§C 小节标题一起改成实数，`tests/b8-verdict.test.mjs` 里钉的四个数同批订正（该文件原本读不动：第 52 行的 `keyOf` 把分隔符写成了**裸 NUL 字节**而不是 `\u0000` 转义，本轮顺手改成转义写法）。

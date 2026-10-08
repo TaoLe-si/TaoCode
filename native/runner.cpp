@@ -1,5 +1,6 @@
 #include "runner.hpp"
 #include "base64.hpp"
+#include "win_graceful_stop.hpp"
 
 #include "workspace.hpp"
 
@@ -334,6 +335,21 @@ void Runner::finish_input() noexcept {
     if (!writer.joinable()) return;
     if (WaitForSingleObject(writer.native_handle(), writer_join_ms) == WAIT_OBJECT_0) writer.join();
     else writer.detach();  // the shared Input keeps the detached writer safe
+}
+
+/**
+ * 优雅停止请求（上游 `KillableProcessHandler.destroyProcessGracefully()`）：只发通知，不等、不杀。
+ * 控制台那一记 Ctrl+C 送的是 `pid` 自己的控制台（CREATE_NO_WINDOW 给每个子进程一个隐藏控制台），
+ * 窗口那一记 WM_CLOSE 送的是 Job Object 里全部进程的可见顶层窗口 —— 树从 Job 取，与强杀用的是
+ * 同一个集合，不会出现"请了 A、杀的是 B"。
+ */
+bool Runner::request_graceful_exit() noexcept {
+    if (!running_.load() || !process_) return false;
+    const unsigned long pid = process_id();
+    if (pid == 0) return false;
+    bool requested = graceful_stop::send_console_ctrl_c(pid);
+    if (graceful_stop::close_top_level_windows(graceful_stop::job_process_ids(job_)) > 0) requested = true;
+    return requested;
 }
 
 void Runner::stop() noexcept {

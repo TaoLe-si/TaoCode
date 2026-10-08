@@ -176,7 +176,10 @@ test('运行配置的「允许并行运行多个实例」走全链路', () => {
   const actions = read('src/runActions.ts')
   assert.match(actions, /params\.allowParallel = config\.allowRunningInParallel === true/, '启动时把策略交给宿主')
   // 原生：校验 + 条目键白名单
-  const schema = read('native/settings_schema.cpp')
+  // 2026-10-08 判词 lane pf-lifecycle 把 runConfigs 那一族（默认值 + 补丁校验）从
+  // `native/settings_schema.cpp` 拆进了 `native/settings_project_schema.cpp`（应用级 vs 项目级
+  // 设置分家，原文件撞 1100 行 native 机检上限）；判据跟着真源走，钉的还是那两件事。
+  const schema = read('native/settings_project_schema.cpp')
   assert.ok(schema.includes('"allowRunningInParallel"'), '原生要认这个键')
   assert.ok(schema.includes('allowRunningInParallel 必须是布尔值'), '原生要校验类型')
 })

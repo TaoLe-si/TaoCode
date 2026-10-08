@@ -1,11 +1,7 @@
 <script setup lang="ts">
-// Agent 设置各分节的**共用外壳** —— 标题下的说明、真实控件的落点，以及分节共用的**设置控件口径**。
+// Agent 设置各分节的共用控件样式。
 //
-// 为什么抽出来：ZCode 的设置面板有十几节，本仓逐节复刻时每一节都要交代同一件事 ——
-// 「这一节是什么」。那句话在十几个 `.vue` 里各写一遍会漂，所以收在这里，各节只交自己的
-// `description`，差别留在节里，共识留在这里。
-//
-// 为什么共用口径也在这里：`SettingsDialog.vue` 给 `.section-description` / `.settings-fields` /
+// `SettingsDialog.vue` 给 `.settings-fields` /
 // `.input-row` / `.field-hint` / `.checkbox-row` 写的那套样式在 `<style scoped>` 里，只落在
 // `SettingsDialog` 自己的元素上 —— 子组件（各节）的元素拿不到它的 scope id（多根子树尤其如此），
 // 所以那些类名在分节里其实是**没有样式**的。分节要统一到同一套类名又真的生效，就得有一处
@@ -15,16 +11,29 @@
 // 命名与几何逐条对齐 `SettingsDialog.vue` 的同名规则（`.settings-fields` 的 gap、`.input-row`
 // 的 label 与控件宽度、`.field-hint` 的 11px、`.checkbox-row` 的勾选框 14px）；控件高度一律走
 // `--ctrl-height`（上游 `expUI_light.theme.json:668-672` 的 `TextField.minimumSize = 49,28`）。
+//
+defineProps<{
+  title?: string
+  /** 这一节是什么、数据从哪来。各节只交文本，形状留在这里（不传就不渲染那一行）。 */
+  description?: string
+}>()
 </script>
 
 <template>
   <div class="agent-section-shell">
+    <header v-if="title || description" class="agent-section-head">
+      <h3 v-if="title" class="agent-section-title">{{ title }}</h3>
+      <p v-if="description" class="agent-section-description">{{ description }}</p>
+    </header>
     <slot />
   </div>
 </template>
 
 <style scoped>
 .agent-section-shell { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.agent-section-head { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.agent-section-title { margin: 0; color: var(--bright); font-size: 13px; font-weight: 600; }
+.agent-section-description { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.6; }
 .agent-section-shell :deep(.settings-fields) { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; margin: 0; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
 .agent-section-shell :deep(.settings-fields :is(input, select, textarea)) { box-sizing: border-box; min-height: var(--ctrl-height); padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-family: inherit; font-size: 12px; }
 .agent-section-shell :deep(.input-row) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 220px); align-items: center; gap: var(--space-2) var(--space-4); min-width: 0; }

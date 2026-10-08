@@ -141,6 +141,15 @@ function onNewGroupKeydown(event: KeyboardEvent) {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
 }
+/**
+ * 提交「新建组」那一格 —— 逐条的「所在组」与组节点的「移至组」共用这一个出口。
+ * 三种输入 = 三种结果（`resolveNewGroupName` 的判据在 src/breakpointGroups.ts:196-208）：
+ *   · 取消（Esc / 关闭按钮）⇒ `null`，这里当场 return —— 上游 `BreakpointsDialog.java:547-549`
+ *     的 `if (groupName == null) { return; }`：**一条断点都不动**（不 `setGroup`、也不 rebuildTree）；
+ *   · 真按了确定、名字是空串 ⇒ `''`，即「无组」：空名在分组规则那边就是没有组
+ *     （`XBreakpointCustomGroupingRule.kt:24` 的 `proxy.getGroup()?.takeIf { it.isNotEmpty() }`），
+ *     等价于子菜单第一项 `MoveToGroupAction(null)`（`BreakpointsDialog.java:324` 的 `<无组>`）。
+ */
 function submitNewGroup() {
   const target = newGroupTarget.value
   if (!target) return

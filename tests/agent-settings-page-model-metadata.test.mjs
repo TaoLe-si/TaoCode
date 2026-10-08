@@ -43,6 +43,11 @@ const baseModel = () => ({
   contextWindow: 128000,
   maxOutputTokens: 4096,
   inputFormat: { supportsText: true, supportsImage: false, supportsVideo: false, supportsAudio: false, supportsPdf: false },
+  // 上游 complete schema 要求 `outputFormat.supportsText` 显式存在（shared/src/model-config.ts:60、:64-82）。
+  // 本仓记录有该字段（归一化无损往返，见 src/agentSettings.ts:191-198），编辑器不画控件、提交时由
+  // `{ ...currentModel }` 原样保留 —— 所以"全元数据"的 fixture 必须带它，否则 `isAgentModelConfigComplete`
+  // 恒为 false（判据订正，2026-10-08 ui-agent；不是产品回归）。
+  outputFormat: { supportsText: true },
   supportsJsonSchemaOutput: false,
   supportsNativeWebSearch: false,
   supportsMidConversationSystem: false,

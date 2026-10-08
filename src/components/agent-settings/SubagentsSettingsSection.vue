@@ -10,6 +10,7 @@ import { AlertTriangle, Save, Search } from 'lucide-vue-next'
 import AgentSettingsSectionShell from './AgentSettingsSectionShell.vue'
 import AgentSettingsSwitch from './AgentSettingsSwitch.vue'
 import { iconSize } from '../../uiIcons'
+import { IdeaCheckedIcon } from '../icons/toolWindowIcons'
 import {
   AGENT_SUBAGENT_GROUP_LABELS, AGENT_SUBAGENT_RISKY_TOOLS,
   AGENT_SUBAGENT_SCOPE_LABELS, AGENT_SUBAGENT_ZCODE_TOOL_OPTIONS,
@@ -92,10 +93,13 @@ function save() {
     ? '已保存到本机设置。'
     : '本次会话仍生效，但没有存下来（本机存储不可用）。'
 }
+
+/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
+const SECTION_DESCRIPTION = '管理用户级子智能体 Markdown 文件（ZCode Agent 读取的那一份，`settings.subagents.description`）。'
 </script>
 
 <template>
-  <AgentSettingsSectionShell>
+  <AgentSettingsSectionShell title="子智能体" :description="SECTION_DESCRIPTION">
     <div class="sub-toolbar">
       <label class="sub-search">
         <Search :size="iconSize.dense" aria-hidden="true" />
@@ -145,6 +149,18 @@ function save() {
     </section>
 
 
+    <!-- ZCode 那边的工具档位对照（`AGENT_SUBAGENT_ZCODE_TOOL_OPTIONS`）——**只读清单**：
+         本仓没有"按子智能体挑工具"的执行路径，所以一列勾选框都没有（勾了也存不进任何东西）。
+         勾选记号用 IDEA 的 `checked` 副本（`AllIcons.Actions.Checked`），与菜单行同一种记号。 -->
+    <section class="settings-box">
+      <h4 class="settings-box-title">ZCode 那边可选的档位</h4>
+      <ul class="sub-zcode-tools">
+        <li v-for="tool in AGENT_SUBAGENT_ZCODE_TOOL_OPTIONS" :key="tool">
+          <IdeaCheckedIcon :size="iconSize.dense" aria-hidden="true" />{{ tool }}
+        </li>
+      </ul>
+    </section>
+
     <div class="settings-actions">
       <button class="settings-button settings-button-primary" type="button" @click="save">
         <Save :size="iconSize.control" aria-hidden="true" />保存
@@ -163,6 +179,8 @@ function save() {
 .sub-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; }
 .sub-select { min-height: var(--ctrl-height-sm); padding: 0 var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--text); font: inherit; font-size: 12px; }
 .sub-group { display: flex; flex-direction: column; gap: var(--space-2); }
+.sub-zcode-tools { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: 0; padding: 0; list-style: none; color: var(--secondary); font-size: 12px; }
+.sub-zcode-tools li { display: flex; align-items: center; gap: var(--space-1); }
 .sub-group-title { margin: 0; padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 12px; font-weight: 600; }
 .sub-entry { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
 .sub-entry-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); }

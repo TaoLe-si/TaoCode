@@ -308,11 +308,19 @@ test('非法字段文案：六个键逐条（inputFormat 无同名键，退回 i
   assert.equal(AGENT_MODEL_METADATA_INVALID_MESSAGES.inputFormat, AGENT_MODEL_PROVIDER_MESSAGES.invalidInputModalities)
 })
 
-test('配置完整性：contextWindow + inputFormat 五项都要有值', () => {
-  assert.equal(isAgentModelConfigComplete(baseModel()), true)
-  assert.equal(isAgentModelConfigComplete(baseModel({ contextWindow: undefined })), false)
-  const missingPdf = baseModel({ inputFormat: { supportsText: true, supportsImage: false, supportsVideo: false, supportsAudio: false } })
+test('配置完整性：contextWindow + inputFormat 五项 + outputFormat.supportsText 都要有值', () => {
+  // 判据形状订正（2026-10-08 ui-agent）：本仓记录已按上游补上 `outputFormat`（sparse 可空类型 +
+  // localStorage 归一化），完整性判定也照上游 complete schema 保留该字段 ——
+  // `shared/src/model-config.ts:60` 的 `completeModelOutputFormatDataSchema` 要求
+  // `supportsText: z.boolean()` 显式存在（整份 complete properties 见 `:64-82`），
+  // 上游挂法 `ProviderFormControls.tsx:262-268`。所以"完整"的输入必须显式带这一格；
+  // 旧 fixture 缺它是判据过时，不是产品回归，这里补上并**加一条**缺 outputFormat 必须判不完整。
+  const complete = baseModel({ outputFormat: { supportsText: true } })
+  assert.equal(isAgentModelConfigComplete(complete), true)
+  assert.equal(isAgentModelConfigComplete(baseModel({ contextWindow: undefined, outputFormat: { supportsText: true } })), false)
+  const missingPdf = baseModel({ inputFormat: { supportsText: true, supportsImage: false, supportsVideo: false, supportsAudio: false }, outputFormat: { supportsText: true } })
   assert.equal(isAgentModelConfigComplete(missingPdf), false)
+  assert.equal(isAgentModelConfigComplete(baseModel()), false, '缺 outputFormat.supportsText 不算完整（上游要求显式布尔值）')
 })
 
 test('Base URL 折叠：仅折叠两段完全相同的 http(s) 形态（ProviderDraftSave.ts:14-31）', () => {
@@ -563,6 +571,10 @@ test('新建：空模型与新建供应商的初值', () => {
     id: '',
     name: '',
     enabled: true,
+    // `supportsToolCall` 是**真的消费面**，不是装饰字段：`src/agentHostProtocol.ts` 在组请求时
+    // 按它决定「要不要把工具表发出去」（显式 `false` 才抛），而新建模型的初值必须是「能带工具」
+    // （`AgentSettingsPage.vue` 新建供应商时也这么写），否则新模型建出来就永远没有工具可用。
+    supportsToolCall: true,
     inputFormat: AGENT_DEFAULT_MODEL_INPUT_FORMAT,
   })
   const created = createAgentModelProviderRecord({ id: 'custom-1' })

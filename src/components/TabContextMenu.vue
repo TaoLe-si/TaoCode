@@ -63,11 +63,24 @@ function moveActive(step: number) {
   const index = nextMenuIndex(list.length, list.findIndex(row => row === current), step)
   list[index]?.focus()
 }
+function setCopyOpen(open: boolean) {
+  copyOpen.value = open
+  if (open) void nextTick(() => box.value?.querySelector<HTMLElement>('.sub-item:not(:disabled)')?.focus())
+}
 function onKeydown(event: KeyboardEvent) {
-  // 只认 ↑↓（`selectPrevious`/`selectNext`），与 `EditorPopupMenu.vue:57-58` 同一种写法：
-  // Enter/Space 由原生 `<button>` 翻成 click，Esc 归全局弹层栈 —— 三条各只有一个所有者。
   if (event.key === 'ArrowDown') { event.preventDefault(); moveActive(1); return }
   if (event.key === 'ArrowUp') { event.preventDefault(); moveActive(-1); return }
+  const target = event.target instanceof HTMLElement ? event.target : null
+  if (event.key === 'ArrowRight' && target?.classList.contains('has-sub')) {
+    event.preventDefault()
+    setCopyOpen(true)
+    return
+  }
+  if (event.key === 'ArrowLeft' && (target?.classList.contains('sub-item') || (copyOpen.value && target?.classList.contains('has-sub')))) {
+    event.preventDefault()
+    copyOpen.value = false
+    box.value?.querySelector<HTMLElement>('.has-sub')?.focus()
+  }
 }
 onMounted(() => {
   // 打开前的焦点持有者（上游的 `lastFocused`）：关闭时还给它。
@@ -126,7 +139,7 @@ function pickSourceRootCopy(text: string) {
     <button role="menuitem" @click="ctx.copyPathOfTab(path); close()">复制路径</button>
     <!-- `CopyReferencePopupGroup`（上游 :1280 插在 CopyPaths 之后）。`popup="true"` 的子段在
          ARIA 里就是 `aria-haspopup="menu"` + 真实展开态；展开后子行就地接在父行之后（同一张菜单）。 -->
-    <button role="menuitem" class="has-sub" aria-haspopup="menu" :aria-expanded="copyOpen" @click="copyOpen = !copyOpen">{{ COPY_REFERENCE_GROUP }}</button>
+    <button role="menuitem" class="has-sub" aria-haspopup="menu" :aria-expanded="copyOpen" @click="setCopyOpen(!copyOpen)">{{ COPY_REFERENCE_GROUP }}</button>
     <template v-if="copyOpen">
       <button v-for="row in copyRows" :key="row.id" class="sub-item" role="menuitem" @click="pickCopy(row.id)">{{ row.title }}</button>
       <button v-if="sourceRootRow" class="sub-item" role="menuitem" @click="pickSourceRootCopy(sourceRootRow.text)">{{ sourceRootRow.title }}</button>

@@ -558,7 +558,11 @@ async function exportText() {
            （等价关系的论证见 src/problemsView.ts 与 docs/batch-2026-10-06-bucket2b2.md）。 -->
       <label class="problems-field">
         <Group :size="iconSize.inline" aria-hidden="true" />
-        <select v-model="grouping" aria-label="分组方式">
+        <!-- title 把这一档的出处带到悬停上（不只躺在注释里）：动作 `ProblemsView.GroupByToolId`
+             、文案 `action.ProblemsView.GroupByToolId.text=Group by Inspection`
+             （`ActionsBundle.properties:2659`）、图标 `AllIcons.ObjectBrowser.SortByType`（`ui.xml:96-98`）。 -->
+        <select v-model="grouping" aria-label="分组方式"
+                title="按诊断码（承接上游的 tool id）—— ProblemsView.GroupByToolId = Group by Inspection（ActionsBundle.properties:2659），图标 AllIcons.ObjectBrowser.SortByType（ui.xml:96-98）">
           <option value="none">不分组</option>
           <option value="file">按文件</option>
           <option value="directory">按目录</option>

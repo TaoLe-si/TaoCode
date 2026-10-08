@@ -12,7 +12,7 @@
 //   · 非法字段文案 = ProviderFormControls.tsx:227-233（本仓 `resolveAgentModelMetadataInvalidMessage`）。
 //
 // 只画本仓 `src/agentModelProviders.ts` 的 `AgentProviderModelConfig` 里真实存在的字段。上游有而本仓
-// 记录没有的字段（requiresMfjsToolSchema、supportsToolCall、outputFormat、推理档位 Option Spec JSON）
+// 没有编辑控件的字段（requiresMfjsToolSchema、supportsToolCall、outputFormat、推理档位 Option Spec JSON）
 // **不画**。文案一律取本仓已有的字段名常量（`AGENT_MODEL_PROVIDER_MESSAGES`）或 zh-CN.ts 原文，
 // 每个常量后面是它的行号。
 //

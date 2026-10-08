@@ -439,7 +439,7 @@ const fileTypeKindLabel = (bean: PluginFileType) => (bean.implementationClass ? 
               <ul class="plugin-list" role="listbox" :aria-label="group.title">
                 <li v-for="plugin in group.plugins" :key="plugin.id">
                   <button type="button" class="plugin-row" role="option" :aria-selected="selected?.id === plugin.id" :class="{ 'is-selected': selected?.id === plugin.id }" @click="selectedId = plugin.id">
-                    <span class="plugin-avatar" aria-hidden="true"><Blocks :size="iconSize.control" /></span>
+                    <span class="plugin-avatar" aria-hidden="true"><Blocks :size="iconSize.control" aria-hidden="true" /></span>
                     <span class="plugin-main">
                       <span class="plugin-name">{{ plugin.name || plugin.id }}<span class="plugin-version">v{{ plugin.version || '0' }}</span></span>
                       <span class="plugin-desc">{{ plugin.error ? `清单无法读取：${plugin.error}` : (plugin.broken ? `依赖不满足：${plugin.broken}` : (plugin.description || '没有描述。')) }}</span>

@@ -144,7 +144,9 @@ test('类型标签与编辑器一致，未知类型退回原 id（不编一个�
  * 把整个项目设置拒掉（`docs/batch-2026-10-06-runcfg.md` §B 最后一行登记过这一处）。
  */
 function nativeRunConfigTypeWhitelist() {
+  // 运行配置的项目级校验 2026-10-08 拆进 native/settings_project_schema.cpp。
   const source = readFileSync('native/settings_schema.cpp', 'utf8')
+    + readFileSync('native/settings_project_schema.cpp', 'utf8')
   const guard = /if \(type != "([a-z]+)"((?: && type != "[a-z]+")+)\)/.exec(source)
   assert.ok(guard, 'native/settings_schema.cpp 里要有运行配置 type 的白名单判断')
   const ids = [guard[1], ...[...guard[2].matchAll(/"([a-z]+)"/g)].map(entry => entry[1])]

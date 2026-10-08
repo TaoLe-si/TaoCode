@@ -147,7 +147,11 @@ test('「复制路径/引用…」子段：aria-haspopup=menu + 绑到真实展�
   const component = read('src/components/TabContextMenu.vue')
   assert.match(component, /role="menuitem" class="has-sub" aria-haspopup="menu" :aria-expanded="copyOpen"/,
     '子段父行要同时有 aria-haspopup="menu" 与绑到 copyOpen 的 aria-expanded（上游 popup="true"）')
-  assert.match(component, /@click="copyOpen = !copyOpen"/, 'aria-expanded 要真的能翻转')
+  // 翻转要走同一个 `setCopyOpen`（它在真展开时还要把焦点移进子段）—— 判的不是写法，
+  // 是"click 真的改状态、而 aria 读的是同一份状态"。
+  assert.match(component, /@click="setCopyOpen\(!copyOpen\)"/, 'aria-expanded 要真的能翻转')
+  assert.match(component, /function setCopyOpen\(open: boolean\) \{\s*copyOpen\.value = open/,
+    '翻转必须真的写 copyOpen（不许只改 aria 不改进状态）')
 })
 
 test('键盘落点：焦点进菜单、↑↓走可用行、Enter 走原生、关闭还原焦点；Esc 仍归弹层栈', () => {

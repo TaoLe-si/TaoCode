@@ -208,7 +208,7 @@ struct App {
     // native/dap_host.cpp —— main.cpp 贴着 2000 行硬上限，它是 `git.*` 之后第二大的一段。
     // 这里只把宿主面接上：每一项都是本类已有的一行（终端仍是本类的 `terminals`，尺寸也仍由本类记着）。
     std::unique_ptr<taocode::dap_host::Host> dap_host = std::make_unique<taocode::dap_host::Host>(
-        taocode::dap_host::Host::Ports{
+        taocode::dap_host::Ports{
             .post = [this](const Json& payload) { post_json(payload); },
             .window = [this] { return window; },
             .ui = [this] { return ui; },
@@ -524,151 +524,6 @@ struct App {
     // refuses anything that escapes the root). The host side only has to react to a
     // server-driven write, which is the edit sink wired below.
 
-    // DAP `runInTerminal` (adapter -> host reverse request). kind "integrated" opens
-    // a real ConPTY session in the Terminal tool window and types the command into
-    // it; kind "external" opens a detached console window. Failures fill `error`
-    // instead of throwing, because the answer travels back as a failed response.
-    Json run_in_terminal(const Json& args, std::string& error) {
-        const auto kind = args.value("kind", std::string("integrated"));
-        std::vector<std::string> command_args;
-        if (args.contains("args") && args.at("args").is_array())
-            for (const auto& item : args.at("args")) if (item.is_string()) command_args.push_back(item.get<std::string>());
-        const auto command = args.value("command", std::string());
-        if (command.empty()) { error = "runInTerminal 没有要执行的命令。"; return Json::object(); }
-        std::wstring directory = wide(current_root);
-        const auto cwd = args.value("cwd", std::string());
-        if (!cwd.empty()) {
-            const fs::path requested(wide(cwd));
-            directory = (requested.is_absolute() ? requested : fs::path(wide(current_root)) / requested).native();
-        }
-        if (kind == "external") {
-            taocode::Runner::Spec spec;
-            spec.command = L"cmd.exe";
-            spec.arguments = {L"/d", L"/s", L"/c", L"start", wide(args.value("title", std::string("TaoCode"))), wide(command)};
-            for (const auto& argument : command_args) spec.arguments.push_back(wide(argument));
-            spec.working_directory = fs::path(directory);
-            auto console = std::make_unique<taocode::Runner>();
-            try {
-                console->start(spec, [](const taocode::Runner::Chunk&) {}, [](int) {});
-            } catch (const taocode::WorkspaceError& failure) {
-                error = failure.what();
-                return Json::object();
-            }
-            const auto pid = console->process_id();
-            reap_external_runners();
-            { std::lock_guard lock(external_mutex); external_runners.push_back(std::move(console)); }
-            // `processId` is the one field the adapter can act on: it lets the
-            // debuggee's launcher be waited on or killed later.
-            return {{"processId", pid}};
-        }
-        // Integrated: ConPTY has no "run one command" mode, so a real session is
-        // opened and the command line is typed into it. Both pid fields of the
-        // DAP answer are optional and the shell's own pid is not ours to report,
-        // so an empty body means "started" — the UI shows the session by its id.
-        std::string line = command;
-        for (const auto& argument : command_args) { line += ' '; line += argument; }
-        int id = 0;
-        try {
-            id = terminals->create(terminal_cols, terminal_rows, directory,
-                                   [this](int terminal, std::string_view bytes) {
-                                       queue_term({{"event", "term.output"}, {"id", terminal}, {"dataB64", base64_encode(bytes)}});
-                                   });
-        } catch (const taocode::WorkspaceError& failure) {
-            error = failure.what();
-            return Json::object();
-        }
-        terminals->write(id, line + "\r\n");
-        queue_term({{"event", "term.opened"}, {"id", id}, {"cwd", cwd.empty() ? current_root : cwd}, {"reason", "runInTerminal"}});
-        return Json::object();
-    }
-
-    // Drops the console windows the adapter asked for once their child is gone, so
-    // a long debug session does not accumulate spent Runner objects.
-    void reap_external_runners() {
-        std::lock_guard lock(external_mutex);
-        std::vector<std::unique_ptr<taocode::Runner>> alive;
-        alive.reserve(external_runners.size());
-        for (auto& console : external_runners) if (console && console->running()) alive.push_back(std::move(console));
-        external_runners.swap(alive);
-    }
-
-    // DAP `startDebugging` (adapter -> host reverse request): the nested session
-    // replaces the current one, exactly like IDEA launching a child process debug
-    // from the debug toolbar — one adapter at a time, the previous one reaped.
-    Json start_nested_debug(const Json& args, std::string& error) {
-        const Json configuration = args.contains("configuration") && args.at("configuration").is_object()
-                                       ? args.at("configuration") : Json::object();
-        const auto kind = configuration.value("kind", std::string("cppvsdbg"));
-        const Json entry = dap_config.is_object() ? dap_config.value(kind, Json::object()) : Json::object();
-        auto command = configuration.value("command", std::string());
-        if (command.empty()) command = entry.value("command", std::string());
-        if (command.empty()) { error = "没有为 kind \"" + kind + "\" 配置调试适配器。"; return Json::object(); }
-        std::vector<std::wstring> arguments;
-        const Json args_src = configuration.contains("args") ? configuration.at("args") : entry.value("args", Json::array());
-        if (args_src.is_array()) for (const auto& item : args_src) if (item.is_string()) arguments.push_back(wide(item.get<std::string>()));
-        auto cwd = configuration.value("cwd", std::string());
-        if (cwd.empty()) cwd = current_root;
-        auto nested = std::make_unique<taocode::dap::Client>();
-        nested->set_root(fs::path(wide(current_root)));
-        try {
-            nested->start(wide(command), arguments, fs::path(wide(cwd)),
-                          [this](Json event) { queue_dap({{"event", "dap.event"}, {"payload", std::move(event)}}); });
-        } catch (const taocode::WorkspaceError& failure) {
-            error = failure.what();
-            return Json::object();
-        }
-        stop_dap();
-        dap = std::move(nested);
-        Json request_configuration = configuration;
-        if (!request_configuration.contains("request"))
-            request_configuration["request"] = entry.value("request", std::string("launch"));
-        // The reply arrives on the nested adapter's reader thread, which may answer
-        // long after this function gives up waiting (its own request timeout is two
-        // minutes). The state therefore lives in a shared_ptr the callback keeps
-        // alive: capturing stack locals by reference here was a use-after-free that
-        // would corrupt the stack the moment a slow adapter answered.
-        struct Startup {
-            std::atomic<bool> done{false};
-            std::atomic<bool> failed{false};
-            std::mutex mutex;
-            std::string message;
-        };
-        auto startup = std::make_shared<Startup>();
-        dap->start_debugging(kind, std::move(request_configuration), [startup](Json, Json failure) {
-            if (!failure.is_null()) {
-                std::lock_guard lock(startup->mutex);
-                startup->message = failure.value("message", std::string("调试启动失败"));
-                startup->failed.store(true);
-            }
-            startup->done.store(true);
-        });
-        // A whole initialize -> launch -> setBreakpoints -> configurationDone handshake
-        // legitimately takes a while, so the bound is generous; it exists only so a
-        // silent adapter cannot wedge the session that asked for the child.
-        for (int waited = 0; !startup->done.load() && waited < 3000; ++waited)
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        if (!startup->done.load()) { error = "调试适配器启动超时。"; return Json::object(); }
-        if (startup->failed.load()) {
-            std::lock_guard lock(startup->mutex);
-            error = startup->message.empty() ? std::string("调试启动失败") : startup->message;
-            return Json::object();
-        }
-        return Json::object();
-    }
-
-    void stop_dap() noexcept {
-        // Graceful first: `disconnect` asks the adapter to end the session, waits at
-        // most 5s for it to actually go away and then shuts the pipes down itself, so
-        // this is bounded. shutdown() afterwards is idempotent and is what makes the
-        // stop deterministic — it closes stdin, kills the job and joins the reader
-        // thread (detaching it instead when it is called *from* that thread, which is
-        // what a reverse request does). Destroying the client straight after start()
-        // used to detach a still-running reader — a use-after-free that surfaced as
-        // random crashes right after a detach.
-        // 收摊时必须结束被调试进程（默认语义）；「断开但保留进程」是 dap.disconnect 的显式选项。
-        if (dap) { dap->disconnect(true, {}); dap->shutdown(); dap.reset(); }
-        reap_external_runners();
-    }
 
     std::string require_repo_root() const {
         if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
@@ -964,30 +819,6 @@ struct App {
             const auto& params = request.at("params");
             if (!params.is_object()) throw taocode::WorkspaceError("INVALID_REQUEST", "参数必须为 JSON 对象");
             Json result;
-            if (!on_worker && method == "browser.data.clear") {
-                const auto mode = params.at("mode").get<std::string>();
-                if (mode != "cache" && mode != "all")
-                    throw taocode::WorkspaceError("INVALID_REQUEST", "未知的浏览器数据清理模式。");
-                const HWND reply_window = window;
-                const Json request_id = request["id"];
-                embedded_browser_profile.clear_data(mode.c_str(), [reply_window, request_id, start](bool success) {
-                    if (!IsWindow(reply_window)) return;
-                    auto* target = reinterpret_cast<App*>(GetWindowLongPtrW(reply_window, GWLP_USERDATA));
-                    if (!target) return;
-                    target->post_json({{"id", request_id}, {"ok", true}, {"result", {{"success", success}}},
-                                       {"durationMs", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count()}});
-                });
-                return;
-            }
-            if (!on_worker && method == "agent.model.stream") { start_agent_model(request); return; }
-            if (!on_worker && method == "agent.model.cancel") {
-                result = {{"stopped", stop_agent_model(params.value("streamId", std::uint64_t{0}), false)}};
-                reply["ok"] = true;
-                reply["result"] = std::move(result);
-                reply["durationMs"] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-                post_json(reply);
-                return;
-            }
             if (!on_worker && method.rfind("agent.mcp.", 0) == 0) {
                 queue_agent_mcp_request(request);
                 return;
@@ -1009,13 +840,35 @@ struct App {
             // `dap.*` 一族（含 loadedSources/modules 的按需重取、反向调试、内存/反汇编）在
             // native/dap_routes.cpp —— main.cpp 贴着 2000 行硬上限，新能力一律抽模块
             // （与 native/file_queries.cpp 同一种拆法；异步答复已由宿主回调送出，这里直接 return）。
-            const auto dap_route = taocode::dap::dispatch_dap_route(method, params, request["id"], *this, result);
+            const auto dap_route = taocode::dap::dispatch_dap_route(method, params, request["id"], *dap_host, result);
             if (dap_route == taocode::dap::RouteOutcome::answered_async) return;
             if (dap_route != taocode::dap::RouteOutcome::unhandled) {}  // result 已由 dap 路由填好
             else if (auto it = routes.find(method); it != routes.end()) result = it->second(params);
             // 文件/系统侧的只读查询（七条）在 native/file_queries.cpp —— main.cpp 贴着 2000 行上限。
             else if (workspace && taocode::dispatch_file_query(method, params, *workspace, result)) {}
             else switch (fnv1a(method)) {
+            // 这三条原先写成上面那串 `if (method == …)`：routing-parity 门禁只认带 `_h` 的 case 标签
+            // 与 `routes.emplace(…)` 两种形状，写成 if 会让门禁把「前端能发、原生真处理」误报成
+            // UNKNOWN_METHOD 风险。搬进 switch 语义不变 —— 三条都不在 clone_active 的禁用表里，
+            // 也都不是 git.* / dap.* / agent.mcp.* 前缀；`agent.model.cancel` 原来手写的那段回包
+            // 与 switch 尾部统一回包逐字段相同（ok/result/durationMs），因此改走统一路径。
+            case "browser.data.clear"_h: {
+                const auto mode = params.at("mode").get<std::string>();
+                if (mode != "cache" && mode != "all")
+                    throw taocode::WorkspaceError("INVALID_REQUEST", "未知的浏览器数据清理模式。");
+                const HWND reply_window = window;
+                const Json request_id = request["id"];
+                embedded_browser_profile.clear_data(mode.c_str(), [reply_window, request_id, start](bool success) {
+                    if (!IsWindow(reply_window)) return;
+                    auto* target = reinterpret_cast<App*>(GetWindowLongPtrW(reply_window, GWLP_USERDATA));
+                    if (!target) return;
+                    target->post_json({{"id", request_id}, {"ok", true}, {"result", {{"success", success}}},
+                                       {"durationMs", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count()}});
+                });
+                return;  // 答复由 clear_data 的回调送出
+            }
+            case "agent.model.stream"_h: { start_agent_model(request); return; }
+            case "agent.model.cancel"_h: { result = {{"stopped", stop_agent_model(params.value("streamId", std::uint64_t{0}), false)}}; break; }
             case "app.state"_h: {
                 result = projects->state();
                 result["gitAvailable"] = !taocode::find_git_executable().empty();
@@ -1039,7 +892,7 @@ struct App {
                 git_host->stop_git();
                 // Breakpoints belong to a project: leaving them behind would make the
                 // next debug session stop in files that are no longer open.
-                if (dap) dap->clear_breakpoints();
+                dap_host->clear_breakpoints();
                 stop_watcher();
                 stop_lsp();
                 stop_dap();

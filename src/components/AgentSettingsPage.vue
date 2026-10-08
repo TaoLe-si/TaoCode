@@ -15,8 +15,8 @@
 //   其余节各自一个组件（`src/components/agent-settings/`）。
 import { computed, reactive, ref } from 'vue'
 import {
-  AlarmClock, Anchor, BarChart3, Blocks, Bot, Brain, Cable, Keyboard,
-  Package, Palette, Pencil, Settings2, Terminal, WandSparkles,
+  AlarmClock, Anchor, BarChart3, Blocks, Bot, Brain, Cable, Globe2, Keyboard,
+  MonitorSmartphone, Package, Palette, Pencil, Settings2, Terminal, WandSparkles,
 } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
 import {
@@ -28,7 +28,9 @@ import { AGENT_COMMANDS } from '../agentCommands'
 import { AGENT_SESSION_LIMIT, createAgentSessionStore } from '../agentSessions'
 import {
   AGENT_DEFAULT_PROVIDER_API_TYPE, AGENT_MODEL_PROVIDER_MESSAGES, AGENT_PROVIDER_API_FORMATS,
-  AGENT_PROVIDER_API_FORMAT_TITLES, type AgentProviderModelConfig,
+  AGENT_PROVIDER_API_FORMAT_TITLES, fromAgentModelProvider, resolveAgentProviderDraftValues,
+  resolvePendingAgentProviderDraftSave, resolveProviderNameEditKeyAction,
+  validateAgentModelProviderTable, type AgentProviderDraftValues, type AgentProviderModelConfig,
 } from '../agentModelProviders'
 // 各节各有**独立的纯逻辑模块 + 判据**，所以界面也各自一个组件（2026-10-07 拆出
 // `src/components/agent-settings/`）：本页只管节导航与 Agent 总设置（常规 / 模型设置），
@@ -42,6 +44,8 @@ import SubagentsSettingsSection from './agent-settings/SubagentsSettingsSection.
 import PluginsSettingsSection from './agent-settings/PluginsSettingsSection.vue'
 import McpSettingsSection from './agent-settings/McpSettingsSection.vue'
 import ModelMetadataSection from './agent-settings/ModelMetadataSection.vue'
+import BrowserControlSettingsSection from './agent-settings/BrowserControlSettingsSection.vue'
+import ComputerUseSettingsSection from './agent-settings/ComputerUseSettingsSection.vue'
 
 const props = defineProps<{
   /** 宿主注入的保存通道（App.vue 的 `persistAgentSettings`）。给了才有保存按钮。 */
@@ -55,13 +59,17 @@ const emit = defineEmits<{
 }>()
 
 // ── 节导航（顺序与分组逐字照 settingsPageConfig.ts；标题照 zh-CN.ts）──────────────────────
-type SectionId = 'general' | 'appearance' | 'modelProvider' | 'shortcuts'
+type SectionId = 'general' | 'appearance' | 'modelProvider' | 'browser' | 'computerUse' | 'shortcuts'
   | 'memory' | 'subagents' | 'plugin' | 'mcp' | 'skill' | 'commands' | 'automations' | 'hooks' | 'usage'
 const SECTION_GROUPS: Array<{ title: string; items: Array<{ id: SectionId; label: string; icon: unknown }> }> = [
   { title: '基础设置', items: [
     { id: 'general', label: '常规', icon: Settings2 },
     { id: 'appearance', label: '外观', icon: Palette },
     { id: 'modelProvider', label: '模型设置', icon: Package },
+    // `browser` 的图标是 ZCode `settingsPageConfig.ts:125-138` 的 Globe2；`computerUse` 的本仓
+    // 取 MonitorSmartphone（同一节在 ZCode 那边也没有规定图标，取"屏幕 + 设备"最贴近的 lucide 角色）。
+    { id: 'browser', label: '浏览器控制', icon: Globe2 },
+    { id: 'computerUse', label: '电脑控制', icon: MonitorSmartphone },
     { id: 'shortcuts', label: '键盘快捷键', icon: Keyboard },
   ] },
   { title: 'Agent 能力', items: [
@@ -88,9 +96,91 @@ function selectSection(id: SectionId) {
 
 // ── 草稿与保存 ─────────────────────────────────────────────────────────────────
 const draft = reactive<AgentSettingsState>(loadAgentSettings())
-const problems = computed(() => validateAgentSettings(draft))
+const providerEditDrafts = reactive<Record<string, AgentProviderDraftValues>>({})
+for (const provider of draft.providers) {
+  providerEditDrafts[provider.id] = resolveAgentProviderDraftValues(fromAgentModelProvider(provider))
+}
+const editingProviderName = ref<string | null>(null)
+const providerNameCompositionActive = ref(false)
+const providerFieldCompositionActive = ref(false)
+const providerValidationRecords = computed(() => draft.providers.map(provider => {
+  const current = fromAgentModelProvider(provider)
+  const values = providerEditDrafts[provider.id]
+  return values
+    ? resolvePendingAgentProviderDraftSave({ provider: current, draft: values }) ?? current
+    : current
+}))
+const problems = computed(() => [
+  ...validateAgentSettings(draft),
+  ...validateAgentModelProviderTable(providerValidationRecords.value).map(issue => issue.message),
+])
 const savedNote = ref('')
+function providerDraftFor(provider: AgentModelProvider): AgentProviderDraftValues {
+  return providerEditDrafts[provider.id] ??= resolveAgentProviderDraftValues(fromAgentModelProvider(provider))
+}
+function commitProviderDraft(provider: AgentModelProvider, nameConfirmed = false) {
+  const values = providerDraftFor(provider)
+  const current = fromAgentModelProvider(provider)
+  const currentValues = resolveAgentProviderDraftValues(current)
+  if (nameConfirmed && !values.nameValue.trim()) {
+    values.nameValue = currentValues.nameValue
+    editingProviderName.value = null
+    providerNameCompositionActive.value = false
+    return
+  }
+  const next = resolvePendingAgentProviderDraftSave({ provider: current, draft: values, nameConfirmed })
+  if (next) {
+    if (nameConfirmed && next.name !== current.name) provider.name = next.name
+    if (values.apiFormat !== currentValues.apiFormat) provider.apiFormat = next.apiFormat
+    if (next.baseUrl !== current.baseUrl) provider.baseUrl = next.baseUrl
+    if (next.apiKey !== current.apiKey) provider.apiKey = next.apiKey
+  }
+  const committedValues = resolveAgentProviderDraftValues(fromAgentModelProvider(provider))
+  values.apiFormat = committedValues.apiFormat
+  values.baseUrlValue = committedValues.baseUrlValue
+  values.apiKeyValue = committedValues.apiKeyValue
+  if (nameConfirmed) {
+    values.nameValue = committedValues.nameValue
+    editingProviderName.value = null
+    providerNameCompositionActive.value = false
+  }
+}
+function beginProviderNameEdit(provider: AgentModelProvider) {
+  const values = providerDraftFor(provider)
+  values.nameValue = resolveAgentProviderDraftValues(fromAgentModelProvider(provider)).nameValue
+  editingProviderName.value = provider.id
+  providerNameCompositionActive.value = false
+  requestAnimationFrame(() => document.getElementById(`provider-name-${provider.id}`)?.focus())
+}
+function cancelProviderNameEdit(provider: AgentModelProvider) {
+  providerDraftFor(provider).nameValue = resolveAgentProviderDraftValues(fromAgentModelProvider(provider)).nameValue
+  editingProviderName.value = null
+  providerNameCompositionActive.value = false
+}
+function commitProviderNameEdit(provider: AgentModelProvider) {
+  if (editingProviderName.value !== provider.id) return
+  commitProviderDraft(provider, true)
+}
+function handleProviderNameKeydown(provider: AgentModelProvider, event: KeyboardEvent) {
+  const action = resolveProviderNameEditKeyAction({
+    key: event.key,
+    compositionActive: providerNameCompositionActive.value,
+    isComposing: event.isComposing,
+  })
+  if (action === 'commit') {
+    event.preventDefault()
+    ;(event.currentTarget as HTMLInputElement).blur()
+  } else if (action === 'cancel') {
+    event.preventDefault()
+    cancelProviderNameEdit(provider)
+  }
+}
+function handleProviderConnectionKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || providerFieldCompositionActive.value || event.isComposing) return
+  ;(event.currentTarget as HTMLInputElement).blur()
+}
 function save() {
+  draft.providers.forEach(provider => commitProviderDraft(provider))
   if (problems.value.length) return
   const next = normalizeAgentSettings(JSON.parse(JSON.stringify(draft)))
   const ok = props.persist ? props.persist(next) : saveAgentSettings(next)
@@ -98,6 +188,10 @@ function save() {
 }
 function resetDefaults() {
   Object.assign(draft, defaultAgentSettings())
+  for (const id of Object.keys(providerEditDrafts)) delete providerEditDrafts[id]
+  editingProviderName.value = null
+  providerNameCompositionActive.value = false
+  providerFieldCompositionActive.value = false
   savedNote.value = ''
 }
 
@@ -108,16 +202,24 @@ function addProvider() {
   if (!name) return
   const id = `provider-${Date.now()}`
   const models = providerDraft.modelId.trim()
-    ? [{ id: providerDraft.modelId.trim(), name: providerDraft.modelName.trim() || providerDraft.modelId.trim(), enabled: true }]
+    ? [{ id: providerDraft.modelId.trim(), name: providerDraft.modelName.trim() || providerDraft.modelId.trim(), enabled: true, supportsToolCall: true }]
     : []
-  draft.providers.push({ id, name, baseUrl: providerDraft.baseUrl.trim(), apiKey: providerDraft.apiKey, apiFormat: providerDraft.apiFormat, models })
+  const provider = { id, name, baseUrl: providerDraft.baseUrl.trim(), apiKey: providerDraft.apiKey, apiFormat: providerDraft.apiFormat, models }
+  draft.providers.push(provider)
+  providerEditDrafts[id] = resolveAgentProviderDraftValues(fromAgentModelProvider(provider))
   providerDraft.name = ''; providerDraft.baseUrl = ''; providerDraft.apiKey = ''; providerDraft.apiFormat = AGENT_DEFAULT_PROVIDER_API_TYPE; providerDraft.modelId = ''; providerDraft.modelName = ''
 }
-function removeProvider(index: number) { draft.providers.splice(index, 1) }
+function removeProvider(index: number) {
+  const provider = draft.providers[index]
+  if (!provider) return
+  if (editingProviderName.value === provider.id) cancelProviderNameEdit(provider)
+  delete providerEditDrafts[provider.id]
+  draft.providers.splice(index, 1)
+}
 function addModel(provider: AgentModelProvider) {
   const id = providerDraft.modelId.trim()
   if (!id) return
-  provider.models.push({ id, name: providerDraft.modelName.trim() || id, enabled: true })
+  provider.models.push({ id, name: providerDraft.modelName.trim() || id, enabled: true, supportsToolCall: true })
   providerDraft.modelId = ''; providerDraft.modelName = ''
 }
 function toggleModel(provider: AgentModelProvider, index: number) { provider.models[index]!.enabled = !provider.models[index]!.enabled }
@@ -129,6 +231,8 @@ function toggleModel(provider: AgentModelProvider, index: number) { provider.mod
 const editingModel = ref<{ providerId: string; modelId: string } | null>(null)
 /** 入口按钮文案 —— zh-CN.ts:2553 `settings.modelProvider.editModel`（上游弹窗的标题与铅笔按钮同名）。 */
 const MODEL_EDIT_LABEL = '编辑模型配置'
+/** InlineEditableProviderCard.tsx:162 / zh-CN.ts:3121 `settings.modelProvider.renameProvider`. */
+const PROVIDER_RENAME_LABEL = '重命名'
 
 function beginModelEdit(provider: AgentModelProvider, model: AgentProviderModelConfig) {
   const current = editingModel.value
@@ -220,14 +324,46 @@ const permissionTiers = [
       <template v-else-if="section === 'modelProvider'">
         <div v-for="(provider, index) in draft.providers" :key="provider.id" class="agent-provider">
           <div class="agent-provider-head">
-            <strong>{{ provider.name }}</strong>
-            <code class="agent-provider-url">{{ provider.baseUrl || '（未填端点）' }}</code>
-            <button class="agent-provider-remove" @click="removeProvider(index)">删除</button>
+            <input
+              v-if="editingProviderName === provider.id"
+              :id="`provider-name-${provider.id}`" v-model="providerDraftFor(provider).nameValue"
+              class="agent-provider-name-edit" type="text" aria-label="供应商名称"
+              @compositionstart="providerNameCompositionActive = true"
+              @compositionend="providerNameCompositionActive = false"
+              @blur="commitProviderNameEdit(provider)"
+              @keydown="handleProviderNameKeydown(provider, $event)"
+            />
+            <strong v-else>{{ provider.name }}</strong>
+            <button
+              v-if="editingProviderName !== provider.id" class="agent-model-edit" type="button"
+              :title="PROVIDER_RENAME_LABEL" :aria-label="PROVIDER_RENAME_LABEL"
+              @click="beginProviderNameEdit(provider)"
+            ><Pencil :size="iconSize.control" aria-hidden="true" /></button>
+            <button class="agent-provider-remove" type="button" @click="removeProvider(index)">删除</button>
           </div>
-          <div class="input-row agent-provider-format"><label :for="`provider-api-format-${provider.id}`">API 格式</label>
-            <select :id="`provider-api-format-${provider.id}`" v-model="provider.apiFormat">
-              <option v-for="format in AGENT_PROVIDER_API_FORMATS" :key="format" :value="format">{{ AGENT_PROVIDER_API_FORMAT_TITLES[format] }}</option>
-            </select></div>
+          <div class="agent-provider-fields">
+            <div class="input-row"><label :for="`provider-api-format-${provider.id}`">API 格式</label>
+              <select :id="`provider-api-format-${provider.id}`" v-model="providerDraftFor(provider).apiFormat" @change="commitProviderDraft(provider)">
+                <option v-for="format in AGENT_PROVIDER_API_FORMATS" :key="format" :value="format">{{ AGENT_PROVIDER_API_FORMAT_TITLES[format] }}</option>
+              </select>
+            </div>
+            <div class="input-row"><label :for="`provider-base-url-${provider.id}`">Base URL</label>
+              <input
+                :id="`provider-base-url-${provider.id}`" v-model="providerDraftFor(provider).baseUrlValue" type="text"
+                @compositionstart="providerFieldCompositionActive = true"
+                @compositionend="providerFieldCompositionActive = false"
+                @blur="commitProviderDraft(provider)" @keydown="handleProviderConnectionKeydown"
+              />
+            </div>
+            <div class="input-row"><label :for="`provider-api-key-${provider.id}`">API Key</label>
+              <input
+                :id="`provider-api-key-${provider.id}`" v-model="providerDraftFor(provider).apiKeyValue" type="password"
+                @compositionstart="providerFieldCompositionActive = true"
+                @compositionend="providerFieldCompositionActive = false"
+                @blur="commitProviderDraft(provider)" @keydown="handleProviderConnectionKeydown"
+              />
+            </div>
+          </div>
           <ul class="agent-model-list">
             <li v-for="(model, modelIndex) in provider.models" :key="model.id">
               <div class="agent-model-row">
@@ -279,6 +415,8 @@ const permissionTiers = [
       <SubagentsSettingsSection v-else-if="section === 'subagents'" />
       <PluginsSettingsSection v-else-if="section === 'plugin'" />
       <McpSettingsSection v-else-if="section === 'mcp'" />
+      <BrowserControlSettingsSection v-else-if="section === 'browser'" :workspace-path="props.workspacePath" />
+      <ComputerUseSettingsSection v-else-if="section === 'computerUse'" :workspace-path="props.workspacePath" />
 
       <!-- ── 使用统计：会话库实测数字 ──────────────────────────────────────────── -->
       <template v-else-if="section === 'usage'">
@@ -327,10 +465,11 @@ const permissionTiers = [
 .agent-actions { position: sticky; z-index: 1; bottom: 0; display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-2) 0; border-top: 1px solid var(--line); background: var(--editor); }
 .agent-provider { margin: 0; padding: var(--space-2) 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
 .agent-provider-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.agent-provider-head > strong { color: var(--bright); font-size: 14px; }
-.agent-provider-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--secondary); font: 11px var(--font-mono); }
+.agent-provider-head > strong { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--bright); font-size: 14px; }
+.agent-provider-head > .agent-provider-name-edit { flex: 1 1 auto; min-width: 0; }
 .agent-provider-remove { min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--error); font: inherit; font-size: 12px; cursor: pointer; }
 .agent-provider-remove:hover { background: var(--error-bg); }
+.agent-provider-fields { margin-top: var(--space-2); }
 .agent-model-list { list-style: none; margin: var(--space-2) 0 0; padding: var(--space-1) 0 0; display: flex; flex-direction: column; gap: var(--space-1); border-top: 1px solid var(--line); }
 .agent-model-list > li { min-width: 0; }
 .agent-model-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
@@ -367,7 +506,6 @@ const permissionTiers = [
   .agent-settings-body .input-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
   .agent-settings-body > .settings-fields { padding-inline: var(--space-2); }
   .agent-provider-head { flex-wrap: wrap; }
-  .agent-provider-url { flex-basis: 100%; order: 1; }
   .agent-provider-add input { flex-basis: 100%; }
   .agent-kv { grid-template-columns: minmax(0, 1fr); }
   .agent-kv > code { text-align: left; }

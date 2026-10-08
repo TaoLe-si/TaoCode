@@ -373,15 +373,15 @@ watch(directory, () => { selected.value = null })
     <div class="panel-heading"><span><HistoryIcon :size="iconSize.control" />本地历史</span><span class="heading-count">{{ total }}</span></div>
     <div v-if="path && ready && isDesktop" class="hist-tools">
       <button class="hist-tool" :class="{ on: mode === 'file' }" title="只看当前文件（含重命名前的路径）" aria-label="只看当前文件" :aria-pressed="mode === 'file'" @click="mode = 'file'"><FileCode2 :size="iconSize.menu" /></button>
-      <button class="hist-tool" :class="{ on: mode === 'session' }" aria-label="变更文件的会话视图" :aria-pressed="mode === 'session'" @click="mode = 'session'"><Files :size="iconSize.menu" /></button>
+      <button class="hist-tool" :class="{ on: mode === 'session' }" aria-label="变更文件的会话视图" title="变更文件的会话视图" :aria-pressed="mode === 'session'" @click="mode = 'session'"><Files :size="iconSize.menu" /></button>
       <input v-if="mode === 'session'" v-model="directory" class="hist-directory" aria-label="按目录过滤会话" placeholder="只列这个目录 / 路径前缀…" spellcheck="false" />
       <button class="subtle-button hist-restore" :disabled="restoring || !selected" :title="selected ? '把列出的文件都回退到所选时刻之前的版本' : '先在左侧选一个版本作为回滚边界'" @click="restoreSession"><Clock aria-hidden="true" :size="iconSize.menu" />恢复到此时刻</button>
-      <button class="hist-tool" type="button" :disabled="!projectRoot" :aria-expanded="labelPrompt" aria-controls="hist-label-add" aria-label="放置标签" @click="labelPrompt = !labelPrompt"><Tag :size="iconSize.menu" /></button>
+      <button class="hist-tool" type="button" :disabled="!projectRoot" :aria-expanded="labelPrompt" aria-controls="hist-label-add" aria-label="放置标签" title="放置标签" @click="labelPrompt = !labelPrompt"><Tag :size="iconSize.menu" /></button>
     </div>
     <div v-if="labelPrompt && projectRoot" id="hist-label-add" class="hist-label-add">
       <input v-model="labelDraft" class="hist-label-input" aria-label="标签名" placeholder="标签名…" spellcheck="false" @keydown.enter="createLabel" />
       <button class="subtle-button" :disabled="!labelDraft.trim()" @click="createLabel"><Plus aria-hidden="true" :size="iconSize.menu" />放置</button>
-      <button class="hist-tool" aria-label="取消" @click="labelPrompt = false; labelError = ''"><X :size="iconSize.menu" /></button>
+      <button class="hist-tool" aria-label="取消" title="取消" @click="labelPrompt = false; labelError = ''"><X :size="iconSize.menu" /></button>
     </div>
     <p v-if="labelError" class="hist-error">{{ labelError }}</p>
     <div v-if="labels.length" class="hist-labels" role="list" aria-label="标签">
@@ -389,7 +389,7 @@ watch(directory, () => { selected.value = null })
         <Tag :size="iconSize.menu" aria-hidden="true" />
         <span class="hist-label-name" :title="tag.path ? `打在 ${tag.path}` : ''">{{ labelRowText(tag) }}</span>
         <button class="subtle-button hist-label-go" :disabled="restoring" title="把列出的文件都回退到这个标签的时刻之前" @click="restoreToLabel(tag)">恢复</button>
-        <button class="hist-tool" aria-label="删除标签" @click="deleteLabel(tag.name)"><X :size="iconSize.menu" /></button>
+        <button class="hist-tool" aria-label="删除标签" title="删除标签" @click="deleteLabel(tag.name)"><X :size="iconSize.menu" /></button>
       </div>
     </div>
     <p v-if="!path" class="hist-empty">选择一个文件查看其本地历史。</p>

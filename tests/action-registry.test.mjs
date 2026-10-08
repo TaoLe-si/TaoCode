@@ -157,7 +157,10 @@ test('接线：keymap.ts 经注册表分派、帮助菜单有冲突检查入口�
   const keymap = readFileSync('src/keymap.ts', 'utf8')
   // 注册进注册表的是**生效表**（出厂 + 用户覆盖 + 动态动作），不是出厂表本身 ——
   // 否则用户改过的键位与绑了键的宏都不参与分派。
-  assert.match(keymap, /const bindings = effectiveKeyBindings\(\)/)
+  // base 必须是**分派表自己那一份出厂表**（`KEY_BINDINGS`），不是可编辑表的并集：
+  // `KEYMAP_EDITABLE_BINDINGS` 还含 agent 工具栏那几条，它们由别的分派器处理 —— 混进这张表
+  // 就是「按下去只吞键」的空转键。
+  assert.match(keymap, /const bindings = effectiveKeyBindings\(undefined, KEY_BINDINGS\)/)
   assert.match(keymap, /registerKeymapActions\(bindings,/)
   assert.match(keymap, /ACTIONS\.has\(binding\.id\)/)
   assert.match(keymap, /ACTIONS\.run\(binding\.id\)/)

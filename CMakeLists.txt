@@ -27,11 +27,11 @@ endif()
 
 # window_state（全屏等窗口态）放在这个库里：它同样只依赖 Win32 + json，
 # 而且 workspace_test 要能直接测它（加在可执行目标上就链接不到）。
-add_library(taocode_workspace native/workspace.cpp native/workspace_tree_ops.cpp native/workspace_templates.cpp native/window_state.cpp native/dialogs.cpp native/export_file.cpp native/file_queries.cpp)
+add_library(taocode_workspace native/workspace.cpp native/workspace_paths.cpp native/workspace_tree_ops.cpp native/workspace_templates.cpp native/window_state.cpp native/dialogs.cpp native/export_file.cpp native/file_queries.cpp)
 target_include_directories(taocode_workspace PUBLIC native)
 target_link_libraries(taocode_workspace PUBLIC nlohmann_json::nlohmann_json bcrypt)
 
-add_library(taocode_projects native/projects.cpp native/java_lsp_paths.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/settings_project_schema.cpp native/folding_state_schema.cpp native/trusted_paths.cpp native/git_clone.cpp native/git.cpp
+add_library(taocode_projects native/projects.cpp native/java_lsp_paths.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/settings_project_schema.cpp native/folding_state_schema.cpp native/trusted_paths.cpp native/git_clone.cpp native/git.cpp native/git_refs.cpp
                              native/settings_transfer.cpp native/git_log.cpp native/git_worktree.cpp native/git_hunks.cpp)
 target_link_libraries(taocode_projects PUBLIC taocode_workspace taocode_history xmllite shlwapi ole32)
 
@@ -42,7 +42,7 @@ add_library(taocode_lsp native/lsp.cpp native/lsp_host.cpp native/lsp_session.cp
 # 那是 `java_lsp_settings`（native/projects.cpp）—— 依赖是单向的，不成环。
 target_link_libraries(taocode_lsp PUBLIC taocode_workspace taocode_projects)
 
-add_library(taocode_runner native/runner.cpp native/run_host.cpp)
+add_library(taocode_runner native/runner.cpp native/run_host.cpp native/win_graceful_stop.cpp)
 # iphlpapi：run_host 的 `run.instances` 用 GetExtendedTcpTable 列出实例进程树的监听端口
 # （上游 execution/portsWatcher 的可见等价物，前端在 Run 控制台「进程」区显示）。
 target_link_libraries(taocode_runner PUBLIC taocode_workspace iphlpapi)
@@ -56,7 +56,7 @@ target_link_libraries(taocode_search PUBLIC taocode_workspace)
 #   dap_values.cpp   —— 「取值 / 补全 / 断点位置 / 数据与函数断点 / source」这一族请求
 #   dap_shaping.cpp  —— 响应整形（事件 / 栈帧 / 作用域 / 变量 / 异常 / 断点 / 补全 / 运行到光标处）
 #   dap_routes.cpp   —— 桥接层的 `dap.*` 分派（从 main.cpp 抽出，那边有 2000 行硬上限）
-add_library(taocode_dap native/dap.cpp native/dap_inspect.cpp native/dap_values.cpp native/dap_shaping.cpp native/dap_routes.cpp)
+add_library(taocode_dap native/dap.cpp native/dap_host.cpp native/dap_inspect.cpp native/dap_values.cpp native/dap_shaping.cpp native/dap_routes.cpp)
 target_link_libraries(taocode_dap PUBLIC taocode_workspace)
 
 add_library(taocode_terminal native/terminal.cpp native/terminal_bell.cpp)

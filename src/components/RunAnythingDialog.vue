@@ -32,7 +32,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { Terminal, X } from 'lucide-vue-next'
 import { buildRunAnythingRows, commandDisplayName, loadRunAnythingHistory, pushRunAnythingHistory, RUN_ANYTHING_GROUP_TITLES, type RunAnythingGroupId, type RunAnythingRow } from '../runAnything'
-import { CONTEXT_POPUP_TITLE, allRunAnythingContexts, contextPath, resolveSelectedContext, type RunAnythingContext } from '../runAnythingContext'
+import { CONTEXT_POPUP_TITLE, CONTEXT_TOOLTIP, allRunAnythingContexts, contextPath, resolveSelectedContext, type RunAnythingContext } from '../runAnythingContext'
 import { isDesktop, request } from '../bridge'
 import { recentDirectoryChooserStart, recentDirectoryPaths, rememberRunAnythingRecentDirectory } from '../runAnythingRecentDirectories'
 import { iconSize } from '../uiIcons'
@@ -178,7 +178,7 @@ onMounted(() => { void nextTick(() => input.value?.focus()) })
           @keydown.enter.exact.prevent="pick(rows[selected])"
           @keydown.down.prevent="move(1)" @keydown.up.prevent="move(-1)"
         ></textarea>
-        <label v-if="cellVisible" class="run-ctx">
+        <label v-if="cellVisible" class="run-ctx" :title="CONTEXT_TOOLTIP">
           <span class="run-ctx-title">{{ CONTEXT_POPUP_TITLE }}</span>
           <select
             ref="contextSelect"
@@ -191,7 +191,7 @@ onMounted(() => { void nextTick(() => input.value?.focus()) })
             >{{ entry.label }}</option>
           </select>
         </label>
-        <button class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" /></button>
+        <button class="icon-button" aria-label="关闭" title="关闭" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="palette-results" role="listbox" aria-label="Run Anything 候选">
         <template v-for="(row, index) in rows" :key="`${row.kind}:${row.name}:${index}`">

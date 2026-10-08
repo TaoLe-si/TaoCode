@@ -129,7 +129,7 @@ function apply() {
     <section class="help-dialog te-dialog" role="dialog" aria-modal="true" aria-label="运行目标">
       <header class="te-head">
         <h2>运行目标</h2>
-        <button type="button" class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
+        <button type="button" class="icon-button" aria-label="关闭" title="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
       </header>
       <div class="te-body">
         <!-- 左：目标清单（上游 master 树）。行 = 显示名 + 灰色已配语言；校验不过的行挂告警图标
@@ -155,9 +155,9 @@ function apply() {
           <!-- 工具条：新增 / 移除 / 复制（上游 MasterDetails.kt:176-180 的三个动作）。
                「添加」没有类型下拉：本仓只有本机一种目标类型。 -->
           <div class="te-toolbar" role="toolbar" aria-label="目标工具条">
-            <button type="button" class="icon-button" aria-label="添加目标于 本机" :disabled="busy" @click="addTarget"><Plus :size="iconSize.control" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" aria-label="移除" :disabled="busy || !selected" @click="removeTarget"><Minus :size="iconSize.toolbar" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" aria-label="复制" :disabled="busy || !selected" @click="copyTarget"><Copy :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="添加目标于 本机" title="添加目标于 本机" :disabled="busy" @click="addTarget"><Plus :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="移除" title="移除" :disabled="busy || !selected" @click="removeTarget"><Minus :size="iconSize.toolbar" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" aria-label="复制" title="复制" :disabled="busy || !selected" @click="copyTarget"><Copy :size="iconSize.control" aria-hidden="true" /></button>
           </div>
         </div>
 
@@ -175,7 +175,7 @@ function apply() {
               <div v-for="(entry, index) in selected.runtimes" :key="entry.typeId" class="te-runtime">
                 <div class="te-runtime-head">
                   <span class="te-runtime-name">{{ languageRuntimeType(entry.typeId)?.displayName ?? entry.typeId }}</span>
-                  <button type="button" class="icon-button" :aria-label="`移除运行时 ${languageRuntimeType(entry.typeId)?.displayName ?? entry.typeId}`" :disabled="busy" @click="removeRuntime(index)"><Minus :size="iconSize.dense" aria-hidden="true" /></button>
+                  <button type="button" class="icon-button" :aria-label="`移除运行时 ${languageRuntimeType(entry.typeId)?.displayName ?? entry.typeId}`" :title="`移除运行时 ${languageRuntimeType(entry.typeId)?.displayName ?? entry.typeId}`" :disabled="busy" @click="removeRuntime(index)"><Minus :size="iconSize.dense" aria-hidden="true" /></button>
                 </div>
                 <label class="field-row"><span>{{ languageRuntimeType(entry.typeId)?.homeLabel ?? '主路径:' }}</span>
                   <input :value="entry.homePath" :aria-label="`${languageRuntimeType(entry.typeId)?.displayName ?? entry.typeId} 主路径`" :placeholder="entry.typeId === 'JavaLanguageRuntime' ? 'D:\\Java\\jbr' : 'C:\\Program Files\\…'" @input="setRuntimeField(entry.typeId, 'homePath', ($event.target as HTMLInputElement).value)" />

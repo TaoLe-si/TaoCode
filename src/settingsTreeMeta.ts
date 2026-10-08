@@ -155,14 +155,19 @@ export const SETTINGS_NODES: SettingsNode[] = [
   // 规则、默认值与持久化都在 src/agentSettings.ts；页面是 src/components/AgentSettingsPage.vue。
   { key: 'agent', label: 'Agent', icon: Bot, parent: null, keywords: 'Agent 对话 模型 权限 批准 上下文 差异 保留 撤回 agent model permission approval diff do undo' },
   { key: 'commit', label: '提交', icon: GitCommitIcon, parent: 'project.propVCSSupport.Mappings', keywords: '提交 信息 主题 正文 右边距 空行 换行 commit message margin' },
+  // vcs.log（`platform/vcs-log/impl/resources/intellij.platform.vcs.log.impl.xml:86` 的
+  // `<projectConfigurable id="vcs.log"`，parentId=project.propVCSSupport.Mappings）：项目结构页。
   { key: 'vcs.log', label: 'VCS 日志', icon: History, parent: 'project.propVCSSupport.Mappings', keywords: 'VCS 日志 标签名 仓库根名 vcs log tag root names' },
 
   // actions.on.save groupId="tools"（intellij.platform.ide.impl.xml:1315）
   { key: 'tools.actionsOnSave', label: '保存时操作', icon: Save, parent: 'group:tools', keywords: '保存 时 操作 格式化 重新格式化 actions on save format reformat' },
   { key: 'preferences.externalTools', label: '外部工具', icon: Hammer, parent: 'group:tools', keywords: '外部工具 命令 收藏 external tools run' },
+  // diff.base（`platform/diff-impl/resources/intellij.platform.diff.impl.xml:78` 的
+  // `<applicationConfigurable groupId="tools" id="diff.base"`）：工具页下的「差异与合并」。
   { key: 'diff.base', label: '差异与合并', icon: SlidersHorizontal, parent: 'group:tools', keywords: '差异 合并 上下文 行数 diff merge context lines' },
 
-  // build.tools groupId="build"（ExternalSystemExtensions.xml:24）；它自己是一个页面
+  // build.tools groupId="build"（`platform/external-system-impl/resources/META-INF/ExternalSystemExtensions.xml:24`
+  // 的 `<projectConfigurable groupId="build" id="build.tools"`）；它自己是一个页面
   // （ExternalSystemGroupConfigurable = BoundSearchableConfigurable，kt:22-26），同时又是 Gradle 页的父节点。
   { key: 'build.tools', label: '构建工具', icon: Hammer, parent: 'group:build', keywords: '构建 工具 自动 重新加载 build tools reload external system' },
   // Gradle（intellij.gradle.xml:177-179，groupWeight 110）：是 build.tools 组的子页。

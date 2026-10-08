@@ -93,7 +93,7 @@ export interface AgentModelProvider {
   /** API key 只存本仓 localStorage（ZCode 走系统 keychain，差异如实登记）。 */
   apiKey: string
   /**
-   * 模型条目：完整形状（id/name/enabled + contextWindow / maxOutputTokens / inputFormat /
+   * 模型条目：完整形状（id/name/enabled + contextWindow / maxOutputTokens + map / inputFormat /
    * 能力开关 / reasoningLevels / reasoningLevelMap）见 `src/agentModelProviders.ts` 的
    * `AgentProviderModelConfig` —— 元数据必须跟设置一起落盘，剥掉就没法复原。
    */
@@ -162,11 +162,9 @@ function normalizeAgentModelReasoningLevels(value: unknown): string[] | undefine
   return levels.length > 0 ? [...new Set(levels)] : undefined
 }
 
-/** 正整数元数据（contextWindow / maxOutputTokens）：非有限、非正一律丢弃 —— **不补默认上限**。 */
+/** 正整数元数据（contextWindow / maxOutputTokens）：按 ZCode schema 拒绝小数、非有限和非正值，不做四舍五入。 */
 function normalizeAgentModelPositiveInteger(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
-  const rounded = Math.round(value)
-  return rounded > 0 ? rounded : undefined
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
 }
 
 /**
@@ -190,7 +188,21 @@ export function normalizeAgentProviderModelConfig(value: unknown): AgentProvider
   if (contextWindow !== undefined) model.contextWindow = contextWindow
   const maxOutputTokens = normalizeAgentModelPositiveInteger(raw.maxOutputTokens)
   if (maxOutputTokens !== undefined) model.maxOutputTokens = maxOutputTokens
+  if (raw.outputFormat === null) {
+    model.outputFormat = null
+  } else if (
+    raw.outputFormat &&
+    typeof raw.outputFormat === 'object' &&
+    typeof (raw.outputFormat as Record<string, unknown>).supportsText === 'boolean'
+  ) {
+    model.outputFormat = { supportsText: (raw.outputFormat as { supportsText: boolean }).supportsText }
+  }
+  if (typeof raw.maxOutputTokensMap === 'string' && raw.maxOutputTokensMap.trim()) {
+    model.maxOutputTokensMap = raw.maxOutputTokensMap.trim()
+  }
   if (typeof raw.supportsJsonSchemaOutput === 'boolean') model.supportsJsonSchemaOutput = raw.supportsJsonSchemaOutput
+  if (typeof raw.supportsToolCall === 'boolean') model.supportsToolCall = raw.supportsToolCall
+  if (typeof raw.requiresMfjsToolSchema === 'boolean') model.requiresMfjsToolSchema = raw.requiresMfjsToolSchema
   if (typeof raw.supportsNativeWebSearch === 'boolean') model.supportsNativeWebSearch = raw.supportsNativeWebSearch
   if (typeof raw.supportsMidConversationSystem === 'boolean') model.supportsMidConversationSystem = raw.supportsMidConversationSystem
   const reasoningLevels = normalizeAgentModelReasoningLevels(raw.reasoningLevels)
@@ -308,6 +320,10 @@ export function validateAgentSettings(settings: AgentSettingsState): string[] {
   const endpoint = settings.endpoint.trim()
   if (endpoint && !/^https?:\/\/[^\s]+$/.test(endpoint)) {
     problems.push('模型端点要么留空，要么是 http(s):// 开头的完整地址。')
+  }
+  // 模型名留空 = 用本地假模型（合法）；只填空白 = 用户以为自己填了名字，其实没有。
+  if (settings.model !== '' && settings.model.trim() === '') {
+    problems.push('模型名不能是空白：要么留空用本地假模型，要么填一个真名字。')
   }
   return problems
 }

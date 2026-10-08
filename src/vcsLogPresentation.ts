@@ -13,7 +13,7 @@
 // | `Vcs.Log.ShowLongEdges` | 长边 | ✅ 本批接住（原写 ❌，理由"跨行的长边没有中间表示"**与代码不符**：`vcsLogGraph.ts` 的 `pass` 行就是跨行表示。现在关档不再穿中间行，只在起点留一段竖线 ⇒ `buildLogGraph(list, { showLongEdges })`） |
 // | `Vcs.Log.PreferCommitDate` | 提交时间戳 | ✅ 接住：`git.logFull` 返回 `%cI`；表格日期格、搜索、复制和行 tooltip 共用所选日期，缺省关闭，日期列隐藏时禁用。 |
 // | `Vcs.Log.AlignLabels` | 左侧的引用 | ✅ 本批接住（原写 ❌。勾上 = 引用进**独立的对齐列**、消息不再被 chip 挤走，判据 `GraphCommitCellRenderer.kt:143-146` 的 `setLeftAligned` → 画师 `isLeftAligned`） |
-// | `Vcs.Log.HighlightersActionGroup` | （着色器组） | ❌ 判据：本地按仓库根着色（`rootColor`），没有"按作者/按日期"的着色器族 |
+// | `Vcs.Log.HighlightersActionGroup` | （着色器组） | △ 只接住 `MERGE_COMMITS`；当前分支、索引提交、我的提交着色器仍未接 |
 //
 // `列` 与 `标签名称` 都**不是**新发明的语义：前者是上游同一组的成员，后者是既有项目设置的入口 ——
 // 这一批只是把入口放到 IDEA 放的那一处（日志窗口自己的齿轮里），设置页那份仍然在。
@@ -49,6 +49,8 @@ export const LOG_PREVIEW_RIGHT_DESCRIPTION = '在右侧找到差异预览'
 /** `action.Vcs.Log.ShowChangesFromParents.text` / `.description`。 */
 export const LOG_CHANGES_FROM_PARENTS_TITLE = '显示对父项的更改'
 export const LOG_CHANGES_FROM_PARENTS_DESCRIPTION = '分别显示对每个合并提交所做的更改'
+/** `vcs.log.action.highlight.merge.commits` = `Merge Commits` in upstream `VcsLogBundle.properties:280`. */
+export const LOG_MERGE_COMMITS_TITLE = 'Merge Commits'
 /** `action.vcs.log.show.separator` = 显示（这一组上面的分隔小标题）。 */
 export const LOG_SHOW_SEPARATOR = '显示'
 /** `group.Vcs.Log.ToggleColumns.text` = 列。 */
@@ -113,6 +115,8 @@ export interface LogPresentationState {
   diffPreviewAtBottom: boolean
   /** `Changes.ShowChangesFromParents`（`MainVcsLogUiProperties.java:20`，缺省关 `:116-117`）。 */
   showChangesFromParents: boolean
+  /** `MERGE_COMMITS`（`VcsLogUiPropertiesImpl.kt` 对缺失高亮状态默认 true）。 */
+  highlightMergeCommits: boolean
 }
 
 export interface LogPresentationActions {
@@ -124,6 +128,7 @@ export interface LogPresentationActions {
   setAlignLabels: (value: boolean) => void
   setDiffPreviewAtBottom: (value: boolean) => void
   setShowChangesFromParents: (value: boolean) => void
+  setHighlightMergeCommits: (value: boolean) => void
 }
 
 /**
@@ -131,13 +136,13 @@ export interface LogPresentationActions {
  * 左侧引用 = 关、差异预览在下方 = 开、对父项的更改 = 关），长边那一条来自
  * `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogUiPropertiesImpl.kt:121-122`（**关**：
  * `LONG_EDGES_VISIBLE` 不在 `VcsLogApplicationSettings` 的 `exists()` 名单里（同文件 `:78-90`），
- * 所以走每份日志自己的 State，那份出厂是 false）。
+ * 所以走每份日志自己的 State，那份出厂是 false）；高亮器缺失状态默认 true（`VcsLogUiPropertiesImpl.kt:30`）。
  * `showTagNames` 不在这里：它是**项目设置** `vcsLog.showTagNames`，出厂值在 native 的默认里
  * （上游 `VcsLogApplicationSettings.kt:109-110` 的 `isShowTagNames = false` 与本仓不一致，已另开接线请求）。
  */
 export const LOG_PRESENTATION_DEFAULTS = {
   compactReferences: true, showLongEdges: false, preferCommitDate: false, alignLabels: false, diffPreviewAtBottom: true,
-  showChangesFromParents: false,
+  showChangesFromParents: false, highlightMergeCommits: true,
 } as const
 
 /**
@@ -196,6 +201,12 @@ export function logPresentationModel(state: LogPresentationState, actions: LogPr
       })),
     },
     {
+      id: 'vcs.log.highlighter.MERGE_COMMITS',
+      title: LOG_MERGE_COMMITS_TITLE,
+      checked: state.highlightMergeCommits,
+      run: () => actions.setHighlightMergeCommits(!state.highlightMergeCommits),
+    },
+    {
       id: 'vcs.log.changesFromParents',
       title: LOG_CHANGES_FROM_PARENTS_TITLE,
       checked: state.showChangesFromParents,
@@ -226,7 +237,7 @@ export function logPresentationModel(state: LogPresentationState, actions: LogPr
 /** 上游那一组里**本仓没接**的成员（判据在文件头那张表；判据测试逐条核对这里）。 */
 export const LOG_PRESENTATION_GAPS: ReadonlyArray<{ id: string; title: string; why: string }> = [
   { id: 'Vcs.Log.ShowRootsColumnAction', title: '根名称', why: '日志按仓库根分别打开 ⇒ hasMultiplePaths() 恒假，上游那条行也不会出现' },
-  { id: 'Vcs.Log.HighlightersActionGroup', title: '着色器', why: '本地只按仓库根着色，没有按作者/日期的着色器族' },
+  { id: 'Vcs.Log.HighlightersActionGroup', title: '着色器', why: '只接入 MERGE_COMMITS；CURRENT_BRANCH、INDEXED_COMMITS、MY_COMMITS 仍未接' },
 ]
 
 /**

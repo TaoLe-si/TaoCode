@@ -19,6 +19,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
     role="switch"
     :aria-checked="props.modelValue"
     :aria-label="props.accessibleName"
+    :title="props.accessibleName"
     @click="emit('update:modelValue', !props.modelValue)"
   ><span aria-hidden="true" /></button>
 </template>

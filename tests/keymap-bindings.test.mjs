@@ -99,7 +99,10 @@ test('消费链：分派器从表读，动作映射与表一一对应（不许�
   // 生效表 = 出厂表 + 用户自定义覆盖 + 运行期动态动作（宏）。
   // `effectiveKeyBindings()` 是上游 `KeymapManagerEx.getActiveKeymap()` 的等价物，
   // 分派与菜单显示读同一份，所以改键立刻改行为。
-  assert.match(source, /const bindings = effectiveKeyBindings\(\)/)
+  // base 显式给这份**分派表自己**的出厂表：`effectiveKeyBindings()` 的缺省 base 是
+  // `KEYMAP_EDITABLE_BINDINGS`（多含 agent 工具栏那几条，它们不归这里分派）⇒ 少给这一档就会
+  // 混进下面 `mapped` 对不上的 id。
+  assert.match(source, /const bindings = effectiveKeyBindings\(undefined, KEY_BINDINGS\)/)
   assert.match(source, /findKeyBinding\(event, \{ workspace: !!workspace\.value, editor: !!active\.value, lsp: lspReady\.value \}, bindings\)/)
   assert.match(source, /tailActions\[binding\.id\]/)
   const mapped = [...source.matchAll(/^\s*'([a-z][\w.]*)': \(\) =>/gm)].map(match => match[1])

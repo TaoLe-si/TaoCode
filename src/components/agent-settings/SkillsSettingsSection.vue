@@ -1,266 +1,162 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { ExternalLink, RefreshCw, Search, Trash2 } from 'lucide-vue-next'
+// 「技能」节（ZCode section id `skill`，`settingsPageConfig.ts:100-105`，图标 WandSparkles）的界面。
+//
+// 本节只做**接线**：形状 / 逐字段救 / 校验 / 搜索过滤 / 展示折述全在 `src/agentSkills.ts`
+// （判据 `tests/agent-skills.test.mjs`）。组件里不另写来源判定、不另写状态文案。
+//
+// 两处产品承诺（钉在 `tests/agent-settings-sections-b.test.mjs`）：
+//   · `injected === null` = 本仓没有技能运行时，**未知**。显式判 `=== null` 并显示模块给的
+//     `injectedLabel`；绝不写成 `!injected`（那会把「没接」渲染成「没被注入」）。
+//   · 本仓没有「卸载 / 删除技能目录」那一档，所以**一个纯图标删除按钮都没有**（不放假控件）。
+import { computed, reactive, ref } from 'vue'
+import { Plus, Save, Search } from 'lucide-vue-next'
 import { iconSize } from '../../uiIcons'
 import AgentSettingsSectionShell from './AgentSettingsSectionShell.vue'
 import {
-  deleteAgentSkill,
-  listAgentSkills,
-  revealAgentSkill,
-  setAgentSkillEnabled,
-  type AgentSkill,
-  type AgentSkillScope,
-} from '../../agentSkills.ts'
+  AGENT_BUILTIN_SKILL_ROOT,
+  describeSkillEntry, filterSkills, loadAgentSkillsSettings, normalizeAgentSkillsSettings,
+  saveAgentSkillsSettings, validateAgentSkillsSettings, type AgentSkillEntry,
+} from '../../agentSkills'
 
-const props = defineProps<{ workspacePath?: string | null }>()
-
-const skills = ref<AgentSkill[]>([])
-const selectedId = ref('')
+/** 草稿：本节自管（`reactive(normalize(load()))`，不与别的节共享页面那份 draft）。 */
+const draft = reactive(normalizeAgentSkillsSettings(loadAgentSkillsSettings()))
 const query = ref('')
-const loading = ref(false)
-const busyId = ref('')
-const error = ref('')
-const deleteTarget = ref<AgentSkill | null>(null)
-const deleteButton = ref<HTMLButtonElement | null>(null)
-const cancelButton = ref<HTMLButtonElement | null>(null)
-let focusReturn: HTMLElement | null = null
-let workspaceGeneration = 0
-let latestRefreshId = 0
+const selectedId = ref('')
+const editingId = ref('')
+const problems = ref<string[]>([])
+const status = ref('')
 
-const workspacePath = computed(() => props.workspacePath?.trim() ?? '')
-const workspaceLabel = computed(() => workspacePath.value.split(/[\\/]/u).filter(Boolean).at(-1) ?? '')
-const visibleSkills = computed(() => {
-  const needle = query.value.trim().toLocaleLowerCase()
-  if (!needle) return skills.value
-  return skills.value.filter(skill => `${skill.name}\n${skill.description}\n${skill.path}`.toLocaleLowerCase().includes(needle))
-})
-const selected = computed(() => skills.value.find(skill => skill.id === selectedId.value) ?? null)
+/** 列表行 = 模块折述过的字段（来源标签 / 启用标签 / 注入标签 / 空描述回落都在模块里）。 */
+const rows = computed(() => filterSkills(draft.entries, query.value).map(entry => ({
+  ...describeSkillEntry(entry),
+  entry,
+})))
 
-async function refresh() {
-  const requestId = ++latestRefreshId
-  const generation = workspaceGeneration
-  const targetPath = workspacePath.value
-  loading.value = true
-  error.value = ''
-  try {
-    const result = await listAgentSkills(targetPath)
-    if (requestId !== latestRefreshId || generation !== workspaceGeneration || targetPath !== workspacePath.value) return
-    skills.value = result.skills
-    if (!skills.value.some(skill => skill.id === selectedId.value)) selectedId.value = ''
-  } catch (caught) {
-    if (requestId === latestRefreshId && generation === workspaceGeneration && targetPath === workspacePath.value) {
-      error.value = caught instanceof Error ? caught.message : String(caught)
-    }
-  } finally {
-    if (requestId === latestRefreshId && generation === workspaceGeneration && targetPath === workspacePath.value) loading.value = false
-  }
-}
-
-watch(workspacePath, () => {
-  workspaceGeneration += 1
-  skills.value = []
-  selectedId.value = ''
-  deleteTarget.value = null
-  focusReturn = null
-  busyId.value = ''
-  void refresh()
-}, { immediate: true })
-
-onBeforeUnmount(() => {
-  workspaceGeneration += 1
-  latestRefreshId += 1
+const selected = computed(() => {
+  const entry = draft.entries.find(item => item.id === selectedId.value)
+  return entry ? describeSkillEntry(entry) : null
 })
 
-function isCurrentWorkspace(generation: number, targetPath: string): boolean {
-  return generation === workspaceGeneration && targetPath === workspacePath.value
+/** 编辑对象就是草稿里那一条（v-model 改的是同一个响应式对象，不另存一份）。 */
+const editing = computed(() => draft.entries.find(item => item.id === editingId.value) ?? null)
+
+function addEntry(): void {
+  const seed = normalizeAgentSkillsSettings({ entries: [{ name: '新技能' }] }).entries[0] as AgentSkillEntry
+  seed.id = `skill-${Date.now().toString(36)}`
+  seed.description = ''
+  seed.source = 'user'
+  draft.entries.push(seed)
+  selectedId.value = seed.id
+  editingId.value = seed.id
 }
 
-function scopeLabel(scope: AgentSkillScope, pluginName?: string): string {
-  if (scope === 'workspace') return workspaceLabel.value || '项目'
-  if (scope === 'plugin') return pluginName?.trim() || '插件'
-  return '个人'
+/** 移除**用户自己加**的条目；内置条目来自宿主目录，本仓没有卸载那一档，只能停用。 */
+function removeEntry(entry: AgentSkillEntry): void {
+  if (entry.source === 'builtin') return
+  draft.entries = draft.entries.filter(item => item.id !== entry.id)
+  if (selectedId.value === entry.id) selectedId.value = ''
+  if (editingId.value === entry.id) editingId.value = ''
 }
 
-function enabledLabel(enabled: boolean): string {
-  return enabled ? '已启用' : '已停用'
+/** 保存：先 validate 再 save。有 problems 就不写，并逐条显示。 */
+function save(): void {
+  const found = validateAgentSkillsSettings(draft)
+  problems.value = found
+  if (found.length) return
+  status.value = saveAgentSkillsSettings(draft)
+    ? '已保存到本机设置。'
+    : '本次会话仍生效，但没有存下来（本机存储不可用）。'
 }
 
-function formatPublishedAt(value?: number): string | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toISOString()
-}
-
-async function toggleSkill(skill: AgentSkill, event: Event) {
-  const enabled = (event.target as HTMLInputElement).checked
-  const targetPath = workspacePath.value
-  const generation = workspaceGeneration
-  busyId.value = skill.id
-  error.value = ''
-  try {
-    const result = await setAgentSkillEnabled(targetPath, skill.id, enabled)
-    if (!isCurrentWorkspace(generation, targetPath)) return
-    latestRefreshId += 1
-    loading.value = false
-    skills.value = result.skills
-  } catch (caught) {
-    if (isCurrentWorkspace(generation, targetPath)) {
-      error.value = caught instanceof Error ? caught.message : String(caught)
-    }
-  } finally {
-    if (isCurrentWorkspace(generation, targetPath) && busyId.value === skill.id) busyId.value = ''
-  }
-}
-
-function requestDelete(skill: AgentSkill) {
-  focusReturn = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  error.value = ''
-  deleteTarget.value = skill
-  void nextTick(() => cancelButton.value?.focus())
-}
-
-function closeDelete() {
-  if (busyId.value) return
-  deleteTarget.value = null
-  void nextTick(() => {
-    if (focusReturn?.isConnected) focusReturn.focus()
-    focusReturn = null
-  })
-}
-
-function trapDeleteFocus(event: KeyboardEvent) {
-  if (event.key !== 'Tab') return
-  if (event.shiftKey && document.activeElement === cancelButton.value) {
-    event.preventDefault()
-    deleteButton.value?.focus()
-  } else if (!event.shiftKey && document.activeElement === deleteButton.value) {
-    event.preventDefault()
-    cancelButton.value?.focus()
-  }
-}
-
-async function confirmDelete() {
-  const skill = deleteTarget.value
-  if (!skill) return
-  const targetPath = workspacePath.value
-  const generation = workspaceGeneration
-  busyId.value = skill.id
-  error.value = ''
-  try {
-    const result = await deleteAgentSkill(targetPath, skill.id)
-    if (!isCurrentWorkspace(generation, targetPath)) return
-    latestRefreshId += 1
-    loading.value = false
-    skills.value = result.skills
-    if (selectedId.value === skill.id) selectedId.value = ''
-    deleteTarget.value = null
-    void nextTick(() => {
-      const target = focusReturn?.isConnected ? focusReturn : document.querySelector<HTMLButtonElement>('.skill-toolbar button')
-      target?.focus()
-      focusReturn = null
-    })
-  } catch (caught) {
-    if (isCurrentWorkspace(generation, targetPath)) {
-      error.value = caught instanceof Error ? caught.message : String(caught)
-    }
-  } finally {
-    if (isCurrentWorkspace(generation, targetPath) && busyId.value === skill.id) busyId.value = ''
-  }
-}
-
-async function reveal(skill: AgentSkill) {
-  const targetPath = workspacePath.value
-  const generation = workspaceGeneration
-  error.value = ''
-  try {
-    await revealAgentSkill(targetPath, skill.id)
-  } catch (caught) {
-    if (isCurrentWorkspace(generation, targetPath)) {
-      error.value = caught instanceof Error ? caught.message : String(caught)
-    }
-  }
-}
+/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
+const SECTION_DESCRIPTION = '管理已安装技能：启用、停用与查看注入状态。'
 </script>
 
 <template>
-  <AgentSettingsSectionShell>
+  <AgentSettingsSectionShell title="技能" :description="SECTION_DESCRIPTION">
     <div class="skill-toolbar">
       <label class="skill-search">
         <Search :size="iconSize.dense" aria-hidden="true" />
-        <input v-model="query" type="search" aria-label="搜索技能" placeholder="搜索技能..." spellcheck="false">
+        <input v-model="query" type="search" aria-label="搜索技能" placeholder="搜索技能…" spellcheck="false" />
       </label>
-      <button type="button" class="settings-icon-button" title="刷新" aria-label="刷新" :disabled="loading" @click="refresh">
-        <RefreshCw :size="iconSize.dense" aria-hidden="true" />
+      <button type="button" class="settings-button" @click="addEntry">
+        <Plus :size="iconSize.control" aria-hidden="true" />新增条目
       </button>
+      <button type="button" class="settings-button settings-button-primary" @click="save">
+        <Save :size="iconSize.control" aria-hidden="true" />保存
+      </button>
+      <span v-if="status" class="settings-status" role="status">{{ status }}</span>
     </div>
 
-    <p v-if="query.trim() && !visibleSkills.length" class="field-hint" role="status">没有匹配的技能</p>
-
-    <ul v-if="visibleSkills.length" class="skill-list">
-      <li v-for="skill in visibleSkills" :key="skill.id" class="skill-row" :class="{ active: skill.id === selectedId }">
-        <button type="button" class="skill-row-main" :aria-pressed="skill.id === selectedId" @click="selectedId = skill.id">
+    <ul v-if="rows.length" class="skill-list">
+      <li v-for="row in rows" :key="row.id" class="skill-row" :class="{ active: row.id === selectedId }">
+        <button
+          type="button" class="skill-row-main" :aria-pressed="row.id === selectedId"
+          @click="selectedId = selectedId === row.id ? '' : row.id"
+        >
           <span class="skill-row-title">
-            <span class="skill-row-name">{{ skill.name }}</span>
-            <span class="skill-badge">{{ scopeLabel(skill.scope) }}</span>
-            <span v-if="skill.pluginName" class="skill-badge">{{ skill.pluginName }}</span>
-            <span class="skill-badge">{{ enabledLabel(skill.enabled) }}</span>
+            <span class="skill-row-name">{{ row.name }}</span>
+            <span class="skill-badge">{{ row.sourceLabel }}</span>
+            <span class="skill-badge">{{ row.enabledLabel }}</span>
+            <!-- null 是「本仓没有运行时」，不是「没被注入」：显式判 === null，显示模块给的文案。 -->
+            <span
+              v-if="row.injected === null" class="skill-badge skill-badge-unknown"
+              :title="row.injectedLabel"
+            >{{ row.injectedLabel }}</span>
+            <span v-else class="skill-badge">{{ row.injectedLabel }}</span>
           </span>
-          <span v-if="skill.description" class="skill-row-desc">{{ skill.description }}</span>
+          <span class="skill-row-desc">{{ row.description }}</span>
         </button>
-        <label v-if="skill.scope !== 'plugin'" class="skill-toggle">
-          <input type="checkbox" :checked="skill.enabled" :disabled="busyId !== ''" :aria-label="`启用或停用技能 ${skill.name}`" @change="toggleSkill(skill, $event)">
-          <span class="visually-hidden">{{ enabledLabel(skill.enabled) }}</span>
+        <label v-if="row.toggleable" class="skill-toggle">
+          <input v-model="row.entry.enabled" type="checkbox" :aria-label="`启用或停用技能 ${row.name}`" />
+          <span class="visually-hidden">{{ row.enabledLabel }}</span>
         </label>
-        <button v-if="skill.scope !== 'plugin'" type="button" class="settings-icon-button settings-icon-button-danger" :title="`删除 ${skill.name}`" :aria-label="`删除 ${skill.name}`" :disabled="busyId !== ''" @click="requestDelete(skill)">
-          <Trash2 :size="iconSize.dense" aria-hidden="true" />
-        </button>
       </li>
     </ul>
+    <p v-else class="field-hint">没有匹配的技能。</p>
 
     <section v-if="selected" class="settings-box skill-details">
       <h4 class="settings-box-title">{{ selected.name }}</h4>
-      <div v-if="selected.description" class="skill-description">
-        <span>描述</span>
-        <p>{{ selected.description }}</p>
-      </div>
+      <p class="skill-description">{{ selected.description }}</p>
       <dl class="skill-kv">
-        <div><dt>范围</dt><dd>{{ scopeLabel(selected.scope, selected.pluginName) }}</dd></div>
-        <div><dt>状态</dt><dd>{{ enabledLabel(selected.enabled) }}</dd></div>
-        <div v-if="selected.metadata?.version"><dt>版本</dt><dd>{{ selected.metadata.version }}</dd></div>
-        <div v-if="selected.metadata?.slug"><dt>Slug</dt><dd>{{ selected.metadata.slug }}</dd></div>
-        <div v-if="formatPublishedAt(selected.metadata?.publishedAt)"><dt>发布时间</dt><dd>{{ formatPublishedAt(selected.metadata?.publishedAt) }}</dd></div>
-        <div v-if="selected.metadata?.ownerId"><dt>Owner ID</dt><dd>{{ selected.metadata.ownerId }}</dd></div>
-        <div class="skill-path"><dt>文件路径</dt><dd>{{ selected.path }}</dd></div>
+        <div><dt>来源</dt><dd>{{ selected.sourceLabel }}</dd></div>
+        <div><dt>状态</dt><dd>{{ selected.enabledLabel }}</dd></div>
+        <div><dt>注入</dt><dd>{{ selected.injectedLabel }}</dd></div>
+        <div v-if="selected.version"><dt>版本</dt><dd>{{ selected.version }}</dd></div>
+        <div v-if="selected.slug"><dt>Slug</dt><dd>{{ selected.slug }}</dd></div>
+        <div v-if="selected.publishedAt"><dt>发布时间</dt><dd>{{ selected.publishedAt }}</dd></div>
+        <div class="skill-path"><dt>目录</dt><dd>{{ selected.path || '（未填）' }}</dd></div>
       </dl>
       <div class="settings-actions">
-        <button type="button" class="settings-button" @click="reveal(selected)">
-          <ExternalLink :size="iconSize.dense" aria-hidden="true" />打开
+        <button type="button" class="settings-button" @click="editingId = editingId === selected.id ? '' : selected.id">
+          {{ editingId === selected.id ? '收起编辑' : '编辑' }}
         </button>
+        <button
+          v-if="editing && editing.source !== 'builtin'" type="button" class="settings-button"
+          @click="removeEntry(editing)"
+        >移除条目</button>
+      </div>
+
+      <div v-if="editing" class="skill-form">
+        <div class="input-row">
+          <label :for="`skill-name-${editing.id}`">名称</label>
+          <input :id="`skill-name-${editing.id}`" v-model="editing.name" type="text" />
+        </div>
+        <div class="input-row">
+          <label :for="`skill-desc-${editing.id}`">描述</label>
+          <input :id="`skill-desc-${editing.id}`" v-model="editing.description" type="text" />
+        </div>
+        <div class="input-row">
+          <label :for="`skill-path-${editing.id}`">目录</label>
+          <input :id="`skill-path-${editing.id}`" v-model="editing.path" type="text" :placeholder="AGENT_BUILTIN_SKILL_ROOT" />
+        </div>
       </div>
     </section>
 
-    <p v-if="error && !deleteTarget" class="settings-problems skill-error" role="alert">{{ error }}</p>
+    <ul v-if="problems.length" class="settings-problems" role="alert">
+      <li v-for="problem in problems" :key="problem">{{ problem }}</li>
+    </ul>
   </AgentSettingsSectionShell>
-
-  <Teleport to="body">
-    <div v-if="deleteTarget" class="modal-backdrop" @click.self="closeDelete">
-      <section
-        class="help-dialog leave-dialog skill-delete-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="skill-delete-name"
-        @keydown.esc.prevent.stop="closeDelete"
-        @keydown="trapDeleteFocus"
-      >
-        <p id="skill-delete-name">{{ deleteTarget.name }}</p>
-        <p v-if="error" class="settings-problems skill-error" role="alert">{{ error }}</p>
-        <div class="leave-actions">
-          <button ref="deleteButton" class="primary-button menu-danger-solid" type="button" :disabled="busyId !== ''" @click="confirmDelete">删除</button>
-          <button ref="cancelButton" class="subtle-button" type="button" :disabled="busyId !== ''" @click="closeDelete">取消</button>
-        </div>
-      </section>
-    </div>
-  </Teleport>
 </template>
 
 <style scoped>
@@ -276,21 +172,18 @@ async function reveal(skill: AgentSkill) {
 .skill-row-title { display: flex; align-items: center; gap: var(--space-1); min-width: 0; flex-wrap: wrap; }
 .skill-row-name { color: var(--text); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 .skill-badge { padding: 0 var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--secondary); font-size: 12px; white-space: nowrap; }
+.skill-badge-unknown { border-color: var(--warning); color: var(--warning); }
 .skill-row-desc { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-toggle { flex-shrink: 0; display: flex; align-items: center; }
 .skill-toggle input { width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); margin: 0; accent-color: var(--accent); }
-.skill-details { gap: var(--space-3); }
-.skill-description { min-width: 0; }
-.skill-description > span, .skill-kv dt { color: var(--muted); font-size: 12px; }
-.skill-description > p { margin: var(--space-1) 0 0; color: var(--text); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.skill-description { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .skill-kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-4); margin: 0; padding-top: var(--space-2); border-top: 1px solid var(--line); }
 .skill-kv > div { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
-.skill-kv dt, .skill-kv dd { margin: 0; }
-.skill-kv dd { min-width: 0; color: var(--text); font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.skill-kv dt { color: var(--muted); font-size: 12px; }
+.skill-kv dd { margin: 0; min-width: 0; color: var(--text); font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
 .skill-kv .skill-path { grid-column: 1 / -1; }
+.skill-form { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line); }
 .skill-row-main:focus-visible, .skill-toggle input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
-.skill-details :deep(.settings-button), .skill-error { font-size: 12px; }
-.skill-delete-dialog p, .skill-delete-dialog button { font-size: 12px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 560px) {
   .skill-kv { grid-template-columns: minmax(0, 1fr); }

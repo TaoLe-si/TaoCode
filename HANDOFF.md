@@ -855,6 +855,8 @@ toolbar 15 / action 16 / rail 20 / artwork 24 / hero 28），`ICON_STROKE = 2`�
 ## 索引
 
 - 硬规则：`.workbuddy/memory/MEMORY.md`（任务未完成禁止停止 / 禁止编造 / 缺口必须读源码 / 不放假控件 / 验证口径）
+  —— ⚠️ `.workbuddy/` 整个目录已按用户指令于 2026-10-08 删除（备份在 `D:\TaoCode-backups\workbuddy-2026-10-08\`），
+  本节其余 `.workbuddy/...` 路径同理只是历史记录；现行硬规则见 `docs/lanes-2026-10-08.md` 与记忆库。
 - 日志：`.workbuddy/memory/2026-09-26.md`（按批记录）
 - 清单：`docs/ui-parity-checklist.md`
 - 审计报告（第一阶段）：`docs/audit-completion-report.md`

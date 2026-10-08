@@ -448,3 +448,26 @@ test('映射编译不过：如实报错，不静默把档位丢掉', async () =>
   )
   assert.equal(ws.requests.length, 0, '映射没编译出来就不许发请求')
 })
+
+test('工具能力位：显式 false 才拒绝带工具；缺省（老存档）按上游默认放行', async () => {
+  // 正向对照：模型记录**没有**这一格（老存档的形状）⇒ 工具表照发。
+  const legacy = fakeWorkspace({ 'src/App.vue': 'hello\n' })
+  const legacyHost = createAgentHost({ bridge: legacy.bridge, settings })
+  await legacyHost.send('读一下 `src/App.vue`')
+  assert.ok(legacy.requests.length >= 1, '缺省的工具能力位必须放行，否则老存档里的模型全哑')
+  assert.ok(JSON.parse(legacy.requests[0].body).tools.length > 0, '缺省时请求体要带工具表')
+
+  // 负向对照：显式 `supportsToolCall: false` ⇒ 组请求阶段就拒绝，且**一个请求都不发**。
+  const unsupported = fakeWorkspace({ 'src/App.vue': 'hello\n' })
+  const unsupportedHost = createAgentHost({
+    bridge: unsupported.bridge,
+    settings: modelSettings({
+      providers: [{
+        id: 'p1', name: 'P1', baseUrl: 'https://example.test/v1', apiKey: 'k', apiFormat: 'anthropic-messages',
+        models: [{ id: 'm1', name: 'M1', enabled: true, supportsToolCall: false }],
+      }],
+    }),
+  })
+  await assert.rejects(() => unsupportedHost.send('读一下 `src/App.vue`'), /does not support tool calls/)
+  assert.equal(unsupported.requests.length, 0, '明确不支持工具的模型不该收到请求')
+})

@@ -474,7 +474,7 @@ defineExpose({ handleEscape })
   >
     <header class="dialog-header">
       <h2 :id="`${id}-title`" class="dialog-title">设置</h2>
-      <button type="button" class="icon-button" :disabled="busy" aria-label="关闭设置" @click="close"><X :size="iconSize.action" aria-hidden="true" /></button>
+      <button type="button" class="icon-button" :disabled="busy" aria-label="关闭设置" title="关闭设置" @click="close"><X :size="iconSize.action" aria-hidden="true" /></button>
     </header>
     <div class="settings-layout">
       <nav class="settings-navigation" role="tablist" aria-label="设置分类" aria-orientation="vertical" @keydown="navigateTabs">
@@ -483,7 +483,7 @@ defineExpose({ handleEscape })
                on a single click (IDEA draws the arrow there); with no history it just focuses. -->
           <button
             type="button" class="settings-search-icon" :class="{ 'has-history': searchHistory.length > 0 }"
-            :aria-label="searchHistory.length ? SEARCH_HISTORY_LABEL : '搜索'"
+            :aria-label="searchHistory.length ? SEARCH_HISTORY_LABEL : '搜索'" :title="searchHistory.length ? SEARCH_HISTORY_LABEL : '搜索'"
             aria-haspopup="listbox" :aria-expanded="historyOpen" @click.prevent="onSearchIconClick"
           ><Search :size="iconSize.control" aria-hidden="true" /></button>
           <input
@@ -491,7 +491,7 @@ defineExpose({ handleEscape })
             @mousedown="onSearchPointerDown" @keydown.enter.prevent="onSearchEnter"
             @blur="recordSearchHistory()" @keydown.alt.down.prevent="openHistory()" @keydown.alt.up.prevent="stepSearchHistory('prev')"
           />
-          <button v-if="query" type="button" class="icon-button" aria-label="清空搜索" @click="clearSearch"><X :size="iconSize.dense" aria-hidden="true" /></button>
+          <button v-if="query" type="button" class="icon-button" aria-label="清空搜索" title="清空搜索" @click="clearSearch"><X :size="iconSize.dense" aria-hidden="true" /></button>
         </label>
         <div v-if="historyOpen" class="settings-crumb-backdrop" @click="closeHistory()" @contextmenu.prevent="closeHistory()" />
         <div
@@ -591,8 +591,8 @@ defineExpose({ handleEscape })
       </nav>
       <div class="settings-content" :class="{ 'settings-spotlight-on': spotlightActive }">
         <div class="settings-breadcrumb">
-          <button type="button" class="icon-button" :disabled="!history.length" aria-label="后退" @click="goBack"><ChevronLeft :size="iconSize.action" aria-hidden="true" /></button>
-          <button type="button" class="icon-button" :disabled="!future.length" aria-label="前进" @click="goForward"><ChevronRight :size="iconSize.action" aria-hidden="true" /></button>
+          <button type="button" class="icon-button" :disabled="!history.length" aria-label="后退" title="后退" @click="goBack"><ChevronLeft :size="iconSize.action" aria-hidden="true" /></button>
+          <button type="button" class="icon-button" :disabled="!future.length" aria-label="前进" title="前进" @click="goForward"><ChevronRight :size="iconSize.action" aria-hidden="true" /></button>
           <span
             class="settings-crumbs" role="button" tabindex="0"
             @contextmenu.prevent="openCrumbMenu" @keydown.shift.f10.prevent="openCrumbMenu" @keydown.contextmenu.prevent="openCrumbMenu"
@@ -611,8 +611,8 @@ defineExpose({ handleEscape })
         <section v-show="section === 'preferences.lookFeel'" :id="`${id}-panel-appearance`" class="settings-panel" data-page="appearance" role="tabpanel" :aria-labelledby="`${id}-tab-appearance`">
           <h3>外观</h3>
           <div class="theme-options" role="group" aria-label="主题">
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="iconSize.action" aria-hidden="true" /><span>浅色</span></button>
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="iconSize.action" aria-hidden="true" /><span>深色</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="iconSize.action" aria-hidden="true" /><span>月之亮面</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="iconSize.action" aria-hidden="true" /><span>月之暗面</span></button>
           </div>
           <!-- 外观页里由 editor/general 草稿驱动的那些控件在 SettingsAppearanceSection.vue（拆出去的整节）；
                `<h3>` 与主题选择器留在宿主：主题切换是对话框级 emit（水纹要拿到点击位置）。 -->
@@ -637,8 +637,9 @@ defineExpose({ handleEscape })
             </div>
             <label class="checkbox-row"><input v-model="editor.wordWrap" type="checkbox" /><span>自动换行（软换行）</span></label>
             <EditorSavePassesFields :settings="editor" :busy="busy" /><!-- 终端字号两把（键：src/settingsModel.ts 的 EditorSettings.wheelFontChangeEnabled / terminalBaseFontSize）。上游这一格在「编辑器 › 常规」的 Mouse control 组：控件 platform/lang-impl/src/com/intellij/application/options/editor/EditorOptionsPanel.kt:91-94（enableWheelFontChange）、挂点同文件 :216（chkEnableWheelFontSizeChange = checkBox(enableWheelFontChange)），组名同文件 :214 用 group.advanced.mouse.usages（platform/ide-core/resources/messages/ApplicationBundle.properties:395 = Mouse Control），文案 ApplicationBundle.properties:396 = "Change font size with Ctrl+Mouse Wheel in:"（macOS 变体 :397 是 Command）；中文包不在本地树 ⇒ 下面是英文原文直译。上游默认值 EditorSettingsExternalizable.java:124 = IS_WHEEL_FONTCHANGE_ENABLED false（门 JBTerminalPanel.java:382），本仓缺省同为 false。基准字号那格上游没有原样（那档住在配色方案的 consoleFontSize 里，platform/execution-impl/src/com/intellij/terminal/TerminalUiSettingsManager.kt:123-132 的 detectFontSize() 现算），是本仓架构映射 ⇒ 界 4..40 = EditorFontsConstants.java:11-13 / :15-17，与 previewSettings.ts、settings_editor_keys.hpp 同一对数。消费方 src/components/TerminalPanel.vue:115 / :121。 -->
-            <label class="checkbox-row"><input v-model="editor.wheelFontChangeEnabled" type="checkbox" /><span>按 Ctrl+鼠标滚轮改变字号（终端）</span></label>
-            <label class="field-row"><span>终端基准字号</span><input v-model.number="editor.terminalBaseFontSize" type="number" min="4" max="40" step="1" /></label>
+            <label class="checkbox-row"><input v-model="editor.wheelFontChangeEnabled" type="checkbox" aria-describedby="editor-terminal-font-hint" /><span>按 Ctrl+鼠标滚轮改变字号（终端）</span></label>
+            <label class="field-row"><span>终端基准字号</span><input v-model.number="editor.terminalBaseFontSize" type="number" min="4" max="40" step="1" aria-describedby="editor-terminal-font-hint" /></label>
+            <p id="editor-terminal-font-hint" class="field-hint">按 Ctrl+鼠标滚轮改变字号（上游 "Change font size with Ctrl+Mouse Wheel in:"）；终端基准字号取 4–40，滚到范围外时保持原值，不改动回滚缓冲区。</p>
           </fieldset>
         </form>
 
@@ -996,7 +997,7 @@ defineExpose({ handleEscape })
 </template>
 
 <style scoped>
-.settings-dialog { position: fixed; inset: 0; width: min(1120px, 96vw); height: min(700px, 90dvh); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); margin: auto; padding: 0; overflow: hidden; color: var(--text); border: 1px solid var(--line-strong); border-top: 3px solid var(--accent); border-radius: var(--radius-xs); background: var(--editor); box-shadow: var(--shadow-3); }
+.settings-dialog { position: fixed; inset: 0; width: min(1120px, 96vw); height: min(700px, 90dvh); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); margin: auto; padding: 0; overflow: hidden; color: var(--text); border-top: 3px solid var(--accent); background: var(--editor); }
 .settings-dialog[open] { display: flex; flex-direction: column; }
 .settings-dialog::backdrop { background: var(--backdrop); }
 .settings-dialog:focus { outline: none; }

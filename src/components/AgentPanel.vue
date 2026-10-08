@@ -18,6 +18,7 @@ import { closeAgentPopsOnOutsidePointer, createAgentPopState } from '../agentPan
 import { isAgentComposerShortcutTarget, resolveAgentComposerShortcut } from '../agentComposerShortcuts.ts'
 import AgentSessionPop from './AgentSessionPop.vue'
 import AgentModelSelectPop from './AgentModelSelectPop.vue'
+import AgentThoughtLevelSelect from './AgentThoughtLevelSelect.vue'
 import AgentMessageContent from './AgentMessageContent.vue'
 import { installAgentComposerToolbarFit } from '../agentComposerToolbarFit.ts'
 import { describeEditFailure, type AgentHost, type AgentToolResult } from '../agentHost'
@@ -264,16 +265,20 @@ const thoughtLevels = computed<readonly string[]>(() => {
   const model = decoded?.modelName ? props.host?.settings().providers.find(item => item.id === decoded.providerId)?.models.find(item => item.id === decoded.modelName) : undefined
   return model?.reasoningLevels?.length && model.reasoningLevelMap?.trim() ? model.reasoningLevels : []
 })
+const thoughtLevelOptions = computed(() => thoughtLevels.value.map(value => ({ value, label: thoughtLevelText(value) })))
 /** 档位值 → 文案：别名表在 `src/agentComposerControls.ts`（逐字照 `thoughtLevelOptions.ts:18-40`），表外值原样显示（`:88` 的回退）。 */
 function thoughtLevelText(level: string): string { return getThoughtLevelLabelText(level, level) }
 // 当前档位只认「选过且仍在模型档位表里」；没选或已失效给空串 → 触发器显示占位文案，不补隐式默认
 // （`draftWorkspaceDefaults.ts:36-48` 的 resolveDraftThoughtCurrentValue 同样只认选择结果）。
 const thoughtLevelValue = computed(() => { const level = draftSelection.value?.options?.reasoningLevel?.trim() ?? ''; return thoughtLevels.value.includes(level) ? level : '' })
-const thoughtLevelLabel = computed(() => thoughtLevelValue.value ? thoughtLevelText(thoughtLevelValue.value) : (composerText('chat.toolbar.thoughtLevel.placeholder') ?? ''))
 // 档位弹层的开关住在面板里（`AgentPop` 联合没有 'thought'，而 `agentPanelPops.ts` 不在本次改动范围）；
 // 同屏一个弹层这条靠 closePops/togglePop 两个出口统一收口（见下文）。
 const thoughtOpen = ref(false)
-function toggleThoughtPop() { const next = !thoughtOpen.value; closePops(); thoughtOpen.value = next }
+function updateThoughtPop(open: boolean) {
+  if (!open) { thoughtOpen.value = false; return }
+  closePops()
+  thoughtOpen.value = true
+}
 /** 选中的档位与模型一起进会话选择对象 —— 档位随它所属的那个模型走。 */
 function selectThoughtLevel(level: string) {
   if (busy.value || !thoughtLevels.value.includes(level)) return
@@ -299,7 +304,7 @@ onMounted(() => {
     composerInputObserver.observe(composerInput.value)
   }
   if (toolbarRoot.value) detachToolbarFit = installAgentComposerToolbarFit(toolbarRoot.value)
-  detachOutside = closeAgentPopsOnOutsidePointer('.agent, .agent-model-submenu', () => closePops())
+  detachOutside = closeAgentPopsOnOutsidePointer('.agent, .agent-model-submenu, .agent-thought-listbox', () => closePops())
   detachKeymapOverrides = onOverridesChanged(() => { revision.value += 1 })
   window.addEventListener('keydown', onPanelKeydown, true)
 })
@@ -747,6 +752,8 @@ function onComposerInput() {
               </button>
               <AgentModelSelectPop v-if="openPop === 'model' && !busy" :groups="modelGroups" :value="selectedModelValue" @select="selectModel" @manage-models="emit('openSettings', 'modelProvider'); closePops()" />
             </span>
+            <AgentThoughtLevelSelect v-else-if="elementId === 'thoughtLevel' && thoughtLevelOptions.length" :levels="thoughtLevelOptions" :value="thoughtLevelValue" :placeholder="composerText('chat.toolbar.thoughtLevel.placeholder') ?? ''"
+              :label="toolbarText.get('thoughtLevel') ?? ''" :open="thoughtOpen" :disabled="busy" @update:open="updateThoughtPop" @select="selectThoughtLevel" />
             <button v-else-if="elementId === 'stop' && showStopControl" type="button" class="agent-toolbar-button agent-stop" :title="composerText('chat.stop')" :aria-label="composerText('chat.stop')" @click="stopGeneration"><Square :size="iconSize.menu" aria-hidden="true" /></button>
             <button v-else-if="elementId === 'send' && !showStopControl" class="agent-send" type="submit" :disabled="!canSend" :title="composerText('chat.send')" :aria-label="composerText('chat.send')">
               <Loader2 v-if="busy" :size="iconSize.menu" class="agent-spin" aria-hidden="true" /><ArrowUp v-else :size="iconSize.menu" aria-hidden="true" />
@@ -766,7 +773,7 @@ function onComposerInput() {
 .agent-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "project settings" "session status"; align-items: center; gap: var(--space-1) var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); background: var(--panel); flex-shrink: 0; position: relative; }
 .agent-project { grid-area: project; display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; padding-left: var(--space-2); border-left: 2px solid var(--accent); color: var(--secondary); }
 .agent-project-name { color: var(--text); font-size: 12px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-status { grid-area: status; justify-self: end; color: var(--muted); font: 10px/1.4 var(--font-mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-status { grid-area: status; justify-self: end; color: var(--muted); font: 12px/1.4 var(--font-mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-icon-button { display: inline-flex; align-items: center; justify-content: center; width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); border: 0; background: transparent; border-radius: var(--radius-xs); color: var(--secondary); cursor: pointer; transition: background-color var(--dur-1) var(--ease); }
 .agent-icon-button { grid-area: settings; }
 .agent-icon-button:hover { background: var(--hover); color: var(--text); }
@@ -776,7 +783,7 @@ function onComposerInput() {
 .agent-session-count { color: var(--muted); font: 10px/1 var(--font-mono); flex-shrink: 0; }
 /* 消息流 */
 .agent-scroll { flex: 1; min-height: 0; overflow: auto; padding: var(--space-3) 0; display: flex; flex-direction: column; gap: var(--space-5); }
-.agent-empty-state { position: relative; display: flex; flex: 1; min-height: 0; align-items: center; align-items: safe center; justify-content: flex-start; overflow: hidden; padding: var(--space-4) var(--space-6); }
+.agent-empty-state { position: relative; display: flex; flex: 1; min-height: 0; align-items: center; align-items: safe center; justify-content: flex-start; padding: var(--space-4) var(--space-6); }
 .agent-empty-logo { position: absolute; top: 50%; left: 62%; width: min(68cqi, 25rem); aspect-ratio: 5 / 4; transform: translate(-50%, -50%); pointer-events: none; }
 /* ConversationDraftEmptyState.tsx:180-202 */
 .agent-empty-logo-light { color: var(--muted); opacity: .22; -webkit-mask-image: linear-gradient(to bottom, black 0%, transparent 70%, transparent 100%); mask-image: linear-gradient(to bottom, black 0%, transparent 70%, transparent 100%); -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
@@ -789,7 +796,7 @@ function onComposerInput() {
 .agent-user { align-self: flex-end; width: fit-content; max-width: min(88%, 42rem); padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-right: 2px solid var(--accent); border-radius: var(--radius-sm) var(--radius-xs) var(--radius-xs) var(--radius-sm); background: var(--panel); }
 .agent-assistant { align-self: flex-start; width: calc(100% - var(--space-3)); max-width: 58rem; margin-left: var(--space-3); padding-left: var(--space-3); border-left: 1px solid var(--line-strong); }
 /* 长路径：`min-width: 0` 才让 inline-flex 按钮肯缩，否则整行被路径撑宽（省略号在里面的 span 上）。 */
-.agent-file-link { display: inline-flex; align-items: center; gap: var(--space-1); align-self: flex-start; max-width: 100%; min-width: 0; padding: 0 var(--space-1); border: 0; background: transparent; border-radius: var(--radius-xs); color: var(--accent); font: 11px/1.6 var(--font-mono); cursor: pointer; text-align: left; }
+.agent-file-link { display: inline-flex; align-items: center; gap: var(--space-1); align-self: flex-start; max-width: 100%; min-width: 0; padding: 0 var(--space-1); border: 0; background: transparent; border-radius: var(--radius-xs); color: var(--accent); font: 12px/1.6 var(--font-mono); cursor: pointer; text-align: left; }
 .agent-file-link:hover { background: var(--hover); color: var(--accent-hover); text-decoration: underline; }
 .agent-file-link > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 分区（计划 / 审批 / 改动） */
@@ -806,7 +813,7 @@ function onComposerInput() {
 .agent-approval { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); background: var(--warning-bg); border: 1px solid var(--warning); border-radius: var(--radius-xs); }
 .agent-approval-body { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .agent-approval-tool { color: var(--text); font-size: 12px; font-weight: 600; }
-.agent-approval-params { color: var(--secondary); font: 10px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.agent-approval-params { color: var(--secondary); font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
 .agent-approval-actions, .agent-edit-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); min-width: 0; }
 /* 审批选项行（PermissionDialog 的行模型） */
 .agent-permission-rows { display: flex; flex-direction: column; gap: var(--space-1); }
@@ -834,7 +841,7 @@ function onComposerInput() {
 .agent-removed { color: var(--error); }
 .agent-edit-state { color: var(--muted); font-size: 12px; flex-shrink: 0; }
 .agent-diff { display: flex; flex-direction: column; background: var(--editor); border: 1px solid var(--line); border-radius: var(--radius-xs); overflow: hidden; max-height: 220px; overflow-y: auto; }
-.agent-diff-row { display: flex; align-items: baseline; gap: var(--space-1); padding: 0 var(--space-1); font: 10px/1.6 var(--font-mono); white-space: pre; }
+.agent-diff-row { display: flex; align-items: baseline; gap: var(--space-1); padding: 0 var(--space-1); font: 12px/1.6 var(--font-mono); white-space: pre; }
 .agent-diff-insert { background: var(--success-bg); }
 .agent-diff-delete { background: var(--error-bg); }
 .agent-diff-no { flex-shrink: 0; min-width: 26px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -843,19 +850,19 @@ function onComposerInput() {
 .agent-diff-delete .agent-diff-sign { color: var(--error); }
 .agent-diff-text { overflow: hidden; text-overflow: ellipsis; }
 /* 斜杠命令补全 */
-.agent-command-menu { display: flex; flex-direction: column; gap: var(--space-1); margin: 0 var(--space-2) var(--space-1); padding: var(--space-1); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); color: var(--popup-foreground); }
-.agent-command-item { display: flex; align-items: baseline; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); font-size: 12px; cursor: pointer; text-align: left; transition: background-color var(--dur-1) var(--ease); }
+.agent-command-menu { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; max-width: 100%; margin: 0 var(--space-2) var(--space-1); padding: var(--space-1); overflow-y: auto; overscroll-behavior: contain; background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); color: var(--popup-foreground); }
+.agent-command-item { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); font-size: 12px; cursor: pointer; text-align: left; transition: background-color var(--dur-1) var(--ease); }
 .agent-command-item:hover { background: var(--hover); }
-.agent-command-label { font-family: var(--font-mono); color: var(--accent); flex-shrink: 0; }
+.agent-command-label { min-width: 0; max-width: 100%; font-family: var(--font-mono); color: var(--accent); overflow-wrap: anywhere; }
 .agent-command-desc { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-command-item.selected { background: var(--hover); }
 .agent-menu-hint, .agent-menu-section, .agent-menu-status { margin: 0; padding: var(--space-1) var(--space-2); color: var(--muted); font-size: 12px; line-height: 1.5; }
 .agent-menu-section { color: var(--secondary); font-weight: 600; }
-.agent-action-menu { position: absolute; bottom: 100%; left: var(--space-2); z-index: 20; display: flex; flex-direction: column; gap: var(--space-1); min-width: min(180px, calc(100cqi - var(--space-6))); max-width: min(20rem, calc(100cqi - var(--space-6))); margin-bottom: var(--space-1); padding: var(--space-1); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); color: var(--popup-foreground); }
+.agent-action-menu { position: absolute; bottom: 100%; left: var(--space-2); z-index: 20; display: flex; flex-direction: column; gap: var(--space-1); min-width: min(180px, calc(100cqi - var(--space-6))); max-width: min(20rem, calc(100cqi - var(--space-6))); max-height: min(320px, calc(100vh - var(--space-6))); overflow-y: auto; overscroll-behavior: contain; margin-bottom: var(--space-1); padding: var(--space-1); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); color: var(--popup-foreground); }
 /* 输入区与单行工具条 */
 .agent-composer { position: relative; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--panel); flex-shrink: 0; transition: border-color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
 .agent-composer:hover { border-color: var(--line-strong); }
-.agent-composer:focus-within { border-color: var(--accent); box-shadow: inset 2px 0 0 var(--accent); }
+.agent-composer:focus-within { border-color: var(--accent); outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
 .agent-input { display: block; width: 100%; min-width: 0; height: 40px; max-height: 160px; min-height: 40px; overflow-y: hidden; resize: none; padding: 0; background: transparent; border: 0; border-radius: 0; color: var(--text); font: 1rem/20px var(--font-ui); }
 .agent-input:focus-visible { outline: none; }
 .agent-toolbar { display: flex; align-items: center; gap: var(--space-3); min-height: var(--ctrl-height); min-width: 0; }
@@ -866,8 +873,8 @@ function onComposerInput() {
 .agent-toolbar-button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .agent-toolbar-button:disabled { opacity: .5; cursor: default; }
 .agent-toolbar-button.off { color: var(--muted); }
-.agent-toolbar-button > svg:first-child { width: var(--icon-size-action); height: var(--icon-size-action); }
-.agent-toolbar-button > svg:last-child:not(:first-child) { width: var(--icon-size-control); height: var(--icon-size-control); }
+.agent-toolbar-button > svg:first-child:not(.lucide):not(.idea-icon) { width: var(--icon-size-action); height: var(--icon-size-action); }
+.agent-toolbar-button > svg:last-child:not(:first-child):not(.lucide):not(.idea-icon) { width: var(--icon-size-control); height: var(--icon-size-control); }
 .agent-toolbar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .agent-mode-wrap, .agent-model-wrap { position: relative; display: inline-flex; min-width: 0; }
 .agent-model-icon { display: none; }
@@ -883,7 +890,7 @@ function onComposerInput() {
 .agent-stop:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .agent-stop > svg { fill: currentColor; }
 .agent-send { display: inline-flex; align-items: center; justify-content: center; width: var(--ctrl-height); height: var(--ctrl-height); border: 1px solid transparent; border-radius: var(--radius-xs); background: var(--accent); color: var(--on-accent); cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
-.agent-send > svg { width: var(--icon-size-action); height: var(--icon-size-action); }
+.agent-send > svg:not(.lucide):not(.idea-icon) { width: var(--icon-size-action); height: var(--icon-size-action); }
 .agent-send:hover:not(:disabled) { background: var(--accent-hover); }
 .agent-send:disabled { opacity: .5; cursor: default; }
 .agent-spin { animation: agent-spin var(--dur-spin) var(--ease-linear) infinite; }

@@ -232,6 +232,15 @@ struct Manager::Impl {
         // 与"被停止"。`running` 为真时 exitCode 报 null（还没结束）。
         bool finished = false;
         bool aborted = false;
+        /**
+         * 已经对这个实例发过**优雅停止**请求（`Manager::stop` 的第一次请求：Ctrl+C / WM_CLOSE，
+         * 见 native/win_graceful_stop.cpp）。上游同一格的语义：`KillableProcessHandler` 第一次
+         * Stop 优雅、之后再按才强杀（`KillableProcessHandler.java:26-30`），前端读的是
+         * `ProcessHandler.isProcessTerminating()` 那个内存字段（本仓前端的 `stopping` 位同源）。
+         * 它同时决定这条实例的**结束口径**：优雅请求之后进程退了 = 被停止（exitCode -1 +
+         * aborted），不是"自己跑完退出 N"。
+         */
+        bool stop_requested = false;
     };
 
     Emit emit;
@@ -281,6 +290,7 @@ struct Manager::Impl {
             [this, id](std::string_view chunk) { post({{"event", "run.output"}, {"instance", id}, {"dataB64", base64_encode(chunk)}}); },
             [this, id](int code) {
                 std::size_t remaining = 0;
+                bool stopped = false;
                 {
                     std::lock_guard lock(mutex);
                     const auto found = instances.find(id);
@@ -289,17 +299,35 @@ struct Manager::Impl {
                         // `stop_instance` 可能已经把这个实例标成 aborted（杀树后读线程才回报
                         // 退出码，通常是非 0 的终止码）。被停止的实例要保留 exitCode=-1 +
                         // aborted=true，不能被这条迟到的回调改写成"自己跑完退出 N"。
-                        if (!found->second->aborted) {
+                        if (!found->second->aborted && found->second->stop_requested) {
+                            // 优雅停止请求之后进程**真的退了**（Ctrl+C / WM_CLOSE 生效）：这是
+                            // 「被停止」，不是跑完 —— 与强杀同一档报。上游两条路都归在
+                            // `ProcessHandler.TERMINATION_REQUESTED` 上（`ExecutionManagerImpl.kt:1200-1203`
+                            // 的 `TERMINATED_BY_STOP`），UI 不该看到 0xC000013A 这种终止码。
+                            // 后面还没跑的链步骤一并作废（与 `stop_instance` 的 steps.clear() 同一口径）。
+                            found->second->steps.clear();
+                            found->second->aborted = true;
+                            found->second->last_code = -1;
+                            found->second->finished = true;
+                            found->second->running = false;
+                            remaining = 0;
+                            stopped = true;
+                        } else if (!found->second->aborted) {
                             found->second->last_code = code;
                             found->second->finished = true;  // 这一段真的自己跑完了
+                            found->second->pending = true;   // 即使没有后续步骤也要过一遍（drain 会清标志）
+                            if (remaining == 0) found->second->running = false;
                         }
-                        found->second->pending = true;   // 即使没有后续步骤也要过一遍（drain 会清标志）
-                        if (remaining == 0) found->second->running = false;
                     }
-                    pending.emplace_back(id, code);
+                    // 被停止的实例不进 pending 队列：链已经作废，drain 不该再推进它。
+                    if (!stopped) pending.emplace_back(id, code);
                 }
                 // `remaining` 让控制台把整条配置保持"运行中"直到最后一步退出。
-                post({{"event", "run.exit"}, {"instance", id}, {"code", code}, {"remaining", remaining}});
+                if (stopped)
+                    post({{"event", "run.exit"}, {"instance", id}, {"code", -1},
+                          {"remaining", std::size_t{0}}, {"aborted", true}});
+                else
+                    post({{"event", "run.exit"}, {"instance", id}, {"code", code}, {"remaining", remaining}});
             });
     }
 
@@ -439,18 +467,41 @@ Json Manager::start(const Json& params, const std::filesystem::path& root) {
 Json Manager::stop(int instance) {
     std::vector<std::unique_ptr<Runner>> retired;
     std::size_t stopped = 0;
+    bool graceful = false;
     {
         std::lock_guard lock(impl_->mutex);
-        for (auto& [id, existing] : impl_->instances) {
-            if (instance > 0 && id != instance) continue;
-            impl_->stop_instance(*existing, true, retired);
-            ++stopped;
+        if (instance <= 0) {
+            // 「停止全部」= 上游 `StopAllAction`／多选那一支：直接结束每棵树的 Job Object，
+            // 不走"先请它自己退"那一档（那一档是**单个** Stop 的语义）。
+            for (auto& [id, existing] : impl_->instances) impl_->stop_instance(*existing, true, retired);
+            stopped = impl_->instances.size();
+            impl_->instances.clear();
+        } else {
+            const auto found = impl_->instances.find(instance);
+            if (found != impl_->instances.end()) {
+                Instance& target = *found->second;
+                // 第一次请求 = 优雅（上游 `KillableProcessHandler.java:26-30`：第一次 Stop 优雅、
+                // 之后再按才强杀）：只发 Ctrl+C / WM_CLOSE，**实例留在清单里**——进程还在跑，
+                // 前端那一格"停止中"（`ProcessHandler.isProcessTerminating()`）就是它的可见面。
+                // 请求发不出去（本进程已挂控制台、子进程既无控制台也无窗口），或这是**第二次**
+                // 请求（用户已经按过一次）⇒ 走强杀（上游 `KillableProcessHandler.java:119-123`
+                // 的同一条回退分支）。
+                if (!target.stop_requested && target.running && target.runner &&
+                    target.runner->request_graceful_exit()) {
+                    target.stop_requested = true;
+                    graceful = true;
+                } else {
+                    impl_->stop_instance(target, true, retired);
+                    impl_->instances.erase(found);
+                    stopped = 1;
+                }
+            }
         }
-        if (instance > 0) impl_->instances.erase(instance);
-        else impl_->instances.clear();
     }
     retired.clear();  // 锁外销毁（这一句是必须的，见 stop_instance 的注释）
-    return {{"stopped", static_cast<std::int64_t>(stopped)}};
+    Json result = {{"stopped", static_cast<std::int64_t>(stopped)}};
+    if (graceful) result["graceful"] = true;
+    return result;
 }
 
 bool Manager::write_line(int instance, const std::string& line) {
@@ -491,7 +542,10 @@ Json Manager::instances() const {
         list.push_back({{"id", id}, {"label", instance->label}, {"running", instance->running},
                         {"pid", static_cast<std::int64_t>(pid)}, {"children", std::move(children)},
                         {"tree", std::move(tree)}, {"ports", std::move(ports)},
-                        {"exitCode", std::move(exit_code)}, {"aborted", instance->aborted}});
+                        {"exitCode", std::move(exit_code)}, {"aborted", instance->aborted},
+                        // 已经请求过优雅停止、进程还在跑（上游 `ProcessHandler.isProcessTerminating()`
+                        // 那一格的等价物）：前端据此在重取快照后仍能把图标换成 kill。
+                        {"stopping", instance->stop_requested}});
     }
     return list;
 }

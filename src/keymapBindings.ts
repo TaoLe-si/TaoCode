@@ -255,7 +255,7 @@ export const EDITOR_ACTIONS: readonly EditorActionBinding[] = [
   { id: 'cursor.below', upstreamId: 'EditorCloneCaretBelow', label: '在下行添加光标', keywords: 'clone caret below 多光标 下行 EditorCloneCaretBelow',
     command: 'cursor.below', key: { source: 'none', upstream: '上游注册 platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:218（`CloneCaretBelow`，动作组 PlatformActions.xml:199）、文案 ActionsBundle.properties:119-120；键位：`$default.xml` **无绑定**（同上，只有 `Sublime Text.xml:284` 给过 `control alt DOWN`，插件方案 VSCode.xml:134-136 给过 `ctrl alt down`/`shift ctrl alt down`），而 `$default.xml:882-884` 把 `control alt shift DOWN` 给了 `ResizeToolWindowDown` ⇒ 本仓那行编辑器键位已摘' } },
   { id: 'brace.match', upstreamId: 'EditorMatchBrace', label: '移动到配对的括号', keywords: 'match brace 配对括号 匹配括号 EditorMatchBrace',
-    command: 'brace.match', key: { source: 'upstream', display: 'Ctrl Shift M', cm: 'Ctrl-Shift-m', boundAt: 'src/editorKeymap.ts:181',
+    command: 'brace.match', key: { source: 'upstream', display: 'Ctrl Shift M', cm: 'Ctrl-Shift-m', boundAt: 'src/editorKeymap.ts:186',
       upstream: '$default.xml:1146-1148 EditorMatchBrace = control shift M；注册 intellij.platform.lang.impl.actions.xml:23；文案 ActionsBundle.properties:161' } },
 ]
 

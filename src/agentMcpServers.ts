@@ -12,7 +12,6 @@ export const AGENT_MCP_STORAGE_KEY = 'taocode.agent.mcpServers'
 
 /** 传输类型。ZCode 的第四项 `streamableHttp` 在表单里被注释掉了（`McpServerForm.tsx:281-284`），同口径只留三项。 */
 export type AgentMcpTransport = 'stdio' | 'http' | 'sse'
-
 /** 协议版本。空串 = 未设置 = 自动协商（ZCode 用 `auto` 作 Select 哨兵值，`McpServerForm.tsx:196-199`）。 */
 export type AgentMcpProtocolVersion = '' | 'legacy' | 'auto' | '2026-07-28'
 
@@ -27,6 +26,17 @@ export type AgentMcpScope = 'user' | 'workspace'
  */
 export const AGENT_MCP_TIMEOUT_MIN_MS = 1
 export const AGENT_MCP_TIMEOUT_MAX_MS = 600_000
+
+/** 一条服务器声明的能力面（`initialize` 回包，`native/mcp_server.cpp:327-335` 的真实形状）。 */
+export interface AgentMcpServerCapabilities {
+  /** `capabilities.tools` 是否声明（`mcp_server.cpp:333` 回的是空对象 = 已声明）。 */
+  tools: boolean
+  serverName: string
+  serverVersion: string
+  serverTitle: string
+  /** 服务端声明支持的协议版本（`mcp_server.cpp:328` 的三项）。 */
+  protocolVersions: string[]
+}
 
 /** 一条 MCP 服务器配置。 */
 export interface AgentMcpServer {
@@ -49,6 +59,12 @@ export interface AgentMcpServer {
   timeoutMs: number
   protocolVersion: AgentMcpProtocolVersion
   scope: AgentMcpScope
+  /** 服务端声明的能力面（未声明 = 空声明面，不是「声明了没有工具」）。 */
+  capabilities: AgentMcpServerCapabilities
+  /** 声明的工具名清单（点号分隔；下划线形会拿到 -32602 Unknown tool）。 */
+  declaredTools: string[]
+  /** 最近一次失败码；从未失败是空串（`McpFailurePresentation.tsx:7-11`）。 */
+  failureKind: string
 }
 
 export interface AgentMcpToolDescriptor {
@@ -125,8 +141,59 @@ const MCP_FAILURE_MESSAGES: Record<string, string> = {
 /** 未知 / 空码时的兜底文案（`McpFailurePresentation.tsx:10` 的 `?? "connection_failed"`）。 */
 export const AGENT_MCP_FAILURE_FALLBACK = MCP_FAILURE_MESSAGES.connection_failed!
 
+/**
+ * 本机 `~/.qoder/settings.json` 里 `mcpServers.taocode` 那条的**逐字实测值**
+ * （2026-10-08 核实：只有 command / args / env 三个键；`D:\TaoCode` 在 args 里出现两次）。
+ */
+export const AGENT_TAOCODE_MCP_SAMPLE_CONFIG = {
+  command: 'D:\\TaoCode\\build\\taocode_mcp.exe',
+  args: ['--root', 'D:\\TaoCode', '--repo-dir', 'D:\\TaoCode'],
+  env: { TAOCODE_DEBUG_PORT: '9333' },
+} as const
+
+/**
+ * 本仓自带的 MCP 服务端（`build/taocode_mcp.exe`）那一条设置。
+ *
+ * 工具名与能力面**逐条取自 native**（`native/mcp_server.cpp:391-417` 的分派表 10 条、
+ * `:328-335` 的 initialize 回包），不是照抄 ZCode 的清单 —— 点号分隔是硬要求：
+ * 写成 `fs_read` 会拿到 `-32602 Unknown tool`。
+ */
+export function builtinTaocodeMcpServer(): AgentMcpServer {
+  return {
+    id: 'builtin-taocode',
+    name: 'taocode',
+    enabled: true,
+    transport: 'stdio',
+    command: AGENT_TAOCODE_MCP_SAMPLE_CONFIG.command,
+    args: [...AGENT_TAOCODE_MCP_SAMPLE_CONFIG.args],
+    url: '',
+    env: { ...AGENT_TAOCODE_MCP_SAMPLE_CONFIG.env },
+    cwd: '',
+    headers: {},
+    timeoutMs: 0,
+    protocolVersion: '',
+    scope: 'user',
+    capabilities: {
+      tools: true,
+      serverName: 'taocode',
+      serverVersion: '0.1.0',
+      serverTitle: 'TaoCode IDE (offscreen debug bridge)',
+      protocolVersions: ['2024-11-05', '2025-03-26', '2025-06-18'],
+    },
+    declaredTools: [
+      'fs.read', 'fs.list', 'fs.write', 'git.status', 'git.diff',
+      'project.list', 'run.start', 'run.output', 'run.stop', 'ui.probe',
+    ],
+    failureKind: '',
+  }
+}
+
+/**
+ * 出厂设置：本仓自带的那一条（ZCode 这一节出厂是空列表；本仓有一条真实可用的 stdio 服务端，
+ * 所以预置它而不是留空 —— 空列表会让用户以为这一节没做完，而它是真的能连的）。
+ */
 export function defaultAgentMcpSettings(): AgentMcpSettings {
-  return { servers: [] }
+  return { servers: [builtinTaocodeMcpServer()] }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -173,6 +240,22 @@ function stringList(value: unknown): string[] {
  * 字符串数组 + 去重。**只给"集合语义"的字段用**（工具名、协议版本）——
  * 两个同名工具会让导出的声明面看起来像有两个同名工具。
  */
+function uniqueStrings(value: unknown): string[] {
+  return [...new Set(stringList(value))]
+}
+
+/** 能力面归一：不是对象就退「空声明面」（`tools: false`）—— 没声明 ≠ 声明了没有工具。 */
+function normalizeCapabilities(value: unknown): AgentMcpServerCapabilities {
+  const raw = isRecord(value) ? value : {}
+  return {
+    tools: raw.tools === true,
+    serverName: text(raw.serverName, ''),
+    serverVersion: text(raw.serverVersion, ''),
+    serverTitle: text(raw.serverTitle, ''),
+    protocolVersions: uniqueStrings(raw.protocolVersions),
+  }
+}
+
 function isTransport(value: unknown): value is AgentMcpTransport {
   return value === 'stdio' || value === 'http' || value === 'sse'
 }
@@ -232,6 +315,9 @@ function normalizeMcpServer(raw: unknown, index: number): AgentMcpServer {
     timeoutMs: normalizeTimeout(item.timeoutMs),
     protocolVersion: isProtocolVersion(item.protocolVersion) ? item.protocolVersion : '',
     scope: item.scope === 'workspace' ? 'workspace' : 'user',
+    capabilities: normalizeCapabilities(item.capabilities),
+    declaredTools: uniqueStrings(item.declaredTools),
+    failureKind: text(item.failureKind, ''),
   }
 }
 

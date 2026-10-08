@@ -756,37 +756,6 @@ void cherry_pick(const fs::path& repo, const std::string& commit) {
     require_ok(run(repo, {L"cherry-pick", checked_ref(repo, commit)}), "摘取提交");
 }
 
-void delete_branch(const fs::path& repo, const std::string& name) {
-    if (name.empty()) throw WorkspaceError("INVALID_REQUEST", "要删除的分支不能为空。");
-    require_ok(run(repo, {L"branch", L"-D", checked_ref(repo, name)}), "删除分支");
-}
-
-Json tag_list(const fs::path& repo) {
-    const auto result = run(repo, {L"tag", L"--list"});
-    require_ok(result, "读取标签");
-    Json tags = Json::array();
-    std::istringstream stream(result.out);
-    std::string name;
-    while (std::getline(stream, name)) {
-        if (!name.empty() && name.back() == '\r') name.pop_back();
-        if (!name.empty()) tags.push_back(name);
-    }
-    return {{"tags", std::move(tags)}};
-}
-
-void tag_create(const fs::path& repo, const std::string& name, const std::string& target) {
-    // The tag is new (checked_new_name), the optional target is an existing ref.
-    std::vector<std::wstring> arguments{L"tag", checked_new_name(name, "标签名")};
-    if (!target.empty()) arguments.push_back(checked_ref(repo, target));
-    require_ok(run(repo, arguments), "新建标签");
-}
-
-void tag_delete(const fs::path& repo, const std::string& name) {
-    if (name.empty()) throw WorkspaceError("INVALID_REQUEST", "要删除的标签不能为空。");
-    // The tag has to exist to be deleted, so checked_ref is the right guard here.
-    require_ok(run(repo, {L"tag", L"-d", checked_ref(repo, name)}), "删除标签");
-}
-
 void ignore_path(const fs::path& repo, const std::string& path) {
     if (path.empty() || path.find('\n') != std::string::npos || path.find('\r') != std::string::npos)
         throw WorkspaceError("INVALID_REQUEST", "要忽略的路径无效。");

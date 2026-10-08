@@ -16,7 +16,8 @@
 import type { MenuRow } from './menus/types'
 import {
   USAGE_GROUP_BY_DIRECTORY_TITLE, USAGE_GROUP_BY_FILE_STRUCTURE_TITLE,
-  USAGE_OPEN_IN_NEW_TAB_TITLE, USAGE_SORT_TITLE, USAGE_VIEW_OPTIONS_TITLE,
+  USAGE_NAVIGATE_ON_SINGLE_CLICK_TITLE, USAGE_OPEN_IN_NEW_TAB_TITLE, USAGE_SORT_TITLE,
+  USAGE_VIEW_OPTIONS_TITLE,
   referencesGroupByDirectory, referencesGroupByFileStructure, referencesInNewTab,
   referencesNavigateOnSingleClick,
   referencesSortAlphabetically, usageSymbolsAvailable,
@@ -42,7 +43,7 @@ export function usageViewGearRows(activeContent: string): Record<string, MenuRow
   const rows: MenuRow[] = [
     {
       id: 'usage.navigateOnSingleClick',
-      title: '单击导航',
+      title: USAGE_NAVIGATE_ON_SINGLE_CLICK_TITLE,
       keywords: 'navigate with single click autoscroll 一键导航',
       checked: () => referencesNavigateOnSingleClick.value,
       run: () => { referencesNavigateOnSingleClick.value = !referencesNavigateOnSingleClick.value },

@@ -192,10 +192,14 @@ test('接线：启动参数把 JAR 走 argv 通道（shell 关掉）并由 jarRu
   const source = readFileSync(new URL('../src/runActions.ts', import.meta.url), 'utf8')
   assert.match(source, /import \{[^}]*\bisJarRunConfig\b[^}]*\bjarRunConfigParams\b[^}]*\} from '\.\/jarRun\.ts'/,
     '宿主必须引真身那两个出口，不是自己再算一遍 argv')
-  assert.match(source, /params\.shell = config\.type !== 'application' && config\.type !== 'jar'/,
+  // 启动参数一律从**宏展开后**那一份算（`launchConfig = expandRunConfigMacros(config)`），
+  // 所以类型判断与 JAR 折算必须读同一个记录，不许一半读 `config` 一半读 `launchConfig`。
+  assert.match(source, /params\.shell = launchConfig\.type !== 'application' && launchConfig\.type !== 'jar'/,
     'JAR 与 application 同一档：不过 shell（路径里的空格会被 cmd /c 切坏）')
-  assert.match(source, /const launch = jarRunConfigParams\(config, \{ jdkHome: projectSettings\.value\.java\.jdkHome \?\? '' \}\)/,
+  assert.match(source, /const launch = jarRunConfigParams\(launchConfig, \{ jdkHome: projectSettings\.value\.java\.jdkHome \?\? '' \}\)/,
     'JRE 那格留空要退到项目 JDK（上游 JarApplicationCommandLineState.java:20-21）')
+  assert.doesNotMatch(source, /jarRunConfigParams\(config,/,
+    '折算读的是没展开宏的那一份 ⇒ 与上面那条 shell 判断看的不是同一个 config')
   assert.match(source, /params\.program = launch\.program/, '折算出的可执行文件必须落到启动参数上')
   assert.match(source, /params\.args = launch\.args/, '折算出的 argv 必须落到启动参数上')
 })

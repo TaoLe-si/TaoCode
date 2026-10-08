@@ -150,7 +150,8 @@
 
 ## 10. 第三十七批（用法视图齿轮的「视图选项」组）的缺口
 
-上游那一组是三条（`UsageViewContentManagerImpl.java:114-116` 的 `addAll`），本仓接了两条：
+上游那一组是三条（`UsageViewContentManagerImpl.java:114-116` 的 `addAll`），本仓三条都接了
+（2026-10-08 lane vc-nav 复算：第三条「一键导航」前一批已落，本条摘要原写"接了两条"，现订正）：
 
 - [x] 「按字母顺序排列成员」（`sort.alphabetically.action.text`，`UsageViewSettings.isSortAlphabetically`
   默认 false）——`src/referenceContents.ts` 的 `sortUsages`（路径大小写不敏感 → 行 → 列）+ 持久化 +
@@ -190,8 +191,7 @@
   全局偏好存于 `taocode.vcs.log.preferCommitDate`。`VcsLogTable.vue` 的日期格、速度搜索、复制文本与行 tooltip
   共用所选日期格式；`PreferCommitDateAction.java:37-59` 的日期列可见门控也已接入。
 - [x] 「左侧的引用」（`Vcs.Log.AlignLabels`）：开关切到独立引用列；提交消息不再被引用 chip 挤占空间。
-- [~] 着色器组（`Vcs.Log.HighlightersActionGroup`）：本地只按仓库根着色（`rootColor`），
-  没有按作者/按日期的着色器族。
+- [~] 着色器组（`Vcs.Log.HighlightersActionGroup`）：`MERGE_COMMITS` 已接入，缺省启用；仅对未选中且至少有两个父项的提交使用 `VersionControl.Log.Commit.unmatchedForeground` 对应的 `--muted` 前景。上游其余当前分支、索引提交、我的提交着色器仍未接。
 
 2026-10-06 vcslogdisp 批补记（`Vcs.Log.CompactReferencesView` 的显示档还剩哪几截，判据与坐标见
 `docs/batch-2026-10-06-vcslogdisp.md`）：

@@ -62,6 +62,22 @@ function mergeSelection(
 }
 
 /**
+ * 从**调用方原始输入**里取"显式档位"：
+ *   · `undefined` = 这一格压根没提（沿用既有档位；换模型时由 `mergeSelection` 丢掉）；
+ *   · `null` = 明确清掉（`options.reasoningLevel` 存在但是空串 —— composer 里"没选档位"就是这个形状）；
+ *   · 字符串 = 明确档位。
+ * 读原始输入而不是归一化后的 `next.options`：归一化把"空串"与"没提"都变成 undefined，
+ * 两者含义不同（前者要清、后者要沿用），`tests/agent-sessions.test.mjs` 的「切模型清旧档位」钉着这条。
+ */
+function explicitReasoningLevel(selection: unknown): string | null | undefined {
+  if (!selection || typeof selection !== "object" || Array.isArray(selection)) return undefined
+  const options = (selection as { options?: unknown }).options
+  if (!options || typeof options !== "object" || Array.isArray(options)) return undefined
+  if (!Object.prototype.hasOwnProperty.call(options, "reasoningLevel")) return undefined
+  return normalizeReasoningLevel((options as { reasoningLevel?: unknown }).reasoningLevel)
+}
+
+/**
  * 把存档里那一格读成最小选择。历史版本按模型字符串存过（`modelSelection: "glm-5.3"`），
  * 读成 `{ model }`，不炸不丢；对象形状按字段救：`model` 不是非空字符串就整格丢掉，
  * 档位坏掉只丢档位、模型保住。什么都读不出给 null（调用方删掉这一格，不写空壳）。
@@ -467,7 +483,7 @@ export function createAgentSessionStore(storage?: AgentSessionStorage | null, no
       }
       const next = sessionModelSelection(selection)
       if (!next) return false
-      record.modelSelection = mergeSelection(record.modelSelection, next.model, next.options?.reasoningLevel)
+      record.modelSelection = mergeSelection(record.modelSelection, next.model, explicitReasoningLevel(selection))
       persist()
       return true
     },
@@ -486,7 +502,7 @@ export function createAgentSessionStore(storage?: AgentSessionStorage | null, no
       }
       const next = sessionModelSelection(selection)
       if (!next) return false
-      library.draftModelSelection = mergeSelection(library.draftModelSelection, next.model, next.options?.reasoningLevel)
+      library.draftModelSelection = mergeSelection(library.draftModelSelection, next.model, explicitReasoningLevel(selection))
       persist()
       return true
     },

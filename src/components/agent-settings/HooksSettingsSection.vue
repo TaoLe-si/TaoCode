@@ -69,10 +69,13 @@ function save() {
     : '本次会话仍生效，但没有存下来（本机存储不可用）。'
   if (!found.length) editingId.value = undefined
 }
+
+/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
+const SECTION_DESCRIPTION = '管理任务生命周期钩子：在指定事件上自动执行命令（ZCode `settings.hooks.description`）。'
 </script>
 
 <template>
-  <AgentSettingsSectionShell>
+  <AgentSettingsSectionShell title="钩子" :description="SECTION_DESCRIPTION">
     <fieldset class="settings-fields">
       <div v-for="(hook, index) in draft.hooks" :key="hook.id" class="hooks-item">
         <div class="hooks-head">
@@ -87,7 +90,8 @@ function save() {
           <span class="hooks-scope">{{ scopeLabel(hook.scope) }}</span>
           <span v-if="trustLabel(hook)" class="hooks-trust">需信任审核</span>
           <button
-            class="settings-icon-button settings-icon-button-danger" type="button" :aria-label="`删除第 ${index + 1} 条钩子`"
+            class="settings-icon-button settings-icon-button-danger" type="button"
+            :title="`删除第 ${index + 1} 条钩子`" :aria-label="`删除第 ${index + 1} 条钩子`"
             @click="removeAt(index)"
           ><Trash2 :size="iconSize.control" aria-hidden="true" /></button>
           <button
@@ -147,6 +151,8 @@ function save() {
           </div>
         </div>
       </div>
+
+      <p v-if="!draft.hooks.length" class="field-hint">暂无钩子配置：下面「新建钩子」起第一条。</p>
 
       <div class="settings-actions">
       <button class="settings-button settings-button-primary" type="button" @click="addHook">

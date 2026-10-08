@@ -580,12 +580,12 @@ watch(() => props.activePath, () => refreshFile())
         </span>
         <button class="icon-button" :disabled="!expandable" :title="expandable ? '' : '没有可展开的测试套件'" aria-label="展开全部" @click="expandAll"><ChevronsUpDown :size="iconSize.control" /></button>
         <button class="icon-button" :disabled="!expandable" :title="expandable ? '' : '没有可折叠的测试套件'" aria-label="折叠全部" @click="collapseAll"><ChevronsDownUp :size="iconSize.control" /></button>
-        <button class="icon-button" :disabled="!results.size" aria-label="导出测试结果 XML" @click="exportXml"><FileDown :size="iconSize.control" /></button>
-        <button class="icon-button" :disabled="!results.size" aria-label="导出测试结果到文件" @click="openExportDialog"><FileOutput :size="iconSize.control" /></button>
+        <button class="icon-button" :disabled="!results.size" aria-label="导出测试结果 XML" title="导出测试结果 XML" @click="exportXml"><FileDown :size="iconSize.control" /></button>
+        <button class="icon-button" :disabled="!results.size" aria-label="导出测试结果到文件" title="导出测试结果到文件" @click="openExportDialog"><FileOutput :size="iconSize.control" /></button>
         <button class="icon-button" :title="`${IMPORT_TESTS_NAME}：${IMPORT_TESTS_DESCRIPTION}`" :aria-label="IMPORT_TESTS_NAME" @click="importTestsFromFile()"><FileInput :size="iconSize.control" /></button>
         <button class="icon-button" :class="{ active: autoTest.isEnabled() }" :aria-pressed="autoTest.isEnabled()"
           title="改动后延迟重跑" aria-label="自动测试" @click="toggleAutoTest"><RefreshCw :size="iconSize.control" /></button>
-        <button class="icon-button" aria-label="重新发现测试" @click="refreshProject"><RefreshCw :size="iconSize.control" /></button>
+        <button class="icon-button" aria-label="重新发现测试" title="重新发现测试" @click="refreshProject"><RefreshCw :size="iconSize.control" /></button>
         <button class="icon-button" :disabled="!tests.length" title="按 git 本地更改" :aria-label="FIND_AFFECTED_TESTS_TEXT" @click="selectAffectedTests"><GitBranch :size="iconSize.control" /></button>
       </div>
     </div>
@@ -594,8 +594,8 @@ watch(() => props.activePath, () => refreshFile())
       <button class="subtle-button" :disabled="running || !selectedRows.length" title="只跑勾选的测试" @click="runSelected"><Play aria-hidden="true" :size="iconSize.menu" />所选</button>
       <button class="subtle-button" :disabled="running || !rerunNames.length"
         :title="rerunFilter.includeNonStarted ? '重跑失败的、没跑完的与没跑起来的' : '只重跑失败的测试'" @click="rerunFailed"><RotateCcw aria-hidden="true" :size="iconSize.menu" />失败 ({{ rerunNames.length }})</button>
-      <button class="icon-button" :disabled="!failed.size" :aria-label="PREVIOUS_FAILED_TEST_NAME" @click="stepFailure(-1)"><ChevronUp :size="iconSize.control" /></button>
-      <button class="icon-button" :disabled="!failed.size" :aria-label="NEXT_FAILED_TEST_NAME" @click="stepFailure(1)"><ChevronDown :size="iconSize.control" /></button>
+      <button class="icon-button" :disabled="!failed.size" :aria-label="PREVIOUS_FAILED_TEST_NAME" :title="PREVIOUS_FAILED_TEST_NAME" @click="stepFailure(-1)"><ChevronUp :size="iconSize.control" /></button>
+      <button class="icon-button" :disabled="!failed.size" :aria-label="NEXT_FAILED_TEST_NAME" :title="NEXT_FAILED_TEST_NAME" @click="stepFailure(1)"><ChevronDown :size="iconSize.control" /></button>
       <!-- 显示过滤器（上游 ToolbarPanel.java:58-66 的两个 inverted 开关）。 -->
       <button class="icon-button" :class="{ active: displayFilter.showPassed }" :aria-pressed="displayFilter.showPassed"
         :title="`${SHOW_PASSED_NAME}：${SHOW_PASSED_DESCRIPTION}`" :aria-label="SHOW_PASSED_NAME" @click="displayFilter = toggleDisplayFilter(displayFilter, 'showPassed')"><CircleCheck :size="iconSize.control" /></button>
@@ -604,7 +604,7 @@ watch(() => props.activePath, () => refreshFile())
       <!-- 重跑集的那条属性开关（上游 `JUnitConsoleProperties.java:50` 把它加进 gear 组，
            文案 `ExecutionBundle.properties:157`；本仓的工具栏是平铺的，与既有的显示过滤器同排）。 -->
       <button class="icon-button" :class="{ active: rerunFilter.includeNonStarted }" :aria-pressed="rerunFilter.includeNonStarted"
-        :aria-label="INCLUDE_NON_STARTED_NAME" @click="toggleRerunFilter"><ListChecks :size="iconSize.control" /></button>
+        :aria-label="INCLUDE_NON_STARTED_NAME" :title="INCLUDE_NON_STARTED_NAME" @click="toggleRerunFilter"><ListChecks :size="iconSize.control" /></button>
       <!-- Open Source at Exception（上游 `ToolbarPanel.java:187-189` 的 gear 组开关，
            文案 `ExecutionBundle.properties:166-167`）：开着时失败节点的跳转落到抛异常那一行。 -->
       <button class="icon-button" :class="{ active: openFailureLine }" :aria-pressed="openFailureLine"
@@ -732,10 +732,10 @@ watch(() => props.activePath, () => refreshFile())
 .testrun-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--ctrl-height-sm); padding-top: var(--space-1); padding-right: var(--space-3); padding-bottom: var(--space-1); font-size: 12px; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
 .testrun-row:hover { background: var(--hover); }
 .testrun-row.selected { background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); }
-.testrun-row.suite { border-bottom: 1px solid var(--line-strong); background: var(--panel); color: var(--bright); font-weight: 650; }
+.testrun-row.suite { border-bottom: 1px solid var(--line-strong); background: var(--panel); color: var(--bright); font-weight: 650; transition: background-color var(--dur-1) var(--ease); }
 .testrun-row.suite:hover { background: var(--hover); }
 .testrun-row.suite .testrun-meta { color: var(--secondary); font-variant-numeric: tabular-nums; }
-.testrun-row input[type="checkbox"] { flex-shrink: 0; accent-color: var(--accent); }
+.testrun-row input[type="checkbox"] { flex-shrink: 0; width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); accent-color: var(--accent); }
 .testrun-chevron { display: inline-flex; align-items: center; justify-content: center; width: 14px; padding: 0; flex-shrink: 0; background: none; border: 0; color: var(--muted); }
 .testrun-chevron svg { flex-shrink: 0; }
 /* 失败详情的断言并排（宽度不够时上下堆叠；长值横向滚动，不换行撑破面板）。 */

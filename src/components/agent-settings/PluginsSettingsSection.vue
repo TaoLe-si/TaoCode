@@ -85,10 +85,13 @@ function save() {
     ? '已保存到本机设置。'
     : '本次会话仍生效，但没有存下来（本机存储不可用）。'
 }
+
+/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
+const SECTION_DESCRIPTION = '启用或停用已安装的插件；插件打包技能、命令、钩子与 MCP 服务器（`settings.plugins.description`）。'
 </script>
 
 <template>
-  <AgentSettingsSectionShell>
+  <AgentSettingsSectionShell title="插件" :description="SECTION_DESCRIPTION">
     <div class="pl-toolbar">
       <label class="pl-search">
         <Search :size="iconSize.dense" aria-hidden="true" />

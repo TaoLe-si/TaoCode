@@ -128,7 +128,9 @@ test('导出设置是项目级，且默认值与 IDEA 的字段默认值一致',
   assert.deepEqual(defaultExportToHtmlSettings, { scope: 0, includeSubdirectories: false, printLineNumbers: false, openInBrowser: false, outputDirectory: '' })
   assert.deepEqual(defaultProjectSettings.exportToHtml, defaultExportToHtmlSettings)
   // 原生侧：项目默认值 + 校验都在
-  const schema = read('native/settings_schema.cpp')
+  // 项目级设置 2026-10-08 拆进 native/settings_project_schema.cpp（尺寸上限），判据读**两份的并集**：
+  // 它要钉的是「原生侧有这个默认值/校验」，不是「它在哪一个文件里」。
+  const schema = read('native/settings_schema.cpp') + read('native/settings_project_schema.cpp')
   assert.ok(schema.includes('{"exportToHtml", {{"scope", 0}'), '原生项目默认值里要有 exportToHtml')
   assert.ok(schema.includes('void validate_export_to_html'), '要有校验函数')
   assert.ok(schema.includes('0 / 1 / 2 / 4'), '范围值只允许那四个')

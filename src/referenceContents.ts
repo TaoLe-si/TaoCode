@@ -44,6 +44,7 @@ const PROJECT_SCOPE = '项目文件'
 // 「在新标签页中打开结果」与「按字母顺序排列成员」在下方各自持久化。
 // 组标题 `group.view.options` = 视图选项（IdeBundle）。
 export const USAGE_VIEW_OPTIONS_TITLE = '视图选项'
+export const USAGE_NAVIGATE_ON_SINGLE_CLICK_TITLE = '单击导航'
 export const USAGE_OPEN_IN_NEW_TAB_TITLE = '在新标签页中打开结果'
 export const USAGE_SORT_TITLE = '按字母顺序排列成员'
 

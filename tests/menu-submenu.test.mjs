@@ -121,8 +121,14 @@ test('the file properties group nests the line-separator group inside it', () =>
   assert.match(body, /id: 'file\.lineSeparatorUnix'/, 'Unix 行尾在第二层里')
   assert.match(body, /id: 'file\.encoding'/, '文件编码是同级的第一个子项')
   assert.match(body, /id: 'file\.toggleReadOnly'/, '只读属性在同一子菜单里')
-  // IDEA 还有 ConvertToMacLineSeparators，但 TaoCode 的转换只支持 CRLF/LF，不造第三项
-  assert.doesNotMatch(body, /id: 'file\.lineSeparatorMac'/)
+  // IDEA 的 ConvertToMacLineSeparators（CR 档）2026-10-08 起是**真能力**：三档行尾在
+  // `native/workspace_codec.hpp`（LF/CRLF/CR 映射与检测）与 `src/editorFileOps.ts` 的
+  // `convertLineSeparators` 联合类型里都有 —— 所以这一行不是死行。判据从「不许出现」改成
+  // 「出现且绑到真动作 + 实现侧真的收第三档」，两条件缺一才是假控件。
+  assert.match(body, /id: 'file\.lineSeparatorMac'[\s\S]{0,220}run: \(\) => void ctx\.convertLineSeparators\('cr'\)/,
+    'CR 档已实现，菜单行必须绑到同一个动作')
+  assert.match(readFileSync(new URL('../src/editorFileOps.ts', import.meta.url), 'utf8'),
+    /separator: 'crlf' \| 'lf' \| 'cr'/, '实现侧要真的收第三档，否则菜单这一行就是假控件')
 })
 
 test('the renderer has a submenu branch ahead of the plain row branch', () => {

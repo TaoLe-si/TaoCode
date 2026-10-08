@@ -41,8 +41,8 @@ const emit = defineEmits<{
 <style scoped>
 .git-update-options-dialog { width: min(520px, 96vw); }
 .git-update-options-rows { display: flex; flex-direction: column; gap: var(--space-1); }
-.git-update-option-row { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2); border-radius: var(--radius-xs); color: var(--text); font-size: 12px; }
+.git-update-option-row { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2); border-radius: var(--radius-xs); color: var(--text); font-size: 12px; transition: background-color var(--dur-1) var(--ease); }
 .git-update-option-row:hover { background: var(--hover); }
-.git-update-option-row input, .git-update-options-again input { margin: 2px 0 0; accent-color: var(--accent); }
+.git-update-option-row input, .git-update-options-again input { margin: 2px 0 0; width: var(--icon-size-checkbox); height: var(--icon-size-checkbox); accent-color: var(--accent); }
 .git-update-options-again { display: flex; align-items: flex-start; gap: var(--space-2); margin-top: var(--space-3); color: var(--secondary); font-size: 12px; }
 </style>

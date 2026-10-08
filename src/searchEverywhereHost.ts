@@ -147,7 +147,9 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
     const epoch = generation
     const id = ++fileRequestId
     try {
-      const candidates = await loadWorkspaceFileSearchEntries(workspace.value.root)
+      // `fresh`：SE 的清单是"此刻"的快照。文件变化后重取时必须另起一次扫描 ——
+      // 复用同根在途的那一次会拿到变化之前的清单（那一份是 @ 文件候选等别的消费方在等的）。
+      const candidates = await loadWorkspaceFileSearchEntries(workspace.value.root, { fresh: true })
       if (isCurrent(epoch) && id === fileRequestId)
         searchEverywhereFiles.value = candidates.filter(entry => entry.type === 'file')
     } catch { /* 当前会话刷新失败保留清单；新会话从空清单开始。 */ }
@@ -158,6 +160,9 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
     try {
       const result = await request<{ available: boolean; symbols?: SymbolEntry[] }>(
         'lsp.request', { kind: 'workspaceSymbol', path: activePath.value, query })
+      // 回包落地前必须**再查一次请求序号**：同词重发时 `onSearchEverywhereQuery` 会把
+      // `symbolRequestId` 推进一格（新查询立刻作废在途符号响应），只查 generation 会让
+      // 旧响应把新查询的结果覆盖掉 —— 与文件那一档（`id === fileRequestId`）同一条口径。
       if (!isCurrent(epoch) || id !== symbolRequestId) return
       searchEverywhereSymbols.value = (result.symbols ?? []).slice(0, 100)
     } catch {
@@ -427,15 +432,18 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
       refreshTimer = undefined
       textTimer = undefined
     })
+  if (open) {
+    void refreshFiles()
+    onSearchEverywhereQuery(lastQuery)
+    scheduleText()
+  }
+  }, { immediate: true, flush: 'sync' })
+
+  // 忽略规则文件本身改了（另存 `.zcodeignore`、从 `.gitignore` 同步、恢复默认）：候选清单的口径变了，
+  // 立刻重取一次，不等下一次文件变化推送。会话没开时 `refreshFiles` 自己会返回。
   watch(() => workspaceFileIgnoreChanged.revision, () => {
     if (workspaceFileIgnoreChanged.root === workspace.value?.root) void refreshFiles()
   })
-    if (open) {
-      void refreshFiles()
-      onSearchEverywhereQuery(lastQuery)
-      scheduleText()
-    }
-  }, { immediate: true, flush: 'sync' })
 
   // LSP 就绪状态或请求所依赖的文档变化也必须作废旧符号响应。
   watch([activePath, lspReady], () => {

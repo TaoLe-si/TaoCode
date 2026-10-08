@@ -301,7 +301,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
            WelcomeScreen.Options, not to the Settings dialog itself. -->
       <div class="welcome-quick-access">
         <button
-          type="button" class="icon-button welcome-gear" aria-label="选项"
+          type="button" class="icon-button welcome-gear" aria-label="选项" title="选项"
           aria-haspopup="menu" :aria-expanded="optionsOpen" :disabled="busy"
           @click.stop="optionsOpen = !optionsOpen"
         >
@@ -329,8 +329,8 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
         <section class="customize-group">
           <h2>主题</h2>
           <div class="theme-options" role="group" aria-label="主题">
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="iconSize.action" aria-hidden="true" /><span>浅色</span></button>
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="iconSize.action" aria-hidden="true" /><span>深色</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="iconSize.action" aria-hidden="true" /><span>月之亮面</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="iconSize.action" aria-hidden="true" /><span>月之暗面</span></button>
           </div>
         </section>
         <section class="customize-group">
@@ -384,14 +384,14 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
         <section class="recent-section" :aria-labelledby="`${id}-recent-title`" :aria-busy="busy">
           <div class="recent-heading">
             <h2 :id="`${id}-recent-title`">{{ isDesktop ? '近期项目' : '当前会话' }}</h2>
-            <button type="button" class="icon-button" :disabled="busy" aria-label="刷新项目列表" @click="emit('refresh')">
+            <button type="button" class="icon-button" :disabled="busy" aria-label="刷新项目列表" title="刷新项目列表" @click="emit('refresh')">
               <RefreshCw :size="iconSize.toolbar" aria-hidden="true" />
             </button>
           </div>
           <div class="project-search">
             <Search :size="iconSize.action" aria-hidden="true" />
             <input :id="`${id}-search`" ref="searchInput" v-model="query" type="search" aria-label="按项目名称、路径或分组搜索" placeholder="搜索项目名称、路径或分组" autocomplete="off" spellcheck="false" @keydown="onSearchKeydown" />
-            <button v-if="query" type="button" class="icon-button" aria-label="清空搜索" @click="clearSearch"><X :size="iconSize.toolbar" aria-hidden="true" /></button>
+            <button v-if="query" type="button" class="icon-button" aria-label="清空搜索" title="清空搜索" @click="clearSearch"><X :size="iconSize.toolbar" aria-hidden="true" /></button>
           </div>
           <p class="list-status" role="status">{{ listStatus }}</p>
 
@@ -437,7 +437,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                      reachable and a remove icon once its path is gone. -->
                 <button
                   type="button" class="icon-button row-menu-button" :disabled="busy"
-                  :aria-label="`打开 ${project.name} 的操作菜单`" :aria-expanded="menuPath === project.path"
+                  :aria-label="`打开 ${project.name} 的操作菜单`" :title="`打开 ${project.name} 的操作菜单`" :aria-expanded="menuPath === project.path"
                   @click.stop="toggleMenu(project.path)"
                 ><Settings v-if="project.available" :size="iconSize.control" aria-hidden="true" /><X v-else :size="iconSize.toolbar" aria-hidden="true" /></button>
               </div>
@@ -635,7 +635,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .recent-open:hover:not(:disabled) { background: var(--hover); }
 .recent-open:disabled { opacity: 1; color: var(--muted); }
 .recent-open:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset-inset); }
-.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; align-self: center; border-radius: 3px; font-size: 12px; background-color: var(--selected); background-image: linear-gradient(135deg, var(--selected), var(--selected)); color: var(--on-accent); font: 700 11px var(--font-brand); letter-spacing: .04em; }
+.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; align-self: center; border-radius: var(--radius-xs); font-size: 12px; background-color: var(--selected); background-image: linear-gradient(135deg, var(--selected), var(--selected)); color: var(--on-accent); font: 700 11px var(--font-brand); letter-spacing: .04em; }
 /* RecentProjectIconHelper generates gradient avatars (ProjectIconPalette) for
    reachable paths and a desaturated version when the path is gone. The CSS
    gradient lives inline so the JS palette stays the single source of truth. */

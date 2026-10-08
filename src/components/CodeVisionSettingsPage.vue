@@ -36,6 +36,10 @@ import { onMounted, watch } from 'vue'
 import { useId } from 'vue'
 import {
   CODE_VISION_GROUP_IDS,
+  INHERITORS_CODE_VISION_GROUP_ID,
+  LSP_CODE_VISION_GROUP_ID,
+  PROBLEMS_CODE_VISION_GROUP_ID,
+  USAGES_CODE_VISION_GROUP_ID,
   codeVisionGroupName, codeVisionSettings, codeVisionVisibleEntryLimit, setCodeVisionGroupEnabled,
 } from '../codeLensSettings.ts'
 import type { EditorSettings } from '../settingsModel'
@@ -50,6 +54,19 @@ const props = defineProps<{ settings: EditorSettings; busy?: boolean }>()
 // 组名走 `codeVisionGroupName`，页面不自己拼字符串。
 const GROUPS = CODE_VISION_GROUP_IDS
 const spinnerId = useId()
+
+// 每组的说明：`aria-describedby` 挂在那一组的复选框上，正文用设置页的 `field-hint` 配方
+// （`.field-hint` 在 `src/components/SettingsDialog.vue:1067`）。
+// 2026-10-08 复读：UI 视觉重构那一批把这两条 `field-hint` 与 `:aria-describedby` 一起从页面上拿掉了，
+// 而 `tests/code-lens-grouping.test.mjs` 还在按「分组复选框带 `cv-group-<id>-hint` 描述」认这一行
+// （缺了它就分不清「启用 Code Vision」总闸与四个分组开关）⇒ 这里按四组补齐，文案只说本仓真会渲染的东西。
+const GROUP_HINTS: Record<string, string> = {
+  [LSP_CODE_VISION_GROUP_ID]: '服务端（LSP）下发的嵌入提示全归 LSP CodeLens 这一组，本仓自己不产出这一组。',
+  [PROBLEMS_CODE_VISION_GROUP_ID]: '问题计数的嵌入提示：本仓内置的 problems provider，数的是当前文件里的诊断。',
+  [USAGES_CODE_VISION_GROUP_ID]: '用法计数的嵌入提示：references provider（上游 PlatformCodeVisionIds.USAGES 那一格）。',
+  [INHERITORS_CODE_VISION_GROUP_ID]: '继承者计数的嵌入提示：inheritors provider（上游 PlatformCodeVisionIds.INHERITORS 那一格）。',
+}
+const groupHintId = (id: string) => `cv-group-${id}-hint`
 
 /** 某一组现在是不是开着：出厂开，被写进 `codeVisionDisabledGroups` 才是关（上游 :45 的语义）。 */
 function groupOn(id: string): boolean {
@@ -85,9 +102,11 @@ watch(() => `${props.settings.codeVisionEnabled}|${props.settings.codeVisionDisa
   <fieldset class="settings-fields" :disabled="busy">
     <label class="checkbox-row"><input v-model="settings.codeVisionEnabled" type="checkbox" /><span>启用 Code Vision</span></label>
     <label v-for="id in GROUPS" :key="id" class="checkbox-row">
-      <input type="checkbox" :checked="groupOn(id)" @change="toggleGroup(id, ($event.target as HTMLInputElement).checked)"
+      <input type="checkbox" :checked="groupOn(id)" :aria-describedby="groupHintId(id)" @change="toggleGroup(id, ($event.target as HTMLInputElement).checked)"
       /><span>显示 {{ codeVisionGroupName(id) }} 嵌入提示</span>
     </label>
+    <p v-for="id in GROUPS" :key="`${id}-hint`" :id="groupHintId(id)" class="field-hint">{{ GROUP_HINTS[id] }}</p>
+    <p class="field-hint">四个分开关只装「与出厂相反」的那一半：关掉的组在编辑器右键里也一并消失；「启用 Code Vision」总闸关掉时四组都不显示。</p>
     <div class="input-row">
       <label :for="spinnerId">声明上方可见的条数</label>
       <input :id="spinnerId" v-model.number="settings.codeVisionVisibleEntries" type="number" min="1" max="10" step="1" />

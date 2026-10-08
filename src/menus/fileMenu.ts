@@ -80,11 +80,10 @@ export interface FileMenuContext {
     { id: 'file.properties', title: '文件属性', keywords: 'file properties encoding read only line separators 文件属性 编码 只读 行分隔符', children: [
       { id: 'file.encoding', title: '文件编码…', keywords: 'encoding charset gbk utf16 bom 编码', enabled: ctx.hasEditor, run: () => ctx.openEncoding() },
       { id: 'file.toggleReadOnly', title: '切换只读属性', keywords: 'read only writable lock attribute 只读 可写', enabled: () => Boolean(ctx.active.value) && ctx.isDesktop, run: () => void ctx.toggleReadOnly(ctx.activePath.value) },
-      { id: 'file.lineSeparators', title: '行分隔符', keywords: 'line separators crlf lf 行尾 分隔符', children: [
+      { id: 'file.lineSeparators', title: '行分隔符', keywords: 'line separators crlf lf cr mac 行尾 分隔符', children: [
         { id: 'file.lineSeparatorWindows', title: '转换为 Windows (CRLF) 行尾', keywords: 'convert windows line separators crlf 行尾 换行', enabled: () => Boolean(ctx.active.value) && ctx.isDesktop, run: () => void ctx.convertLineSeparators('crlf') },
         { id: 'file.lineSeparatorUnix', title: '转换为 Unix and macOS (LF) 行尾', keywords: 'convert unix macos line separators lf 行尾 换行', enabled: () => Boolean(ctx.active.value) && ctx.isDesktop, run: () => void ctx.convertLineSeparators('lf') },
-        // IDEA 还有 ConvertToMacLineSeparators(CR)：TaoCode 的换行转换只有 CRLF/LF 两种（见
-        // convertLineSeparators 的参数类型），不做只有名字没有实现的第三项。
+        { id: 'file.lineSeparatorMac', title: '转换为 Classic Mac OS (CR) 行尾', keywords: 'convert mac classic mac os line separators cr 行尾 换行', enabled: () => Boolean(ctx.active.value) && ctx.isDesktop, run: () => void ctx.convertLineSeparators('cr') },
       ] },
     ] },
     { id: 'file.openBinary', title: '以二进制/十六进制方式打开', keywords: 'binary hex image 二进制 十六进制 图片', enabled: () => ctx.isDesktop && Boolean(ctx.activePath.value || ctx.workspace.value), run: () => { const path = ctx.activePath.value; if (path) void ctx.openBinary(path); else ctx.notify('请先选中一个文件。', true) } },
