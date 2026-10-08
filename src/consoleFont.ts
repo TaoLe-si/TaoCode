@@ -127,6 +127,17 @@ export function resetConsoleFontSettings(): ConsoleFontSettings {
   return { ...DEFAULT_CONSOLE_FONT }
 }
 
+/**
+ * 改行距（上游 Console Font 页的 `setCurrentLineSpacing(float)`：界内任意小数，越界夹回）。
+ * 空/坏输入保持原值（输入框清空时不该把行距弹回默认）。
+ */
+export function changeConsoleLineSpacing(settings: ConsoleFontSettings, value: unknown): ConsoleFontSettings {
+  if (value === '' || value === null || value === undefined) return { ...settings }
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return { ...settings }
+  return { ...settings, lineSpacing: clampConsoleLineSpacing(numeric) }
+}
+
 export function isDefaultConsoleFont(settings: ConsoleFontSettings): boolean {
   return settings.size === DEFAULT_CONSOLE_FONT.size && settings.lineSpacing === DEFAULT_CONSOLE_FONT.lineSpacing
 }
@@ -137,8 +148,10 @@ export function isDefaultConsoleFont(settings: ConsoleFontSettings): boolean {
  * 字号只写 px 与行距倍数，字体族仍交给 `--font-mono` 令牌（本仓不做字体名覆盖，见文件头）。
  */
 export function consoleFontCss(settings: ConsoleFontSettings): Record<string, string> {
-  if (isDefaultConsoleFont(settings)) return {}
-  return { fontSize: `${settings.size}px`, lineHeight: String(settings.lineSpacing) }
+  const css: Record<string, string> = {}
+  if (settings.size !== DEFAULT_CONSOLE_FONT.size) css.fontSize = `${settings.size}px`
+  if (settings.lineSpacing !== DEFAULT_CONSOLE_FONT.lineSpacing) css.lineHeight = String(settings.lineSpacing)
+  return css
 }
 
 /** 工具条/aria 上那一句（带上下限，用户能看懂为什么点不动）。 */

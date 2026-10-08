@@ -479,7 +479,7 @@ Json Manager::stop(int instance) {
         } else {
             const auto found = impl_->instances.find(instance);
             if (found != impl_->instances.end()) {
-                Instance& target = *found->second;
+                Impl::Instance& target = *found->second;
                 // 第一次请求 = 优雅（上游 `KillableProcessHandler.java:26-30`：第一次 Stop 优雅、
                 // 之后再按才强杀）：只发 Ctrl+C / WM_CLOSE，**实例留在清单里**——进程还在跑，
                 // 前端那一格"停止中"（`ProcessHandler.isProcessTerminating()`）就是它的可见面。

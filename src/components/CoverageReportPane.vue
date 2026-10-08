@@ -109,6 +109,7 @@ async function exportReport() {
   exporting.value = true
   exportNote.value = ''
   try {
+    if (!current) return  // 没有报告就没有可导出的内容（`coverageReportHtml` 要的是非空摘要）
     const directory = await request<string | null>('dialog.pickDirectory', { title: COVERAGE_EXPORT_DIALOG_TITLE, initial: '' })
     if (!directory) return
     const path = coverageReportExportPath(directory)

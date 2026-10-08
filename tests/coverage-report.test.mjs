@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { collectCoverageReportPath, coverageAvailableGroupings, coverageFormatOf, coveragePercentText, coverageViewSection, isCoverageReportPath, MAX_COVERAGE_FILES, MAX_COVERAGE_METHODS, parseCoberturaXml, parseCoverageReport, parseJacocoXml, parseLcovInfo } from '../src/coverageReport.ts'
+import { COVERAGE_EXPORT_DIALOG_TITLE, COVERAGE_EXPORT_FILE_NAME, coverageReportExportAvailable, coverageReportExportPath, coverageReportHtml } from '../src/coverageExport.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -304,4 +305,76 @@ test('接线：CoverageReportPane 走三格式分发入口与四档行模型，�
   assert.match(pane, /aria-label="读取覆盖率报告"/)
   assert.match(pane, /按方法 \(/, '方法级切换按钮')
   assert.match(pane, /COVERAGE_FORMAT_LABELS/, '标题显示读的是哪种格式')
+})
+
+// ── 导出（上游 `GenerateCoverageReportAction` → `ExportToHTMLDialog`） ─────────────────
+// 门、文件名、自包含 HTML、落盘接线四件事都核：判据要能红在"门放行了空报告"、
+// "导出里夹带外部资源"、"面板没接宿主那两条通道"这几种真缺陷上。
+
+test('导出：门 = 有报告内容才可用（没有报告/空报告一律 false）', () => {
+  assert.equal(coverageReportExportAvailable(null), false)
+  assert.equal(coverageReportExportAvailable(undefined), false)
+  assert.equal(coverageReportExportAvailable(parseCoverageReport('', 'coverage/lcov.info')), false,
+    '空报告（0 文件 0 行）不许导出 —— 那是"生成一份空报告"')
+  assert.equal(coverageReportExportAvailable(parseLcovInfo('SF:/a/b.c\nDA:1,1\nend_of_record\n', 'coverage/lcov.info')), true)
+  const rootOnly = parseJacocoXml('<report><counter type="LINE" missed="2" covered="3"/></report>', 'coverage/jacoco.xml')
+  assert.equal(coverageReportExportAvailable(rootOnly), true, '只有根计数器的总览报告也算有内容')
+})
+
+test('导出：自包含 HTML —— 四档表都在、没有外部资源/脚本、路径与内容都转义', () => {
+  const summary = parseJacocoXml(
+    '<report><package name="p"><sourcefile name="A.java"><counter type="LINE" missed="1" covered="3"/></sourcefile>'
+    + '<class name="p/A" sourcefilename="A.java"><counter type="LINE" missed="1" covered="3"/>'
+    + '<method name="run" desc="()V"><counter type="LINE" missed="1" covered="3"/></method></class>'
+    + '<class name="p/B" sourcefilename="B.java"><counter type="LINE" missed="2" covered="0"/></class></package></report>',
+    'coverage/jacoco.xml')
+  const html = coverageReportHtml(summary, { generatedAt: new Date('2026-10-08T00:00:00Z') })
+  assert.match(html, /^<!DOCTYPE html>/)
+  assert.match(html, /<meta charset="utf-8" \/>/)
+  assert.match(html, /p\/A\.java/, '逐文件表')
+  for (const heading of ['按文件（1）', '按包（1）', '按类（2）', '按方法（1）']) {
+    assert.ok(html.includes(heading), `缺 ${heading} 那张表`)
+  }
+  assert.match(html, /行覆盖 75%/, '总计百分比')
+  assert.match(html, /JaCoCo \/ Kover/, '格式标签')
+  assert.match(html, /2026-10-08T00:00:00\.000Z/, '生成时间进导出的元信息')
+  // 自包含：不许有脚本、外链、img/iframe（导出的文件要能离线双击打开）。
+  assert.equal(/<script/i.test(html), false)
+  assert.equal(/<img|<iframe|<link\b/i.test(html), false)
+  assert.equal(/https?:\/\//i.test(html), false, '不许引用外部地址')
+
+  // 转义：路径/类名里的尖括号与 & 不许原样进 HTML（否则报告文件本身就是注入面）。
+  const nasty = parseLcovInfo('SF:/tmp/<script>alert(1)</script> & co.c\nDA:1,1\nend_of_record\n', 'coverage/lcov.info')
+  const escaped = coverageReportHtml(nasty)
+  assert.equal(escaped.includes('<script>'), false, '原始 <script> 不许出现')
+  assert.ok(escaped.includes('&lt;script&gt;'), '必须转义成实体')
+  assert.ok(escaped.includes('&amp;'), '& 也要转义')
+})
+
+test('导出：LCOV 只写文件表（空档不写空表），文件名与落盘路径照上游那棵树', () => {
+  const lcov = parseLcovInfo('SF:/a/b.c\nDA:1,1\nend_of_record\n', 'coverage/lcov.info')
+  const html = coverageReportHtml(lcov)
+  assert.ok(html.includes('按文件（1）'))
+  for (const heading of ['按包（', '按类（', '按方法（']) {
+    assert.equal(html.includes(heading), false, `LCOV 没有 ${heading} 那一档，不许写空表`)
+  }
+  assert.equal(COVERAGE_EXPORT_FILE_NAME, 'index.html')
+  assert.equal(coverageReportExportPath('C:/out'), 'C:/out/index.html')
+  assert.equal(coverageReportExportPath('C:\\out\\'), 'C:\\out/index.html', '结尾斜杠要去掉（不多写一层）')
+  assert.equal(COVERAGE_EXPORT_DIALOG_TITLE, 'Export', '上游 InspectionsBundle.properties:56')
+})
+
+test('接线：CoverageReportPane 的「生成报告」走 pickDirectory + writeExportFiles，门与上游同义', () => {
+  const pane = read('src/components/CoverageReportPane.vue')
+  assert.match(pane, /coverageReportExportAvailable\(summary\.value\)/, '按钮可用性 = 上游 isReportGenerationAvailable')
+  assert.match(pane, /request<string \| null>\('dialog\.pickDirectory', \{ title: COVERAGE_EXPORT_DIALOG_TITLE/, '先选目录（上游 ExportToHTMLDialog）')
+  assert.match(pane, /request\('app\.writeExportFiles', \{ files: \[\{ path, content: coverageReportHtml\(current, \{ generatedAt: new Date\(\) \}\) \}\] \}\)/,
+    '写盘走既有 .html 通道，内容来自 coverageReportHtml')
+  assert.match(pane, /coverageReportExportPath\(directory\)/, '路径拼接走模块里的那一条')
+  assert.match(pane, /aria-label="生成覆盖率报告"/)
+  assert.match(pane, /没有可导出的报告内容/, '不可用时标题要写明原因（不假装能导出）')
+  const module = read('src/coverageExport.ts')
+  for (const coordinate of ['GenerateCoverageReportAction.java:22-40', 'ExportToHTMLDialog.kt:19-52', 'InspectionsBundle.properties:55-57']) {
+    assert.ok(module.includes(coordinate), `模块注释缺上游坐标 ${coordinate}`)
+  }
 })

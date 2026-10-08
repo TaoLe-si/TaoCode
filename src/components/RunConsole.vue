@@ -78,9 +78,10 @@ import { consoleAnsiCss, consoleAnsiStyleAt, type ConsoleAnsiChunk } from '../co
 import { resolveTerminalThemeName, terminalPalette, type TerminalColorPalette } from '../terminalColors.ts'
 import { CONSOLE_ENCODINGS } from '../consoleEncoding.ts'
 import {
-  changeConsoleFontSize, CONSOLE_FONT_SIZE_STEP_DOWN, CONSOLE_FONT_SIZE_STEP_UP, consoleFontCss, consoleFontLabel,
-  consoleFontSizeForWheel, consoleFontSizeStep, consoleFontZoomApplies, readConsoleFontSettings,
-  resetConsoleFontSettings, saveConsoleFontSettings, type ConsoleFontSettings,
+  changeConsoleFontSize, changeConsoleLineSpacing, CONSOLE_FONT_SIZE_STEP_DOWN, CONSOLE_FONT_SIZE_STEP_UP, consoleFontCss,
+  consoleFontLabel, consoleFontSizeForWheel, consoleFontSizeStep, consoleFontZoomApplies, MAX_CONSOLE_LINE_SPACING,
+  MIN_CONSOLE_LINE_SPACING, readConsoleFontSettings, resetConsoleFontSettings, saveConsoleFontSettings,
+  type ConsoleFontSettings,
 } from '../consoleFont.ts'
 import { consoleScrollToEndPosition, consoleViewAtBottom } from '../consoleScroll.ts'
 import { copyToClipboard } from '../clipboard.ts'
@@ -374,6 +375,12 @@ function resetConsoleFont() {
   consoleFontSettings.value = resetConsoleFontSettings()
   saveConsoleFontSettings(consoleFontStore(), consoleFontSettings.value)
 }
+/** 行距那一格（上游 Console Font 页的 `setCurrentLineSpacing`）：输入 0.6–3，越界夹回。 */
+function onFontSpacingChange(event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  consoleFontSettings.value = changeConsoleLineSpacing(consoleFontSettings.value, value)
+  saveConsoleFontSettings(consoleFontStore(), consoleFontSettings.value)
+}
 /**
  * 输出区的 Ctrl+滚轮缩放（编辑器语义：门=「Ctrl+滚轮改字号」设置 **且** Ctrl 按下）。
  * 缩放时**不再滚缓冲区**（上游 `JBTerminalPanel.java:381-390` 那条分支同样 return 掉）；
@@ -633,6 +640,12 @@ watch([() => props.active, () => displayLines.value.length], async ([active, cou
         <button type="button" class="run-action" :disabled="!consoleFontBounds.canDecrease" :title="consoleFontText" aria-label="减小控制台字号" @click="stepConsoleFont(CONSOLE_FONT_SIZE_STEP_DOWN)">A−</button>
         <button type="button" class="run-action" :disabled="!consoleFontBounds.canIncrease" :title="consoleFontText" aria-label="增大控制台字号" @click="stepConsoleFont(CONSOLE_FONT_SIZE_STEP_UP)">A+</button>
         <button type="button" class="run-action" :title="consoleFontText" aria-label="复位控制台字体" @click="resetConsoleFont">复位</button>
+        <!-- 行距那一格（上游 Console Font 页的 `setCurrentLineSpacing(float)`；界 .6–3）。 -->
+        <label class="run-font-spacing" :title="consoleFontText">
+          <span>行距</span>
+          <input type="number" :min="MIN_CONSOLE_LINE_SPACING" :max="MAX_CONSOLE_LINE_SPACING" step="0.1"
+                 :value="consoleFontSettings.lineSpacing" aria-label="控制台行距" @change="onFontSpacingChange" />
+        </label>
       </span>
       <!-- 控制台自己的工具条动作：Clear All（上游 `ClearConsoleAction`）。只清当前实例。 -->
       <button type="button" class="run-clear" title="清空控制台输出（当前实例）" aria-label="清空控制台输出" @click="clearRunOutput()">清空</button>
@@ -813,6 +826,8 @@ watch([() => props.active, () => displayLines.value.length], async ([active, cou
 .run-encoding { display: inline-flex; align-items: center; gap: 2px; }
 /* 控制台字号三枚按钮（A−/A+/复位）同一条工具条，紧挨编码选择器。 */
 .run-font { display: inline-flex; align-items: center; gap: 2px; }
+.run-font-spacing { display: inline-flex; align-items: center; gap: 2px; }
+.run-font-spacing input { width: 48px; height: var(--ctrl-height-sm); border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--editor); color: var(--text); font-size: 11px; padding: 0 var(--space-1); }
 .run-encoding select { height: var(--ctrl-height-sm); border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--editor); color: var(--text); font-size: 11px; padding: 0 var(--space-1); }
 .run-clear { margin-left: auto; }
 /* 视图动作弹层：hover / focus-within 展开（同 src/components/RunConfigurationsDialog.vue 的 .rc-add）。 */

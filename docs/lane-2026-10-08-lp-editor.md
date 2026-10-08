@@ -6,7 +6,7 @@
 
 - `src/editorTyping.ts`：已在 HEAD（`6d6d17f`），消费方齐（`src/components/CodeEditor.vue:25` 的 `smartQuotes`/`insertedText`、`src/enterHandlers.ts:98`、`src/lspCompletion.ts:27`），无半成品。
 - `src/lspCompletion.ts`（+67 行）/`src/completionAutoPopup.ts`（当时未跟踪）/`tests/completion-auto-popup.test.mjs`/`tests/editor-typed-handler-faces.test.mjs`：接续时 13+10 条全绿、接线是真的（自动档入口逐档消费）；**订正一处真缺陷**（见下）。任务书点名的 `tests/editor-typing.test.mjs` **不存在**，对等物是 `tests/editor-typed-handler-faces.test.mjs`（10 条，TypedHandler 委托面）。
-- 另一条 lane/协调者在本 lane 进行中提交了 `545eb6b`，把上一条 lane 的遗留（含我修的 `src/lspCompletion.ts:555`）扫进 HEAD；我的新判据仍在工作树（未提交）。
+- 本 lane 进行中另一条 lane/协调者落了两个提交（`545eb6b`、`1207ea7`），把上一条 lane 的遗留与我本批的全部代码/判据/判决表回填都扫进了 HEAD（**不是我提交的**；我未执行任何 commit）。本报告自身是工作树里唯一未提交的那一件。
 
 ## 本批做的两件事
 
@@ -25,12 +25,11 @@
 
 | 门禁 | 读数 |
 |---|---|
-| 任务书点名两文件 | `tests/inlay-hints.test.mjs`+`tests/code-lens-grouping.test.mjs` = **26/26 pass** |
-| 本 lane 三族全批（inlay-* + code-lens-* + code-vision-* + 两个新文件 + lsp-completion） | **160/160 pass** |
+| 任务书点名两文件 / 本 lane 三族全批（inlay-* + code-lens-* + code-vision-* + 两个新文件 + lsp-completion） | **26/26 pass** / **160/160 pass** |
 | 设置相邻批（18 文件：settings-keys-parity/setkeys-batch/inlay-hints-settings 等） | **154/154 pass** |
 | `tests/module-size.test.mjs` + `tests/no-parameter-properties.test.mjs` | **7/7 pass**（无上限被抬；我改的文件都在 900/1100 以内） |
 | `tests/verdict-generated.test.mjs` | **5/5 pass** |
-| `npx vue-tsc --noEmit` | **exit 0，输出 0 行** |
+| `npx vue-tsc --noEmit` | 本 lane 改完时 **exit 0、输出 0 行**；另一条 lane 的提交落地后为 **1 错**，唯一一条在 `src/components/CoverageReportPane.vue(115,89)`（TS2345），**本 lane 文件 0 错**（见接线清单 ②） |
 | native 本 lane 目标 | `cmake --build build --target settings_editor_keys_test` 成功；`ctest -R settings_editor_key_bounds` **Passed**；全量 ctest **42/42 passed**（104.8s） |
 | 整树 `scripts/build-native-locked.bat` | **红（不是本 lane）**：`native/run_host.cpp(482)` 编译错，见接线清单 ① |
 
@@ -47,4 +46,5 @@
 ## 接线清单（需要协调代理做）
 
 ① `native/run_host.cpp:482`：`Instance& target = *found->second;` → `Impl::Instance& target = *found->second;`（`Instance` 是 `Manager::Impl` 的嵌套类型，同文件 `:411`/`:441` 用的就是 `Impl::Instance`）。该文件 HEAD==工作树（无未提交改动）⇒ 是已提交的编译红，挡住整树 native 构建与 `TaoCode.exe` 重链；本 lane 的 native 改动只能在 ctest 二进制里验证（已过）。
-② 无其他接线：本 lane 的改动都自带消费方（`src/components/CodeEditor.vue:223/920` 从同一份草稿读 toggles，未改冻结文件）。
+② `src/components/CoverageReportPane.vue:115`：`coverageReportHtml(current, …)` 的 `current` 是 `CoverageSummary | null` ⇒ 调用前补 `if (!current) return`（该文件属 coverage lane，我未动）。整树 `vue-tsc` 要 0 错必须补这一处。
+③ 本 lane 自身的改动都自带消费方，不需要额外接线（`src/components/CodeEditor.vue:223/920` 从同一份草稿读 toggles，冻结文件一行未改）。
