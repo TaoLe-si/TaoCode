@@ -178,8 +178,8 @@ onBeforeUnmount(() => {
   if (statusPoll !== undefined) window.clearInterval(statusPoll)
 })
 
-/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
-const SECTION_DESCRIPTION = '管理 ZCode Agent 使用的 MCP 服务器配置（`settings.mcp.description`）。'
+/** 这一节的说明：上游原文（`zh-CN.ts:2356` 的 `settings.mcp.description`），交给共用外壳渲染。 */
+const SECTION_DESCRIPTION = '管理 ZCode Agent 使用的 MCP 服务器配置。'
 </script>
 
 <template>

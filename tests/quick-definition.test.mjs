@@ -19,6 +19,11 @@ const keymap = read('src/editorKeymap.ts')
 const menu = read('src/menus/navigateMenu.ts')
 const popup = read('src/components/QuickDefinitionPopup.vue')
 const host = read('src/quickDefinitionHost.ts')
+// 「库类型的源码」那条宿主通道的两端（2026-10-08 lane lp-docs 补判据）：
+// 通道名在 `src/bridge.ts` 的 Method 联合、实现在 native 的分派 + library_sources.cpp。
+const bridge = read('src/bridge.ts')
+const mainCpp = read('native/main.cpp')
+const cmake = read('CMakeLists.txt')
 
 test('hover 文本里取全限定名（JDT 真机回包的真实形状）', () => {
   // 真机实测（AE2 工程 · net.minecraftforge.common.config.Configuration）：
@@ -92,6 +97,18 @@ test('没有位置 → hover 取全限定名，逐级回退问库源码并命中
   assert.equal(source?.library, true)
   assert.equal(source?.path, 'demo-sources.jar!com/example/Greeter.java')
   assert.match(source?.title ?? '', /库源码/)
+})
+
+test('库源码通道端到端：宿主的库源码端口 → file.librarySource → native 分派 → 原生判据登记', () => {
+  // 前端那一端：编辑器的库源码端口就是宿主通道 `file.librarySource`（参数名 qualifier 与 native 的
+  // `params.at("qualifier")` 对齐）；这条线此前只有 C++ 侧判据，TS 侧零覆盖（lane lp-docs 补）。
+  assert.match(editor, /librarySource: qualifier => request\('file\.librarySource', \{ qualifier \}\)/, '编辑器把库源码端口接到宿主通道')
+  assert.match(bridge, /'file\.librarySource'/, '桥接的方法联合里有这条通道')
+  // 宿主那一端：native/main.cpp 的分派把它交给 library_sources.cpp 的 find_library_source，
+  // 入参 qualifier 逐字对上（改任一侧都红）。
+  assert.match(mainCpp, /case "file\.librarySource"_h: \{[\s\S]{0,260}params\.at\("qualifier"\)/, 'native 分派把这条通道交给 find_library_source 且入参名一致')
+  assert.match(cmake, /native\/library_sources\.cpp/, 'library_sources.cpp 编进目标')
+  assert.match(cmake, /add_test\(NAME library_sources COMMAND library_sources_test\)/, '原生判据登记进 CTest')
 })
 
 test('两路都没有就返回 null（不弹空壳）', async () => {

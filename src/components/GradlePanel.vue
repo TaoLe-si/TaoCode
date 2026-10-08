@@ -15,7 +15,7 @@ import { iconSize } from '../uiIcons'
 import { IdeaCheckedIcon } from './icons/toolWindowIcons.ts'
 // 构建事件与进度树（上游 `BuildEventDispatcher`/`BuildProgress`/`BuildRootProgressImpl` 的有界子集）：
 // 同步就是一类 build，把 CLI 输出折成按任务分组的进度树（`src/buildEvents.ts`）。
-import { buildProgressTree, flattenProgress, gradleBuildEvents, progressPercent } from '../buildEvents.ts'
+import { buildProgressStripe, buildProgressTree, flattenProgress, gradleBuildEvents, progressPercent, stripeProgressOf } from '../buildEvents.ts'
 // 任务激活（上游 `TaskActivationState` / `ExternalSystemTaskActivator` / `ConfigureTasksActivationDialog`）：
 // 状态按工作区根持久化在 src/externalProjectModel.ts，对话框树的折叠与命令在
 // src/externalTasksActivation.ts，宿主是本面板（工程/任务右键「配置任务激活…」）。
@@ -281,6 +281,9 @@ const buildProgress = computed(() => buildProgressTree(gradleBuildEvents({
   label: gradleSync.command || 'Gradle 同步',
   running: gradleSync.running,
   finishedAt: gradleSync.at || undefined,
+  // 最后一条无后缀任务的收口证据：退出码 0（或总结果行成功）；取消不算。
+  exitCode: gradleSync.exit,
+  cancelled: gradleSync.cancelled,
 })))
 /** 进度树里深度 > 0 的任务行（根节点就是整次同步，不重复画）。 */
 const buildTaskRows = computed(() => buildProgress.value
@@ -293,6 +296,18 @@ const buildTaskRows = computed(() => buildProgress.value
   }))
   : [])
 const rootPercent = computed(() => buildProgress.value ? progressPercent(buildProgress.value) : -1)
+/**
+ * 进度树头部那条**进度条**（上游 `BuildProgressStripe.updateProgress` 的判定表）：
+ * `(total, progress)` 由 `stripeProgressOf` 从这棵树现算（任务数 / 已有结论的任务数）——
+ * 节点的 progress 事件本仓没有（CLI 输出不给数字），所以头部原来那条百分比一直是空的。
+ * 折不出任务（`total === progress === 0`）时按判定表是「收工 + 满格」，但那时整块树不渲染。
+ */
+const buildStripe = computed(() => {
+  const tree = buildProgress.value
+  if (!tree) return null
+  const { total, progress } = stripeProgressOf(tree)
+  return buildProgressStripe(total, progress)
+})
 /** 节点结论 → 一行文案（上游 `BuildTreeConsoleView` 的收尾行；未结束是空串）。 */
 function buildResultLabel(result: { kind: string; message?: string } | null | undefined): string {
   if (!result) return ''
@@ -347,7 +362,16 @@ const analyzerModuleName = computed(() => (analyzerBuild.value?.directory || '�
       <div class="gradle-build-head"><span class="gradle-build-title">{{ buildProgress?.message }}</span>
         <span v-if="buildProgress?.result" class="gradle-build-result" :class="{ failed: buildProgress.result.kind === 'failure' }">{{ buildResultLabel(buildProgress.result) }}</span>
         <span v-if="rootPercent >= 0" class="gradle-build-pct">{{ rootPercent }}%</span>
+        <!-- 根节点自己没有 progress 事件（CLI 不给数字）时，头部百分比取进度条那条：任务完成度。 -->
+        <span v-else-if="buildStripe?.determinate" class="gradle-build-pct">{{ buildStripe.percent }}%</span>
       </div>
+      <!-- 进度条本体（上游 `BuildProgressStripe`）：确定态给填充宽度；不确定态只留轨道
+           （"还在动"的信号是面板上方原有的「正在跑」行 + 它那个转圈图标，这里不做假动画）。 -->
+      <span v-if="buildStripe" class="gradle-build-stripe" role="progressbar" aria-label="构建进度"
+        :aria-busy="buildStripe.loading" :aria-valuenow="buildStripe.determinate ? buildStripe.percent : undefined"
+        :data-busy="buildStripe.determinate ? 'false' : 'true'">
+        <span class="gradle-build-stripe-fill" :style="buildStripe.determinate ? { width: `${buildStripe.percent}%` } : undefined" />
+      </span>
       <p v-for="row in buildTaskRows" :key="row.id" class="gradle-build-row" role="treeitem" :style="{ paddingLeft: `${row.depth * 12}px` }" :title="row.message">
         <span class="gradle-build-mark" :class="row.result ? `is-${row.result.kind}` : 'is-running'" aria-hidden="true">{{ row.result ? buildResultMark(row.result) : '…' }}</span>
         <span class="gradle-build-task">{{ row.message }}</span>
@@ -471,6 +495,12 @@ const analyzerModuleName = computed(() => (analyzerBuild.value?.directory || '�
 .gradle-build-title { flex:1; min-width:0; font-weight:600; color:var(--text); overflow-wrap:anywhere; }
 .gradle-build-result.failed { color:var(--error); }
 .gradle-build-pct { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
+/* 进度条（`BuildProgressStripe`）：几何照本仓既有的那一条进度条
+   （`DebugProgressPane.vue` 的 `.debug-progress-track`：4px 高 + `--radius-pill` + `--rail` 轨道 + `--accent` 填充），
+   不新造一套尺寸。不确定态只留轨道（"还在动"由上方「正在跑」行与它的转圈图标表达，不做假动画）。 */
+.gradle-build-stripe { display:block; height:4px; margin:var(--space-1) 0; border-radius:var(--radius-pill); background:var(--rail); overflow:hidden; }
+.gradle-build-stripe-fill { display:block; height:100%; border-radius:var(--radius-pill); background:var(--accent); }
+.gradle-build-stripe[data-busy='true'] .gradle-build-stripe-fill { display:none; }
 .gradle-build-row { display:flex; align-items:center; gap:var(--space-2); min-height:var(--ctrl-height-sm); margin:0; padding:var(--space-1) 0; }
 .gradle-build-mark { flex:0 0 10px; text-align:center; }
 .gradle-build-mark.is-success { color:var(--success); }

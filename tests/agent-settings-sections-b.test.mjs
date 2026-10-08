@@ -51,7 +51,10 @@ test('两节都用 AgentSettingsSectionShell 包起来', () => {
   for (const [file, src, tpl] of [[MCP_VUE, mcpSrc, mcpTpl], [SKILL_VUE, skillSrc, skillTpl]]) {
     assert.ok(tpl.includes('<AgentSettingsSectionShell'), `${file} 必须用 shell 包起来`)
     assert.ok(src.includes(`from './AgentSettingsSectionShell.vue'`), `${file} 必须 import shell`)
-    assert.ok(tpl.includes(':description='), `${file} 要把这一节的说明交给 shell`)
+    // 说明口径（2026-10-08 交接件）：上游有 description 键的节（MCP，`zh-CN.ts:2356`）才显示说明；
+    // 技能那一节上游没有说明键 —— 不许自造一句。
+    if (file === MCP_VUE) assert.ok(tpl.includes(':description='), `${file} 有上游说明键，必须交给 shell 渲染`)
+    else assert.ok(!tpl.includes(':description='), `${file} 上游没有这一节的说明键，不许自造一句`)
   }
 })
 

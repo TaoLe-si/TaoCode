@@ -86,8 +86,8 @@ function save() {
     : '本次会话仍生效，但没有存下来（本机存储不可用）。'
 }
 
-/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
-const SECTION_DESCRIPTION = '启用或停用已安装的插件；插件打包技能、命令、钩子与 MCP 服务器（`settings.plugins.description`）。'
+/** 这一节的说明：上游原文（`zh-CN.ts:3737-3738` 的 `settings.plugins.description`），交给共用外壳渲染。 */
+const SECTION_DESCRIPTION = '启用或停用已安装的插件。插件可打包技能、命令、Hooks 和 MCP 服务器。'
 </script>
 
 <template>

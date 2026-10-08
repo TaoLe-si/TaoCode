@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { reactive, ref } from 'vue'
+
 import {
   classifyJavaException,
   describeExceptionKind,
@@ -14,6 +16,7 @@ import {
   stackFrameCopyText,
 } from '../src/exceptionFilter.ts'
 import { findRunHyperlinks, splitRunLine } from '../src/runHyperlinks.ts'
+import { createRunIssues } from '../src/runIssues.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -124,4 +127,37 @@ test('接线：runIssues 收集全部链接、RunConsole 渲染片段与异常�
   assert.match(console, /:aria-label="consolePaused \? '继续输出' : '暂停输出'"/)
   assert.match(console, /@click="copyLine\(line\)"/)
   assert.match(console, /jumpLink\(segment\.link\)/)
+})
+
+// ── 内建默认链（`CompositeFilter` 语义）在运行面板上的接线 ────────────────────────────────────
+//
+// 判词 exec/filters 把 `Filter`/`CompositeFilter` 记成「已落并已接」，而链本体在
+// `src/consoleFilterRegistry.ts`：只被测试 import 的模块不算接线（`node .tools/find-orphan-modules.mjs`
+// 把它列进零生产消费方）。这里钉两件事：① 内建链的**文件位置**命中真的进控制台那一行的可跳转落点；
+// ② `src/runIssues.ts` 真的是它的消费方。
+
+function makeRunIssues(output) {
+  return createRunIssues({
+    runOutput: reactive(output),
+    workspace: ref({ root: 'D:/proj' }),
+    generalSettings: ref({ foldConsoleLines: [], foldExceptions: [] }),
+    revealLocation: () => undefined,
+    notify: () => undefined,
+  })
+}
+
+test('内建默认链进运行面板：UrlFilter 的 file: 落点成为可跳转行', () => {
+  // 上游那条：`platform/execution-impl/resources/intellij.platform.execution.impl.xml:63` 把
+  // `UrlFilter$UrlFilterProvider` 登记成控制台的默认过滤器，于是控制台里打印的 `file:` 落点可跳
+  // （`UrlFilter.java:89-92` 先试文件、`:186-195` 点开才报错）。本仓这一格原本只认 `file:line`
+  // 字面（`src/runHyperlinks.ts` 的字符类不含 `:`，`file:///` 前缀整条被拒），所以要走内建链。
+  const issues = makeRunIssues(['报告在 file:///D:/a/B.java:12\n'])
+  assert.deepEqual(issues.runLines.value[0].issue, { path: 'D:/a/B.java', line: 12, column: 1 },
+    '内建链（UrlFilter 分支）的 file: 命中要成为可跳转行')
+})
+
+test('接线：runIssues 走注册表的内建默认链', () => {
+  const issues = read('src/runIssues.ts')
+  assert.match(issues, /import \{ builtinConsoleFilterHits \} from '\.\/consoleFilterRegistry\.ts'/)
+  assert.match(issues, /builtinConsoleFilterHits\(text, workspace\.value\?\.root \?\? ''\)/)
 })

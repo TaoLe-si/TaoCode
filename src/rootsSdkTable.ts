@@ -20,6 +20,13 @@
 //     一个 SDK 的取值面：`getSdkType` / `getName` / `setName` / `getVersionString` / `setVersionString`
 //     / `getHomePath` / `setHomePath`；`:49-51` 三参构造器 `(name, sdkType, homePath, version)`。
 //   · `OrderRootType.java:34/:44` SDK 的 CLASSES / SOURCES 根；`:54-55` 内建持久类型就这两个。
+//   · `platform/lang-impl/src/com/intellij/openapi/projectRoots/impl/SdkConfigurationUtil.java:269-277`
+//     建 SDK 的唯一入口 `createSdk(…)`：名字**先过** `createUniqueSdkName(suggestedName, allSdks)`（`:429-436`）；
+//     `:429-431` 那一档用 `SdkType.suggestSdkName(null, home)` 取名 ⇒ 本仓等价物是宿主 `suggest_name`
+//     （`native/jdk.cpp:133-172`，两台 JDK 21 都叫 `21`）。
+//   · `platform/util/src/com/intellij/util/text/UniqueNameGenerator.java:96-121`
+//     `generateUniqueName(defaultName, "", "", " (", ")", validator, 2)`：编号从 2 起；
+//     原名已带 ` (N)` 时从 N+1 接着编（`:110-116`）；判等是精确串（HashSet）。
 //
 // 明确不做的（别当成漏抄）：
 //   · **SDK 下载/安装**（`JdkInstaller` / `JdkDownloadTask` / `RuntimeChooser*` / `UnknownSdkFix*`）：
@@ -105,6 +112,40 @@ export function sdkRootsOf(sdk: Sdk): Record<OrderRootType, string[]> {
   return { sources, classes, javadoc: [...(sdk.roots.javadoc ?? [])], annotations: [...(sdk.roots.annotations ?? [])] }
 }
 
+/**
+ * `SdkConfigurationUtil.createUniqueSdkName`（`SdkConfigurationUtil.java:429-436`）的等价物：
+ * 那里逐字调的是 `UniqueNameGenerator.generateUniqueName(suggestedName, "", "", " (", ")", o -> !nameList.contains(o))`
+ * （`UniqueNameGenerator.java:96-100` 转发给 `:101-121` 那颗带 `startingNumber` 的实现）。
+ *
+ * 规则逐条照 `:101-121`：
+ *   · 先试原样名字（`defaultFullName` = `(prefix + name + suffix).trim()`；本仓 prefix/suffix 都是空串）；
+ *   · 被占用了就从 **2** 开始编号：`名字 + " (" + n + ")"`；
+ *   · 原名自己已经带 ` (<1-9 位数字>)` 时（`:110-116` 的 `Pattern.compile("(.+?) \\(\\d{1,9})")` + `matches()`
+ *     那一支）**从那个数字接着往后编**（`21 (2)` 被占 ⇒ 下一个是 `21 (3)`，不是 `21 (2) (2)`）；
+ *   · 数字位数超过 9 位不认这一支（正则只吃 1-9 位），整串当基名 —— 与上游同形，不"顺手修正"。
+ * 判等是**精确字符串**（上游 `e -> !nameList.contains(o)` 走 HashSet，区分大小写）。
+ *
+ * 为什么本仓需要它：宿主探测给的名字是 `JdkUtil.suggestJdkName` 的结果（`native/jdk.cpp:133-172`
+ * 的 `suggest_name`；两台 JDK 21 安装都叫 `21`），而本仓 `addJdk` 同名同类型是**替换** ——
+ * 不去重就只剩最后一台 JDK 在表里。
+ */
+export function uniqueSdkName(suggestedName: string, existingNames: readonly string[]): string {
+  const taken = new Set(existingNames)
+  const preferred = suggestedName.trim()
+  if (!taken.has(preferred)) return preferred
+  let base = suggestedName          // 上游 `baseName = defaultName`：这一支用的是**未 trim** 的原名
+  let index = 2                     // `generateUniqueName`（非 OneBased）从 2 起（`UniqueNameGenerator.java:99`）
+  const numbered = /^(.+?) \((\d{1,9})\)$/.exec(base)
+  if (numbered) {
+    base = numbered[1]!
+    index = Number(numbered[2]) + 1
+  }
+  for (;;) {
+    const name = `${base} (${index++})`.trim()
+    if (!taken.has(name)) return name
+  }
+}
+
 /** SDK 表（`ProjectJdkTable`，`:24-98`）。 */
 export class SdkTable {
   private readonly sdks: Sdk[] = []
@@ -188,12 +229,35 @@ export class SdkTable {
   clear(): void { this.sdks.length = 0 }
 
   /**
+   * `SdkConfigurationUtil.createAndAddSDK`（`:269-277`）里**造名字那一步**的等价物：
+   * `createUniqueSdkName(suggestedName, allSdks)`（`:429-436`）先按表里现有的 SDK 名字去重，再 `addJdk`。
+   * 上游所有「检测 / 新建 SDK」的入口都走这条路，所以表里不会出现两条同名同类型 ——
+   * 本仓的 `addJdk` 是「同 (name,type) 替换」（撞名就顶掉一条），**唯独这条路先去重**。
+   */
+  createAndAddJdk(suggestedName: string, homePath: string, versionString = '', extra: Partial<Sdk> = {}): Sdk {
+    const name = uniqueSdkName(suggestedName, this.sdks.map(sdk => sdk.name))
+    const sdk = createSdk(name, JAVA_SDK_TYPE, homePath, versionString, extra)
+    this.addJdk(sdk)
+    return sdk
+  }
+
+  /**
    * `preconfigure()`（`:88-92`）的可移植部分：**一个 SDK 都没配时**把宿主探测到的那些灌进来。
-   * 已经配过就原样返回（`preconfigure` 的语义是「if none are configured」），
-   * 探测到的那些逐条 `addJdk`（会替换同名的）。
+   * 已经配过就原样返回（`preconfigure` 的语义是「if none are configured」）。
+   *
+   * 每一条都走 `createAndAddJdk`（上游检测/新建 SDK 的入口都是先 `createUniqueSdkName` 再 add）：
+   * 两台 JDK 21 安装的 `suggest_name` 都是 `21`，直接 `addJdk` 会**后者顶掉前者**（一台 JDK 从表里消失）；
+   * 去重后是 `21` + `21 (2)`，两台都在。同一个家目录重复喂进来不重复登记
+   * （宿主的 `find_all()` 已按路径去重，这里再挡一层幂等）。
    */
   preconfigure(detected: readonly Sdk[]): Sdk[] {
-    if (!this.sdks.length) for (const sdk of detected) this.addJdk({ ...sdk, detected: true })
+    if (!this.sdks.length) {
+      for (const sdk of detected) {
+        if (this.findJdkByHome(sdk.homePath)) continue
+        const { name, ...rest } = sdk
+        this.createAndAddJdk(name, sdk.homePath, sdk.versionString, { ...rest, detected: true })
+      }
+    }
     return this.getAllJdks()
   }
 
@@ -201,6 +265,9 @@ export class SdkTable {
    * 把「项目设置里的 jdkHome 字符串」接回表：表里没有这个家目录就按
    * `ProjectJdkImpl.java:49-51` 的构造器登记一条（名字取家目录末段，版本留空 —— 不编）。
    * 返回登记后的那条。没有家目录就返回 null（调用方自己决定「SDK 默认」那条路怎么走）。
+   *
+   * 名字同样过 `createAndAddJdk` 的去重（上游建 SDK 的入口只有那一条）：两个目录同名末段
+   * （`D:\a\jdk-21` 与 `D:\b\jdk-21`）时是同名两条，不是后者顶掉前者。
    */
   ensureJdkForHome(homePath: string, versionString = ''): Sdk | null {
     const home = homePath.trim()
@@ -208,9 +275,7 @@ export class SdkTable {
     const existing = this.findJdkByHome(home)
     if (existing) return existing
     const name = home.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || home
-    const created = createSdk(name, JAVA_SDK_TYPE, home, versionString)
-    this.addJdk(created)
-    return created
+    return this.createAndAddJdk(name, home, versionString)
   }
 }
 

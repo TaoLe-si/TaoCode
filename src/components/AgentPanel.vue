@@ -464,10 +464,15 @@ function removeSession(id: string) {
 function renameSession(id: string, name: string) {
   if (sessions.rename(id, name)) bump()
 }
-/** 工作区各用自己的会话库；换宿主前先存旧转写，再恢复新工作区的当前会话。 */
+/** 工作区各用自己的会话库与草稿库；换宿主前先存旧转写，再恢复新工作区的当前会话。 */
 watch(() => [props.projectRoot, props.host] as const, ([projectRoot, host], [previousRoot, previousHost]) => {
   if (previousHost && (previousRoot !== projectRoot || previousHost !== host)) persistHostSession(previousHost, false)
-  if (previousRoot !== projectRoot) sessions = createAgentSessionStore(undefined, undefined, projectRoot)
+  if (previousRoot !== projectRoot) {
+    sessions = createAgentSessionStore(undefined, undefined, projectRoot)
+    // 草稿库也要一起换成新工作区那份：两份键都带工作区后缀（`storageKeyForProject`），
+    // 只换会话库会让新工作区里敲的正文写进旧工作区的键。
+    drafts = createAgentComposerDraftStore(undefined, projectRoot)
+  }
   restoreDraftText(sessions.activeId() ?? AGENT_DRAFT_SCOPE_ROOT)
   if (!host) return
   const id = sessions.activeId()

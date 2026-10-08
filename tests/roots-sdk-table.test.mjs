@@ -10,9 +10,16 @@
 //     「This method may automatically detect Sdk if none are configured」；
 //   · `platform/projectModel-impl/src/com/intellij/openapi/projectRoots/impl/ProjectJdkImpl.java:49-51`
 //     构造器 (name, sdkType, homePath, version)。
+//   · 建 SDK 的入口与名字去重（2026-10-08 lane lp-roots 补）：
+//     `platform/lang-impl/src/com/intellij/openapi/projectRoots/impl/SdkConfigurationUtil.java:269-277`
+//     （`createSdk(…)` 先 `createUniqueSdkName` 再 add）、`:429-436`
+//     （`createUniqueSdkName` = `UniqueNameGenerator.generateUniqueName(name, "", "", " (", ")", validator)`）、
+//     `platform/util/src/com/intellij/util/text/UniqueNameGenerator.java:96-121`（编号从 2 起、
+//     原名带 ` (N)` 时从 N+1 接着编、判等走 HashSet 精确串）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { compareSdkVersions, createSdk, JAVA_SDK_TYPE, sdkPresentableName, sdkRootsOf, SdkTable } from '../src/rootsSdkTable.ts'
+import { readFileSync } from 'node:fs'
+import { compareSdkVersions, createSdk, JAVA_SDK_TYPE, sdkPresentableName, sdkRootsOf, SdkTable, uniqueSdkName } from '../src/rootsSdkTable.ts'
 
 test('createSdk 的默认值（ProjectJdkImpl.java:49-51 的三参构造器）', () => {
   const sdk = createSdk('21', JAVA_SDK_TYPE, 'D:/jdk-21', '21.0.1')
@@ -131,4 +138,78 @@ test('SDK 行文案的三级取值（OrderEntry.getPresentableName 等价物）'
   assert.equal(sdkPresentableName(createSdk('', JAVA_SDK_TYPE, '/jdk21', '21.0.1')), 'JDK 21.0.1', '没名字用版本')
   assert.equal(sdkPresentableName(createSdk('', JAVA_SDK_TYPE, '/opt/tools/jdk-21')), 'jdk-21', '连版本都没有才退回家目录末段')
   assert.equal(sdkPresentableName(createSdk('', JAVA_SDK_TYPE)), 'JDK', '三条都空时给一个不会渲染成空串的名字')
+})
+
+// ---------------------------------------------------------------------------
+// 名字去重（`SdkConfigurationUtil.createUniqueSdkName` + `UniqueNameGenerator.generateUniqueName`）
+// 这一批是 2026-10-08 lane lp-roots 补的：加之前 `preconfigure` 直接 `addJdk`，
+// 两台 JDK 21 安装（`native/jdk.cpp` 的 `suggest_name` 都给 `21`）在表里只剩最后一台。
+// ---------------------------------------------------------------------------
+
+test('uniqueSdkName：名字没被占就原样（trim 后）；被占了从 2 编号（UniqueNameGenerator.java:101-108）', () => {
+  assert.equal(uniqueSdkName('21', []), '21', '一条都没有 ⇒ 原名')
+  assert.equal(uniqueSdkName('21', ['17', '22']), '21')
+  assert.equal(uniqueSdkName(' 21 ', ['17']), '21', '第一条分支用的是 trim 过的全名（`:102`）')
+  assert.equal(uniqueSdkName('21', ['21']), '21 (2)', '编号从 2 起（`:99` 的 startingNumber）')
+  assert.equal(uniqueSdkName('21', ['21', '21 (2)']), '21 (3)')
+  assert.equal(uniqueSdkName('21', ['21', '21 (2)', '21 (3)']), '21 (4)')
+})
+
+test('uniqueSdkName：原名自己带 ` (N)` 时从 N+1 接着编，数字超过 9 位不认这一支（:110-116）', () => {
+  assert.equal(uniqueSdkName('21 (2)', ['21', '21 (2)']), '21 (3)', '不是 "21 (2) (2)"')
+  assert.equal(uniqueSdkName('21 (7)', ['21 (7)']), '21 (8)')
+  assert.equal(uniqueSdkName('21 (x)', ['21 (x)']), '21 (x) (2)', '非数字后缀不匹配那条正则（`matches()` 要整串）')
+  assert.equal(uniqueSdkName('21 (1234567890)', ['21 (1234567890)']), '21 (1234567890) (2)', '正则只吃 1-9 位数字')
+  // 上游这一支用的是**未 trim** 的原名当基名（`:109` `baseName = defaultName`）⇒ 尾空格会留在名字里。
+  // 行内照抄，不"顺手修正"。
+  assert.equal(uniqueSdkName('21 ', ['21', '21  (2)']), '21  (3)')
+})
+
+test('uniqueSdkName：判等是精确串（上游 validator 是 HashSet.contains），大小写不同不算撞名', () => {
+  assert.equal(uniqueSdkName('21', ['21']), '21 (2)')
+  assert.equal(uniqueSdkName('21', [' 21']), '21', '带空格的另一条不算占用')
+  assert.equal(uniqueSdkName('JDK 21', ['jdk 21']), 'JDK 21', '大小写不同不撞名')
+})
+
+test('createAndAddJdk：上游建 SDK 的入口先去重（:269-277 + :429-436）—— 同名的两台 JDK 都在表里', () => {
+  const table = new SdkTable()
+  const first = table.createAndAddJdk('21', 'C:/a/jdk-21', '21.0.11')
+  const second = table.createAndAddJdk('21', 'D:/b/jdk-21', '21.0.12')
+  assert.equal(first.name, '21')
+  assert.equal(second.name, '21 (2)', '第二个 21 不顶掉第一个')
+  assert.deepEqual(table.getAllJdks().map(sdk => sdk.name), ['21', '21 (2)'])
+  assert.equal(table.findJdkOfType('21 (2)', JAVA_SDK_TYPE).homePath, 'D:/b/jdk-21')
+  const detected = table.createAndAddJdk('8', 'D:/jdk-8', '1.8.0_392', { detected: true })
+  assert.equal(detected.detected, true, 'extra 原样落到构造器上')
+})
+
+test('preconfigure：探测到的同名 JDK 各占一条（两台 JDK 21 ⇒ 21 + 21 (2)），同家目录不重复登记', () => {
+  const table = new SdkTable()
+  const names = table.preconfigure([
+    createSdk('21', JAVA_SDK_TYPE, 'C:/adoptium/jdk-21.0.11', '21.0.11'),
+    createSdk('17', JAVA_SDK_TYPE, 'C:/adoptium/jdk-17.0.9', '17.0.9'),
+    createSdk('21', JAVA_SDK_TYPE, 'D:/Java21', '21.0.12'),
+  ]).map(sdk => sdk.name)
+  assert.deepEqual(names, ['21', '17', '21 (2)'], '同名不丢：后者编号而不是顶掉前者')
+  assert.equal(table.getAllJdks().every(sdk => sdk.detected === true), true)
+  assert.deepEqual(table.getAllJdks().map(sdk => sdk.homePath), ['C:/adoptium/jdk-21.0.11', 'C:/adoptium/jdk-17.0.9', 'D:/Java21'])
+  // 同一个家目录重复喂进来（宿主清单里有重影/多次预配置）只登记一条。
+  const again = new SdkTable()
+  again.preconfigure([createSdk('21', JAVA_SDK_TYPE, 'D:/Java21', '21.0.12'), createSdk('21', JAVA_SDK_TYPE, 'D:/Java21', '21.0.12')])
+  assert.deepEqual(again.getAllJdks().map(sdk => sdk.name), ['21'])
+})
+
+test('ensureJdkForHome：两个同名末段的目录不互相顶掉（名字同样过去重）', () => {
+  const table = new SdkTable()
+  table.preconfigure([createSdk('jdk-21', JAVA_SDK_TYPE, 'D:/a/jdk-21', '21')])
+  const configured = table.ensureJdkForHome('D:\\b\\jdk-21')
+  assert.equal(configured.name, 'jdk-21 (2)')
+  assert.deepEqual(table.getAllJdks().map(sdk => sdk.name), ['jdk-21', 'jdk-21 (2)'])
+  assert.equal(table.ensureJdkForHome('D:\\b\\jdk-21\\'), configured, '同家目录仍然幂等')
+})
+
+test('接线：会话装配那条链还在（preconfigure/ensureJdkForHome 被 workspaceLifecycle 调用）', () => {
+  const source = readFileSync(new URL('../src/workspaceLifecycle.ts', import.meta.url), 'utf8')
+  assert.match(source, /sdkTable\.preconfigure\(/, '探测结果要灌进 SDK 表')
+  assert.match(source, /sdkTable\.ensureJdkForHome\(/, '设置里的 jdkHome 要接回同一张表')
 })

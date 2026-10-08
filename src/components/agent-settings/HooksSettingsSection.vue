@@ -70,8 +70,8 @@ function save() {
   if (!found.length) editingId.value = undefined
 }
 
-/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
-const SECTION_DESCRIPTION = '管理任务生命周期钩子：在指定事件上自动执行命令（ZCode `settings.hooks.description`）。'
+/** 这一节的说明：上游原文（`zh-CN.ts:4050` 的 `settings.hooks.description`），交给共用外壳渲染。 */
+const SECTION_DESCRIPTION = '管理任务生命周期钩子，在特定事件发生时自动执行命令。'
 </script>
 
 <template>

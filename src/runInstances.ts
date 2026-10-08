@@ -539,7 +539,7 @@ export function applyRunInstanceSnapshot(rows: readonly unknown[]): number {
   let claimed = 0
   for (const raw of rows) {
     if (!raw || typeof raw !== 'object') continue
-    const row = raw as { id?: unknown; pid?: unknown; children?: unknown; tree?: unknown; ports?: unknown; exitCode?: unknown; aborted?: unknown }
+    const row = raw as { id?: unknown; pid?: unknown; children?: unknown; tree?: unknown; ports?: unknown; exitCode?: unknown; aborted?: unknown; stopping?: unknown }
     if (typeof row.id !== 'number') continue
     const target = runInstances.get(row.id)
     if (!target) continue
@@ -560,6 +560,12 @@ export function applyRunInstanceSnapshot(rows: readonly unknown[]): number {
     // `exitCode` 为 `null` 表示宿主那边还在跑 ⇒ 不写（不能把"还没结束"当成"退出码 0"）。
     if (target.exit === null && typeof row.exitCode === 'number' && Number.isFinite(row.exitCode)) target.exit = Math.trunc(row.exitCode)
     if (row.aborted === true) target.aborted = true
+    // 「正在结束」（宿主 `Instance::stop_requested`，`native/run_host.cpp:546-548` 随快照回传）：
+    // 宿主那行的注释写着**前端据此在重取快照后仍能把图标换成 kill** —— 所以这一位要合进来。
+    // 只**置位、不清位**（与上面 `exitCode`/`aborted` 同一条取舍）：快照可能与请求交叠，
+    // 一条在请求之前拍下的快照（`stopping:false`）不能把已经记下的「正在结束」翻回去；
+    // 清它的是退出事件（`handleRunExit` 里 `remaining === 0` 那一句）。
+    if (row.stopping === true && target.running) target.stopping = true
     claimed++
   }
   return claimed

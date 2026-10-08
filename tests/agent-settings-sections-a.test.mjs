@@ -118,7 +118,10 @@ test('自动化节：调度摘要与下次运行都走模块导出', () => {
   assert.match(source, /automationNextRun\(automation, Date\.now\(\)\)/, '下次运行必须走模块的 automationNextRun 并注入基准时刻')
   assert.match(template, /AGENT_AUTOMATIONS_BETA_BADGE/, 'Beta 徽标取自模块常量')
   // 模板目录为空时要有空态说明。
-  assert.match(template, /v-if="!draft\.templates\.length"/, '模板为空必须有空态说明')
+  // 模板目录为空时**不再**画一段说明（交接件：那是本仓实现说明，2026-10-08 已删）；
+  // 空态改成上游原文的三件套：标题/说明/手动创建（`zh-CN.ts:6186-6188`），动作接真出口。
+  assert.match(template, /v-if="!draft\.automations\.length"/, '一条任务都没有时要有上游空态')
+  assert.ok(template.includes('还没有定时任务') && template.includes('手动创建'), '空态标题/动作要逐字取上游')
 })
 
 test('自动化节：保存走 validate → save，有 problems 就不写并逐条显示', () => {
@@ -159,7 +162,9 @@ test('三节都真的能解析出模板并渲染：shell 到位、真控件在�
   // 真控件在页面上（不是只在源码里）。
   assert.ok(rendered.memory.includes('记忆文件'), '记忆节该渲染出清单控件')
   assert.ok(rendered.hooks.includes('暂无钩子配置'), '钩子节空态要在页面上')
-  assert.ok(rendered.automations.includes('没有符合条件的任务'), '自动化节空态要在页面上')
+  // 默认草稿没有任何任务 ⇒ 渲染出来的是上游「还没有定时任务」那一支；
+  // 「没有符合条件的任务」是**有任务但被筛空**那一支（`zh-CN.ts:6089`），在源码里钉。
+  assert.ok(rendered.automations.includes('还没有定时任务'), '自动化节空态要在页面上')
 
   // 纯图标按钮必须同时有 title 与 aria-label（门禁 tests/ui-icons.test.mjs:122 也守这条）。
   for (const [key, html] of Object.entries(rendered)) {

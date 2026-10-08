@@ -12,16 +12,25 @@
 //      （`> Task :app:compileJava`）、结论（`UP-TO-DATE`/`FAILED`/`SKIPPED`）与总结果
 //      （`BUILD SUCCESSFUL in 3s` / `FAILURE:`），足以还原出上游那棵**按任务分组的进度树**。
 //      折算不出来的行一律当 `output` 事件挂在当前节点下（不猜任务边界）。
+//      任务结论的两条补法（都属于"硬信号"）：无后缀的 `> Task` 只证明**开始执行**，下一条
+//      任务 / Configure 行出现就反证它执行完了 ⇒ 补一条成功结论；收口时总结果行是
+//      `BUILD SUCCESSFUL` **或进程退出码是 0**（`gradleSync.exit`，`cancelled` 不算）时，
+//      最后那条无后缀的任务同样补成功。失败 / 取消 / 异常收口时
+//      **不补**（没有证据），所以那种情况下最后一条任务会停在"没有结论"——如实留白，不编。
 //
 // 消费方：`src/components/GradlePanel.vue` 的同步输出区 —— 同步就是上游的一类 build
 // （`ExternalSystemTaskProgressIndicatorUpdater` 把同步进度画成带 fraction 的进度条），
 // 本仓把 `gradleSync.output` 折成树、逐任务显示状态与耗时；折不出事件时退回原来的平铺尾部
-// （`gradleOutputTail`），行为与接入前一致。
+// （`gradleOutputTail`），行为与接入前一致。树的头部另有一条**进度条**（上游
+// `build/console/BuildProgressStripe.java:37-56` 的判定表落在 `buildProgressStripe`，
+// `(total, progress)` 由 `stripeProgressOf` 从这棵树现算：任务数 / 已有结论的任务数）。
 //
 // **如实说明做不到的**（判词里同样点名）：
 //   · 上游 `BuildEventDispatcher.invokeOnCompletion` 的完成回调、`BuildProgress` 的
 //     `startChildProgress`/`presentable` 与 `BuildViewSettingsProvider` —— 需要视图宿主，
 //     本仓没有多视图与构建树控件；
+//   · `BuildProgressStripe` 的 Swing 外壳（`ProgressBarLoadingDecorator` 的**延迟出现**与
+//     不确定态的位移动画）：本仓只有一条静态条 + 面板上原有的"正在跑"行，不做假动画；
 //   · 真实**增量**语义（`isUpToDate` 之外，Gradle 的 task outcome 只有 CLI 文本可读，
 //     拿不到 Tooling API 的 `TaskOutcome` 对象）；
 //   · `MessageEvent.Kind` 的 FILE/LOG/STATISTICS 细分与 `BuildIssue` 的快速修复
@@ -130,6 +139,48 @@ export function countFailures(node: BuildProgressNode): number {
   return self + node.children.reduce((sum, child) => sum + countFailures(child), 0)
 }
 
+// ------------------------------------------------- 进度条（`build/console/BuildProgressStripe`）
+
+/**
+ * 进度条的两态（Swing 那边是 `JProgressBar` 的「值/不确定」）：
+ *   · `loading` = `startLoading()`/`stopLoading()`（`:43-45`/`:59-65`）；
+ *   · `determinate` = 这条进度条当前会不会给出百分比（`:48-55`）；
+ *   · `percent` = `progress * 100 / total` 的**整数截断**（`:49` 的 `Math.toIntExact(progress * 100 / total)`）——
+ *     与 `progressPercent` 的 `Math.round` 不同：那条算的是**单个节点自己的** progress 事件，
+ *     这条算的是整条进度条（上游两处本来就不同源，不"统一"）。
+ */
+export interface BuildStripeState {
+  /** 还在跑（`startLoading`）：`total === progress` 时收工（`stopLoading`）。 */
+  loading: boolean
+  /** `total > 0 && progress > 0`（`:46`）——**progress 为 0 不算 0%**，而是不确定态。 */
+  determinate: boolean
+  percent: number
+}
+
+/**
+ * `BuildProgressStripe.updateProgress(total, progress)`（`BuildProgressStripe.java:37-56`）的判定表：
+ *   · `total == progress` ⇒ 收工（`:38-41`）——空活儿（`0/0`）也走这一支（宿主的 `JProgressBar`
+ *     初始不是不确定态，于是 `stopLoading` 把它置成 100，与上游逐字同形，不"顺手修正"）；
+ *   · 否则确定态当且仅当 `total > 0 && progress > 0`，百分比整数截断；
+ *   · 其余（`total <= 0` 或 `progress <= 0`）⇒ 不确定态（`:52-55` 的 `setIndeterminate(true)`）。
+ */
+export function buildProgressStripe(total: number, progress: number): BuildStripeState {
+  if (total === progress) return { loading: false, determinate: true, percent: 100 }
+  if (total > 0 && progress > 0) return { loading: true, determinate: true, percent: Math.trunc(progress * 100 / total) }
+  return { loading: true, determinate: false, percent: 0 }
+}
+
+/**
+ * 整次构建的 `(total, progress)`：本仓把它现算成**深度 > 0 的节点数 / 其中已有结论的节点数**
+ * （`> Task` 与 `Configure project` 各算一条，根节点不算任务）。上游这两个数来自 `BuildProgress`
+ * 的进度上报（`setProgress(progress, total)`），Gradle CLI 输出里没有数字，取这个等价物 ——
+ * 折不出任务时 `total === progress === 0`，按上面的判定表就是「收工 + 满格」。
+ */
+export function stripeProgressOf(root: BuildProgressNode): { total: number; progress: number } {
+  const nodes = flattenProgress(root).filter(row => row.depth > 0).map(row => row.node)
+  return { total: nodes.length, progress: nodes.filter(node => node.finishedAt !== null).length }
+}
+
 // ---------------------------------------------------------------- 输出 → 事件（Gradle CLI）
 
 /** `> Task :app:compileJava` 一族（`Task :` 后是任务路径，可带 `UP-TO-DATE`/`FAILED` 等后缀）。 */
@@ -164,6 +215,10 @@ export interface GradleBuildEventsInput {
   running?: boolean
   /** 结束时刻（`gradleSync.at`）；缺省用 startedAt。 */
   finishedAt?: number
+  /** 同步进程的退出码（`gradleSync.exit`）。**0 = 干净退出**，与总结果行同级的一类硬信号。 */
+  exitCode?: number | null
+  /** 这次同步被取消了（`gradleSync.cancelled`）：取消时不补最后一条任务的结论。 */
+  cancelled?: boolean
 }
 
 /**
@@ -176,6 +231,20 @@ export function gradleBuildEvents(input: GradleBuildEventsInput): BuildEvent[] {
   events.push({ id: rootId, parentId: null, kind: 'start', time: input.startedAt, message: input.label })
   /** 当前任务节点 id（`> Task` 之后的行挂在它下面）。 */
   let current: string | null = null
+  /** 当前任务是不是已经有结论（带后缀的任务行自己就是结论，别再补第二条）。 */
+  let concluded = false
+  /**
+   * 结掉当前任务：**无后缀的 `> Task` 只证明"开始执行"**，下一条任务/Configure 行出现就
+   * 反证它执行完了（Gradle 只在任务失败或跳过时给后缀）⇒ 补一条成功结论。
+   * 带后缀（已有结论）的任务在这里只清指针、**不覆盖**它的结论（FAILED 不能被改写成成功）。
+   */
+  const closeCurrent = (at: number): void => {
+    if (current && !concluded) {
+      events.push({ id: current, parentId: rootId, kind: 'finish', time: at, message: '', result: { kind: 'success' } })
+    }
+    current = null
+    concluded = false
+  }
   let sequence = 0
   let time = input.startedAt
   let result: EventResult | null = null
@@ -187,21 +256,25 @@ export function gradleBuildEvents(input: GradleBuildEventsInput): BuildEvent[] {
     if (!line.trim()) continue
     const task = TASK_LINE.exec(line)
     if (task) {
+      closeCurrent(time)
       const name = task[1]!.trim()
       const id = `task:${++sequence}:${name}`
       events.push({ id, parentId: rootId, kind: 'start', time, message: name })
       const verdict = taskResultOf(task[2])
       // 带后缀的任务行本身就是一条结论（Gradle 在任务行尾直接给 outcome）。
-      if (verdict) events.push({ id, parentId: rootId, kind: 'finish', time, message: '', result: verdict })
+      if (verdict) {
+        events.push({ id, parentId: rootId, kind: 'finish', time, message: '', result: verdict })
+        concluded = true
+      }
       current = id
       continue
     }
     const configure = CONFIGURE_LINE.exec(line)
     if (configure) {
+      closeCurrent(time)
       const id = `configure:${++sequence}:${configure[1]!.trim()}`
       events.push({ id, parentId: rootId, kind: 'start', time, message: `Configure project ${configure[1]!.trim()}` })
       events.push({ id, parentId: rootId, kind: 'finish', time, message: '', result: { kind: 'success' } })
-      current = null
       continue
     }
     const outcome = BUILD_RESULT_LINE.exec(line)
@@ -225,6 +298,10 @@ export function gradleBuildEvents(input: GradleBuildEventsInput): BuildEvent[] {
   // 收口：宿主给了 error 就按失败；否则看 BUILD 结果行；都没有时（还在跑）不发 finish。
   if (input.error) result = { kind: 'failure', message: input.error }
   if (!input.running) {
+    // 最后一条无后缀任务的收口证据：总结果行是成功，或进程**干净退出**（`exit === 0`）——
+    // 两者都是"这次构建成功了"的硬信号。失败 / 取消 / 异常收口时不补（没有证据），宁可留白。
+    const cleanSuccess = !input.cancelled && (result?.kind === 'success' || input.exitCode === 0)
+    if (cleanSuccess) closeCurrent(input.finishedAt ?? time)
     events.push({
       id: rootId, parentId: null, kind: 'finish', time: input.finishedAt ?? time,
       message: '', result: result ?? { kind: 'success' },

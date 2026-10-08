@@ -57,12 +57,13 @@ function save(): void {
     : '本次会话仍生效，但没有存下来（本机存储不可用）。'
 }
 
-/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
-const SECTION_DESCRIPTION = '管理 Agent 的记忆文件：查看、编辑与删除。'
+// 这一节**没有 description**：上游没有对应的节说明键 —— `settings.memoryDescription`
+// （`zh-CN.ts:2014`）是「工作区记忆」那一行开关的行说明（`MemorySettingsSection.tsx:156-162`），
+// 不是节说明；把别人的位置搬过来是改上游，自己写一句又是自造。所以不显示。
 </script>
 
 <template>
-  <AgentSettingsSectionShell title="记忆" :description="SECTION_DESCRIPTION">
+  <AgentSettingsSectionShell title="记忆">
     <label class="checkbox-row">
       <input v-model="draft.enabled" type="checkbox" />
       <span>启用记忆（新会话生效）</span>

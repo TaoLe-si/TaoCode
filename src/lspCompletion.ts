@@ -26,6 +26,12 @@ import { documentationTargetForLookupElement, lookupElementDocumentationTargetPr
 import { typedHandlerDelegates, dispatchTypedHandler } from './editorActionExtensionPoints.ts'
 import { typedInputAt } from './editorTyping.ts'
 import { languageFor } from './templates.ts'
+// 自动档的**触发条件**（`CompletionAutoPopupHandler` 一族）与「上一拍是空结果就别反复重查」
+// 那条闸（`CompletionPhase.EmptyAutoPopup`）：纯规则与上游坐标见 `src/completionAutoPopup.ts`。
+import {
+  autoPopupKind, autoPopupMeaningless, commandRestartConditions, emptyAutoPopupAllowsSkipping,
+  type EmptyAutoPopupRecord,
+} from './completionAutoPopup.ts'
 
 interface CompletionDeps {
   enabled: () => boolean
@@ -198,6 +204,13 @@ export function createLspCompletion(deps: CompletionDeps) {
   let lastError = ''
   let synced = ''
   /**
+   * 上一拍自动弹出**查到空**（或只剩「你已经打出来的那个词」）时记下的文档/光标 + 这一轮补全
+   * 自己登记的前缀重启条件 —— 上游 `CompletionPhase.EmptyAutoPopup`（`CompletionPhase.kt:588-614`）
+   * 的可移植形状，判据与规则在 `src/completionAutoPopup.ts`。继续打字时靠它跳过重查，
+   * 任何别的编辑/光标移动都会让它自动失效（文档与光标的对账在 `emptyAutoPopupAllowsSkipping` 里）。
+   */
+  let emptyAutoPopup: EmptyAutoPopupRecord | null = null
+  /**
    * `com.intellij.codeInsight.completion.error.intention` 的输入：这一处有诊断时给命令表一份错误清单
    * （上游 `DirectIntentionCommandProvider.kt:474` 在命令补全里问 `ErrorFixCommandProvider`）。
    * **没有贡献者就不构造**（读诊断表是零成本的，但要避免无谓的 map）⇒ 零开销、行为不变。
@@ -243,6 +256,22 @@ export function createLspCompletion(deps: CompletionDeps) {
     // `CompletionPhase`，不经过 TypedHandler（`CompletionAutoPopupHandler.java:43-49` 只管自动档）。
     // 没有委托实现这一问时零开销：先看有没有人实现，再构造 O(n) 的正文（与下面自信度那一格同一条纪律）。
     if (!context.explicit && autoPopupHandedToDelegate(context.state, context.pos, path)) return null
+    // **自动档的触发条件**（`CompletionAutoPopupHandler.java:43-49` + `TypedAutoPopupImpl.java:30-37`）：
+    // CodeMirror 的 `activateOnTyping` 是「敲什么字符都会来问一次源」，而上游的自动弹出只认两档
+    // 字符 —— 字母/数字/下划线（word）与 `.`（member，成员补全）。其余字符（`)`、`;`、`(`…）
+    // 上游不排自动弹出（`(`/`,` 走的是**参数提示**那条通道，本仓没有自动参数提示），所以这里
+    // 直接不查：既少一次往返，也让「弹层的开合」与上游同一形状。
+    // 显式调用（Ctrl+Space 一族）不受这一档管 —— 它不经过 TypedHandler。判据 `tests/completion-auto-popup.test.mjs`。
+    const typedChar = context.state.sliceDoc(Math.max(0, context.pos - 1), context.pos)
+    const autoKind = context.explicit ? 'word' : autoPopupKind(typedChar)
+    if (!context.explicit && autoKind === 'none') return null
+    // `CompletionPhase.EmptyAutoPopup`（`CompletionPhase.kt:602-608`）：上一拍自动弹出查到**空**、
+    // 而这一拍只是继续打字（文档/光标除这个字符外没变）、前缀也没命中这一轮补全登记的重启条件
+    // ⇒ 不重查。上游同一格（`CompletionAutoPopupHandler.java:44-46`）只在字母/数字/下划线那一档问。
+    if (!context.explicit && autoKind === 'word'
+        && emptyAutoPopupAllowsSkipping(emptyAutoPopup, { path, doc: context.state.doc, caret: context.pos, toType: typedChar })) {
+      return null
+    }
     // `com.intellij.completion.confidence`：自动弹出入口问一次自信度。**没有贡献时不构造上下文**
     // （`doc.toString()` 对超大文档不便宜）⇒ 第三方没挂时零开销、行为不变。
     const language = path.includes('.') ? path.slice(path.lastIndexOf('.') + 1).toLowerCase() : ''
@@ -324,7 +353,20 @@ export function createLspCompletion(deps: CompletionDeps) {
       const onlyCommands = invocation?.kind === 'full-suffix'
       // 语言服务没起来时不撒「无建议」这个谎 —— 那是"补全不可用"，不是"没有匹配的建议"
       // （上游空表那行的文案出自 `LangBundle.properties:1`，用点 `LookupImpl.java:702-703`）。
-      if (!matchedItems.length && !commands.length && !words.length && !result.available) return null
+      // 这一档在自动档同样**不弹**（`CompletionProgressIndicator.java:762-776`：`count == 0`
+      // 就 `hideLookup(false)`）⇒ 记下 `EmptyAutoPopup` 的那一笔，下一拍继续打字时由
+      // `emptyAutoPopupAllowsSkipping` 挡掉重查。
+      if (!matchedItems.length && !commands.length && !words.length && !result.available) {
+        if (!context.explicit) {
+          emptyAutoPopup = {
+            path, doc: context.state.doc, caret: context.pos,
+            restart: invocation
+              ? commandRestartConditions({ suffix: invocation.suffix, start: invocation.start }, { readOnly: context.state.readOnly })
+              : [],
+          }
+        }
+        return null
+      }
       lastError = ''
       // 弹层的前缀起点：命令形态下由**命令前缀**决定（上游 `:222` 用命令的 pattern 造前缀匹配器），
       // 没有服务端条目时取两者里靠后的那个（短前缀对 CodeMirror 的过滤更友好）。
@@ -485,6 +527,34 @@ export function createLspCompletion(deps: CompletionDeps) {
         return matcher.matches(visible) || matcher.matches(String(option.label))
       }
       const options = [...serverOptions, ...locals].filter(keeps)
+      // 记下这一轮的重启条件（上游 `CommandCompletionProvider.kt:263-280` 登记、
+      // `CompletionProgressIndicator.java:768/804` 传给 `EmptyAutoPopup` 的那组）。
+      const restartConditions = invocation
+        ? commandRestartConditions({ suffix: invocation.suffix, start: invocation.start }, { readOnly: context.state.readOnly })
+        : []
+      // **自动档的「只剩你已经打出来的那个词」不弹**（上游 `CompletionProgressIndicator.java:786-807`
+      // 的 `hideAutopopupIfMeaningless`：每条候选都已经在编辑器里、且没有一条值得显示
+      // —— `LookupElement.isWorthShowingInAutoPopup()` 默认看有没有尾部灰字，也就是本仓的
+      // `detail`）⇒ 藏掉整层并进 `EmptyAutoPopup`（`:804`）。显式档不适用（`:788` 的
+      // `!isAutopopupCompletion()` 就在第一行返回 false）。
+      if (!context.explicit && autoPopupMeaningless(
+        options.map(option => ({ lookupString: String(option.label), detail: option.detail })),
+        text, context.pos, pattern.length)) {
+        emptyAutoPopup = { path, doc: context.state.doc, caret: context.pos, restart: restartConditions }
+        return null
+      }
+      // 空表那一档同样进 `EmptyAutoPopup`（上游 `:765-770` 的 `count == 0` ⇒ 藏 lookup）。
+      // **只记自动档**：上游这一格在 `CompletionProgressIndicator` 里由 `isAutopopupCompletion()`
+      // 分开（`:788` 显式档第一行就返回 false；显式的空表走 `:961-977` 的 `handleEmptyLookup`
+      // 弹「无建议」，**不进** `EmptyAutoPopup` 这条 phase）。记了显式档的话，一次 Ctrl+Space
+      // 的空结果会把后面**自动**档的第一下敲键吞掉（`emptyAutoPopupAllowsSkipping` 只看文档/光标，
+      // 分不出来源）—— 上游此时恰恰要重弹。
+      // **如实差异**：本仓空表仍返回一行占位（`LookupImpl.java:702-703` 的 `EmptyLookupItem`
+      // 形状，与显式档共用）。收紧成「自动档连占位也不返回」会让 `tests/lsp-completion.test.mjs`
+      // 的既有两档失去落点，那一条留给判词（`lp/completion`）决定，不在本轮改。
+      emptyAutoPopup = !context.explicit && options.length === 0
+        ? { path, doc: context.state.doc, caret: context.pos, restart: restartConditions }
+        : null
       // 一行都不剩时不是"不弹层"，而是弹一行占位（`LookupImpl.java:702-703` 塞 `EmptyLookupItem`，
       // 文案 `LangBundle.properties:1`）；占位行**不是条目**：`apply` 什么都不插
       // （`EmptyLookupItem.java:19-22` 那条"must never be inserted into the document"）。

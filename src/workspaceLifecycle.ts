@@ -417,6 +417,9 @@ async function refreshSyntheticNodes() {
  * pm/roots ① 的缺口是「没有 SDK 对象与多 SDK 选择，只有 java 设置里的一个字符串」。
  * `preconfigure` 的语义照上游 `ProjectJdkTable.java:88-92`（「if none are configured」
  * 才自动探测），本表每个会话重建一次，所以进表的是本轮探测到的全部 SDK；
+ * 名字按上游建 SDK 的唯一入口去重（`SdkConfigurationUtil.createUniqueSdkName`，
+ * 见 `src/rootsSdkTable.ts:uniqueSdkName`）—— 两台 JDK 21 都叫 `21` 时是 `21` + `21 (2)`，
+ * 不是后者把前者顶掉；
  * `ensureJdkForHome` 再把项目设置里那个 `jdkHome` 字符串接回同一张表
  * （上游没有这个方法，它是本仓把「配置面」与「实体面」缝合起来的那一步）。
  */

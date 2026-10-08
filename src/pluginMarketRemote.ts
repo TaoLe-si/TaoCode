@@ -129,7 +129,7 @@ export async function loadRemoteMarketplace(repository: string, deps: RemoteMark
   }
   const failure = marketplaceFetchFailure(result, url)
   if (failure) return { available: false, url, plugins: [], errors: [], reason: failure }
-  const parsed = parseMarketplaceCatalog(result.content, JETBRAINS_MARKETPLACE_HOST)
+  const parsed = parseMarketplaceCatalog(result.content ?? '', JETBRAINS_MARKETPLACE_HOST)
   if (!parsed.catalog) {
     return { available: false, url, plugins: [], errors: parsed.errors, reason: parsed.errors[0] ?? '清单解析失败。' }
   }
@@ -137,7 +137,7 @@ export async function loadRemoteMarketplace(repository: string, deps: RemoteMark
     ...entry,
     // 远程条目的 `file` 换成绝对 URL：对上游 `PluginChunkDataSource` 的下载面是"包在哪"，
     // 对本仓是"链接可点开看"（安装仍走本地那一档，见文件头）。
-    file: resolveRemotePackageUrl(url, entry.file) ?? entry.file,
+    file: resolveRemotePackageUrl(url, entry.file ?? '') ?? entry.file ?? '',
   }))
   return { available: true, url, plugins, errors: parsed.errors, reason: '' }
 }

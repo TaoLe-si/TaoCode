@@ -7,6 +7,7 @@
 //   ④ `refresh` 按注入的 exists 重判有效性并广播变化的那批。
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   createVirtualFilePointerManager,
@@ -125,4 +126,62 @@ test('fileName 跟着当前路径走', () => {
   assert.equal(pointer.fileName(), 'a.ts')
   manager.rename({ from: 'src/a.ts', to: 'lib/renamed.ts' }, () => true)
   assert.equal(pointer.fileName(), 'renamed.ts')
+})
+
+// ── 持有者（2026-10-08 lane pf-vfs）：上游一个指针是**一个实例**，`create`/`duplicate` 各把
+// `useCount` 加一（`VirtualFilePointerManagerImpl.java:316`/`:448`），`dispose` 只在计数落到 0
+// 时摘节点（同文件 `decrementUsageCount:808-818`）；listener 挂在实例上（`:715-730` 的
+// `groupPointersToFire` 把每个 listener 自己那几个指针折成一个数组发出去）。
+
+test('dispose 按持有者解绑：还有别的持有者时条目留着，最后一个走了才摘', () => {
+  const manager = createVirtualFilePointerManager(() => true)
+  const a = manager.create('src/a.ts')
+  const b = manager.duplicate(a)
+  assert.equal(manager.pointers().length, 1, '一条目上两个持有者')
+  assert.equal(manager.dispose(a), true)
+  assert.equal(manager.pointers().length, 1, 'a 走了 b 还在 ⇒ 条目不许摘')
+  assert.equal(b.isValid(), true)
+  manager.rename({ from: 'src/a.ts', to: 'src/renamed.ts' }, () => true)
+  assert.equal(b.path(), 'src/renamed.ts', '剩下的持有者照样跟着改名')
+  assert.equal(manager.dispose(b), true)
+  assert.equal(manager.pointers().length, 0, '最后一个持有者走了才摘')
+  assert.equal(manager.dispose(a), false, '已经解绑过的身份再解一次没有可解的')
+})
+
+test('listener 随持有者：解绑掉登记它的那个持有者之后就不再收到广播', () => {
+  const alive = new Set(['src/a.ts'])
+  const manager = createVirtualFilePointerManager(path => alive.has(path))
+  const mine = []
+  const theirs = []
+  const first = manager.create('src/a.ts', 'file', { validityChanged: () => mine.push('first') })
+  manager.create('src/a.ts', 'file', { validityChanged: () => theirs.push('second') })
+  assert.equal(manager.dispose(first), true, '解绑 first；条目还在（第二位持有者）')
+  alive.delete('src/a.ts')
+  const changed = manager.refresh(path => alive.has(path))
+  assert.deepEqual(changed.map(item => item.path()), ['src/a.ts'])
+  assert.deepEqual(mine, [], '解绑过的持有者不该再收到广播')
+  assert.deepEqual(theirs, ['second'], '还在的持有者照收')
+})
+
+test('一批改名里每个 listener 只收到自己那几个指针（上游 groupPointersToFire 的分组）', () => {
+  const manager = createVirtualFilePointerManager(() => true)
+  const seenA = []
+  const seenB = []
+  manager.create('src/a.ts', 'file', { validityChanged: pointers => seenA.push(pointers.map(item => item.path())) })
+  manager.create('src/b.ts', 'file', { validityChanged: pointers => seenB.push(pointers.map(item => item.path())) })
+  manager.rename({ from: 'src', to: 'lib' }, () => false)     // 两条都由有效变无效 ⇒ 同一批
+  assert.deepEqual(seenA, [['lib/a.ts']], 'A 的 listener 只收到自己那条')
+  assert.deepEqual(seenB, [['lib/b.ts']])
+})
+
+// ── 接线留痕（2026-10-08 lane pf-vfs）：本模块是**有意未接线**的库（实现与判据都在，持有者在冻结
+// 文件/别的族的文件面里）。文件头写明卡点、`.tools/orphan-baseline.txt` 记理由；这一段一旦被悄悄删掉
+// 判据就红 —— 接线之后该连它一起改成「已接上」的断言。
+
+test('文件头写明 NOT WIRED YET 与三个持有者面（接线清单的锚点）', () => {
+  const source = readFileSync(new URL('../src/virtualFilePointer.ts', import.meta.url), 'utf8')
+  assert.match(source, /NOT WIRED YET/)
+  for (const consumer of ['src/App.vue', 'src/bookmarks.ts', 'pv/recent'])
+    assert.ok(source.includes(consumer), `接线清单要点名 ${consumer}`)
+  assert.match(source, /orphan-baseline\.txt/)
 })

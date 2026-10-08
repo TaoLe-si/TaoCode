@@ -511,6 +511,43 @@ export function applyConsoleFilterChain(
     : [{ path: item.path, line: item.line, column: item.column }]))
 }
 
+/**
+ * **内建默认链**在一行输出上的文件落点（控制台的消费入口；`src/runIssues.ts` 是真实消费方）。
+ *
+ * 与 `applyConsoleFilterChain` 只差一处：**不问插件 EP**。理由有两条：
+ *   · 插件贡献在控制台那侧由 `src/consoleFilterProviders.ts` 的 `applyConsoleFilters` 收，它有自己的
+ *     容错口径（一个坏 filter 只丢它自己，见那里的判据）；两边各调一次 ⇒ 插件 filter 不会被叫两遍
+ *     （有状态的插件 filter 被叫两次是可观察的）。
+ *   · 插件 provider 的**默认链顺序**仍是「内建在前、插件在后」（`ConsoleViewUtil.java:315-335`
+ *     按 EP 顺序取；内建那几条是平台自己登记的），调用方按这个先后拼即可。
+ *
+ * 容错：`applyCompositeFilter` 遇到 filter 抛错会上抛 `ConsoleApplyFilterError`（上游
+ * `CompositeFilter.java:75-77` 的 `ApplyFilterException`）。控制台这一侧的兜底是「这一行的过滤没了、
+ * 控制台照常」—— 控制台的 filter 是在异步 runner 里跑的（`AsyncFilterRunner.java:300` 调
+ * `filter.applyFilter`），抛出去只落到那一批异步任务上，不弹窗也不中断输出；终端那一侧同样只记日志
+ * （`JediTermHyperlinkFilterAdapter.kt:103-105`）。所以这里吞掉并返回空表。
+ */
+export function builtinConsoleFilterHits(
+  text: string, root: string, entireLength: number = text.length,
+): { path: string; line: number; column: number }[] {
+  const context: ConsoleFilterContext = { root }
+  let result: ConsoleFilterResult | null
+  try {
+    result = applyCompositeFilter(
+      builtinConsoleFilterProviders().flatMap(provider => providerFilters(provider, context)),
+      text, entireLength, context,
+    )
+  }
+  catch (error) {
+    if (isCancellation(error)) throw error
+    return []
+  }
+  if (result === null) return []
+  return result.items.flatMap(item => (item.path === null
+    ? []
+    : [{ path: item.path, line: item.line, column: item.column }]))
+}
+
 // ── 输入过滤器（`com.intellij.consoleInputFilterProvider`） ────────────────────────────────────
 //
 // 与输出过滤器的差别（上游逐条）：

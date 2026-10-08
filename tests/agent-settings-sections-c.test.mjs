@@ -55,7 +55,10 @@ test('四节都用 AgentSettingsSectionShell 包起来（节标题/说明是共�
     const src = source(name)
     assert.ok(src.includes("from './AgentSettingsSectionShell.vue'"), `${rel(name)} 没有 import shell`)
     assert.match(src, /<AgentSettingsSectionShell\b/, `${rel(name)} 模板里没有用 shell 包`)
-    assert.match(src, /:description=/, `${rel(name)} 没有把 description 交给 shell`)
+    // 说明口径（2026-10-08 交接件）：**有上游 description 键的节才显示说明**，文本交给 shell 渲染；
+    // 没有上游键的节（browser / computerUse）不许自造一句。
+    if (name === SUBAGENTS || name === PLUGINS) assert.match(src, /:description=/, `${rel(name)} 有上游说明键，必须交给 shell 渲染`)
+    else assert.ok(!/:description=/.test(src), `${rel(name)} 上游没有这一节的说明键，不许自造一句`)
   }
 })
 
@@ -155,7 +158,9 @@ test('图标只用 lucide-vue-next / IDEA 副本，且尺寸只从 iconSize 角�
   }
   // 阳性对照：确实有图标（不是「没图标所以通过」）。
   assert.ok(source(SUBAGENTS).includes(':size="iconSize.control"'), `${rel(SUBAGENTS)} 应该有图标`)
-  assert.ok(source(SUBAGENTS).includes('IdeaCheckedIcon'), '勾选记号应该用 IDEA 的 checked 副本')
+  // 反面：ZCode 工具档位是**对照清单**，不是本仓可选能力 —— 不许画勾选记号
+  // （勾出来的样子会被读成「这些能力本仓已具备」，2026-10-08 交接件口径；替代原先那条要求画勾的断言）。
+  assert.ok(!source(SUBAGENTS).includes('IdeaCheckedIcon'), '对照清单不许画勾选记号')
 })
 
 // ── 5 · 真把 SFC 模板跑一遍 ──────────────────────────────────────────────────

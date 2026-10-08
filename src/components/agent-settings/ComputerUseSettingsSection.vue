@@ -39,12 +39,13 @@ const availability = computed(() => computerUseAvailability(platformProbe(), {
 /** 准备步骤：ZCode 的 CUA Helper 授权链路（本仓没有 Helper，所以只是把上游规则如实登出来）。 */
 const preparation = computed(() => cuaPermissionPreparation(null))
 
-/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
-const SECTION_DESCRIPTION = '由官方 CUA Helper 与系统权限决定；本仓宿主没有 CUA Helper，所以只登记判定与准备步骤。'
+// 这一节**没有 description**：上游没有对应的节说明键 —— `ComputerUseSection.tsx:686-700` 在环境
+// 不支持时给的是 `settings.computerUse.unsupported.*` 那种**判定结果**文案，不是节说明；
+// 自己写一句「本仓没有 Helper」又是实现解释。界面只显示模块算出来的判定与准备步骤。
 </script>
 
 <template>
-  <AgentSettingsSectionShell title="电脑控制" :description="SECTION_DESCRIPTION">
+  <AgentSettingsSectionShell title="电脑控制">
     <section class="settings-box">
       <h3 class="settings-box-title">可用性</h3>
       <p class="settings-status" role="status">{{ availability.reason }}</p>
@@ -61,10 +62,6 @@ const SECTION_DESCRIPTION = '由官方 CUA Helper 与系统权限决定；本仓
           <span class="computer-step-detail">{{ step.detail }}</span>
         </li>
       </ol>
-      <p class="field-hint">
-        本节由 ZCode 的官方 CUA Helper 与系统权限决定；本仓宿主（WebView2 + 本机 Windows）没有 CUA Helper，
-        所以这里只登记判定与准备步骤，不画开关 —— 纯文本指令不需要它，它能做的是"看屏幕、动鼠标"这一类。
-      </p>
     </section>
   </AgentSettingsSectionShell>
 </template>

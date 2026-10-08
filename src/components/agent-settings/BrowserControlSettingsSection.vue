@@ -35,22 +35,18 @@ const availability = computed(() => browserControlAvailability(platformProbe(), 
   workspaceIdentity: props.workspacePath ?? null,
 }))
 
-/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
-const SECTION_DESCRIPTION = '由官方 Browser Use 插件决定；内置浏览器数据的清理在「设置 › 常规 › 浏览器」里。'
+// 这一节**没有 description**：上游没有对应的节说明键（`settings.browser.*` 只有行/按钮/导入文案），
+// 自己写一句就是自造。界面只显示模块算出来的「可用性」结论与缺口清单，不解释本仓缺什么通道。
 </script>
 
 <template>
-  <AgentSettingsSectionShell title="浏览器控制" :description="SECTION_DESCRIPTION">
+  <AgentSettingsSectionShell title="浏览器控制">
     <section class="settings-box">
       <h3 class="settings-box-title">可用性</h3>
       <p class="settings-status" role="status">{{ availability.reason }}</p>
       <ul v-if="availability.missing.length" class="browser-missing">
         <li v-for="item in availability.missing" :key="item">{{ item }}</li>
       </ul>
-      <p class="field-hint">
-        ZCode 这一节由官方 Browser Use 插件与内置浏览器通道决定；本仓两条都没有，所以这里只登记缺口、不画开关。
-        证书校验与内置浏览器数据的控件在「设置 › 常规 › 浏览器」。
-      </p>
     </section>
   </AgentSettingsSectionShell>
 </template>

@@ -32,7 +32,9 @@
 // 实测的市场响应，行号与读数记在报告里）。
 
 import type { MarketplacePlugin } from './pluginMarket.ts'
-import { JETBRAINS_MARKETPLACE_HOST, fetchRemoteRaw, marketplaceFetchFailure, type RemoteFetchOptions } from './pluginMarketRemote.ts'
+import { JETBRAINS_MARKETPLACE_HOST, marketplaceFetchFailure } from './pluginMarketRemote.ts'
+// `fetchRemoteRaw` / `RemoteFetchOptions` 的落点已经搬到 `src/remoteFileHost.ts`（宿主 http.get 那一层的门面）。
+import { fetchRemoteRaw, type RemoteFetchOptions } from './remoteFileHost.ts'
 import type { RemoteFetchResult } from './remoteFiles.ts'
 
 /** 搜索 API 的地址（上游 `MarketplaceUrls.getPluginManagerUrl()/api/search/plugins`，`:60-73`）。 */

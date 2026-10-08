@@ -10,6 +10,10 @@
 //     带色码的输出在控制台里是**有色的**，本仓宿主只回传原始字节，所以这里把转义序列剥成
 //     可见文本、把样式带在 `chunks` 上给面板上色（问题/链接识别一律用剥完的文本）。
 //   · `jumpToIssue` / `nextRunIssue` = 控制台侧的"跳到问题".
+//   · 每行的落点按**四档**取（`parseRunIssue` → `file:line` 链接 → 内建默认链 → 插件 filter），
+//     第三档就是控制台的过滤器链：`src/consoleFilterRegistry.ts` 的 `builtinConsoleFilterHits`
+//     （`CompositeFilter` 语义 + 三条内建 provider，`UrlFilter` 的 `file:` 分支靠它才可跳），
+//     第四档是插件 EP `com.intellij.consoleFilterProvider` 的贡献。
 // 它们共享同一份派生结果（`runLines`），所以合成一域；真正的运行控制在 src/runActions.ts。
 import { computed, watch } from 'vue'
 import { runState, type GeneralSettingsState } from './bridge.ts'
@@ -18,6 +22,7 @@ import { foldConsoleLines } from './consoleFold.ts'
 import { findRunHyperlinks, type RunHyperlink } from './runHyperlinks.ts'
 import { parseAnyIssue, type RunIssue } from './buildOutput.ts'
 import { applyConsoleFilters } from './consoleFilterProviders.ts'
+import { builtinConsoleFilterHits } from './consoleFilterRegistry.ts'
 import { applyConsoleFoldings } from './executionExtensionPoints.ts'
 
 export interface RunIssuesDeps {
@@ -50,12 +55,24 @@ const runLines = computed(() => foldConsoleLines(
       const { text, chunks } = ansi.line(raw)
       const links = findRunHyperlinks(text, workspace.value?.root ?? '')
       const first: RunHyperlink | undefined = links[0]
-      // 插件贡献的控制台过滤器（上游 `com.intellij.consoleFilterProvider`）——**追加**在内置识别之后：
+      const parsed = parseRunIssue(text)
+      // 第三档落点 = **内建默认链**的文件位置命中（`src/consoleFilterRegistry.ts` 的
+      // `builtinConsoleFilterHits`）：那一条链按上游 `ConsoleViewImpl` → `CompositeFilter` 的语义跑
+      // 三条内建 provider —— 异常类名（纯高亮）、`UrlFilter$UrlFilterProvider`（URL 与 `file:`）、
+      // `RegexpFilter`（`file:line`）。本仓第一档 `findRunHyperlinks` 的路径字符类不含 `:`，
+      // 所以 `file:///D:/a/B.java:12` 这种**上游能跳**的落点原本落空；这一档补的就是它。
+      // 只在「内置问题与 `file:line` 链接都没有」时才算 —— 有链接的行不必多扫一遍（`links` 已经是
+      // `RegexpFilter` 那把尺量的同一个结果；`render` 那侧的 URL 层另有 `src/consoleHyperlinks.ts`）。
+      const builtinHit = parsed === null && first === undefined
+        ? builtinConsoleFilterHits(text, workspace.value?.root ?? '')[0]
+        : undefined
+      // 插件贡献的控制台过滤器（上游 `com.intellij.consoleFilterProvider`）——**排在**内置识别之后：
       // 没有插件时这里是空数组，行为与之前逐字相同（判据 tests/console-filter-providers.test.mjs）。
       const pluginHit = applyConsoleFilters(text, workspace.value?.root ?? '')[0]
       return {
         text,
-        issue: parseRunIssue(text) ?? (first ? { path: first.path, line: first.line, column: first.column } : null)
+        issue: parsed ?? (first ? { path: first.path, line: first.line, column: first.column } : null)
+          ?? (builtinHit ? { path: builtinHit.path, line: builtinHit.line, column: builtinHit.column ?? 1 } : null)
           ?? (pluginHit ? { path: pluginHit.path, line: pluginHit.line, column: pluginHit.column ?? 1 } : null),
         links,
         // 没有任何样式的行**不带这个字段** ⇒ 面板渲染路径与本轮之前逐字相同（判据钉住）。

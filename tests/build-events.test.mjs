@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
-  buildProgressTree, countFailures, flattenProgress, gradleBuildEvents, progressPercent,
+  buildProgressStripe, buildProgressTree, countFailures, flattenProgress, gradleBuildEvents, progressPercent, stripeProgressOf,
 } from '../src/buildEvents.ts'
 
 test('事件按 id/parentId 折成树，根是第一个 start（BuildRootProgressImpl 只发一次）', () => {
@@ -143,4 +143,88 @@ test('接线：GradlePanel 从 gradleSync.output 折出进度树并画出来', (
   assert.match(vue, /gradleBuildEvents\(/, '面板要用输出折事件')
   assert.match(vue, /flattenProgress\(/, '面板要按深度画树')
   assert.match(vue, /gradle-build-tree/, '模板里要有进度树的容器')
+})
+
+// ---------------------------------------------------------------------------
+// 进度条（`build/console/BuildProgressStripe.java:37-56` 的 `updateProgress(total, progress)`）
+// 2026-10-08 lane lp-roots 补：面板头部原来只有节点自己的 progress 事件（CLI 不给数字 ⇒ 一直空着），
+// 这条把"任务完成度"这条真实数据接上，判定表逐条照上游。
+// ---------------------------------------------------------------------------
+
+test('进度条判定表：progress 为 0 是不确定态而不是 0%，total == progress 收工（:38-55）', () => {
+  assert.deepEqual(buildProgressStripe(4, 1), { loading: true, determinate: true, percent: 25 })
+  assert.deepEqual(buildProgressStripe(3, 1), { loading: true, determinate: true, percent: 33 }, '整数截断（:49 的 Math.toIntExact）')
+  assert.deepEqual(buildProgressStripe(3, 0), { loading: true, determinate: false, percent: 0 }, 'progress 为 0 ⇒ setIndeterminate(true)（:53-55）')
+  assert.deepEqual(buildProgressStripe(-1, 3), { loading: true, determinate: false, percent: 0 }, 'total < 0 ⇒ 不确定')
+  assert.deepEqual(buildProgressStripe(0, 0), { loading: false, determinate: true, percent: 100 }, '空活儿也走 total == progress 那一支（不做"顺手修正"）')
+  assert.deepEqual(buildProgressStripe(5, 5), { loading: false, determinate: true, percent: 100 }, '跑完收工、值置 100（:43-45 + :60-64）')
+})
+
+test('无后缀任务在下一条边界处收成功；收口有证据（BUILD SUCCESSFUL 或 exit 0）才收最后一条', () => {
+  // 边界反证：`> Task :a` 之后出现 `> Task :b` ⇒ a 执行完了（Gradle 只在失败/跳过时给后缀）。
+  // b 之后什么都没发生且没有退出码 ⇒ b 留白。
+  const boundary = buildProgressTree(gradleBuildEvents({
+    output: ['> Task :a', '> Task :b'].join('\n'), startedAt: 0, label: 'build', running: false,
+  }))
+  assert.deepEqual(boundary.children.map(child => child.result?.kind ?? null), ['success', null], '只有边界这一条证据')
+  // 退出码 0 是"整次构建成功"的硬信号（本仓宿主给的那个数）⇒ 最后一条也收成功。
+  const cleanExit = buildProgressTree(gradleBuildEvents({
+    output: ['> Task :a', '> Task :b'].join('\n'), startedAt: 0, label: 'build', running: false, exitCode: 0,
+  }))
+  assert.deepEqual(cleanExit.children.map(child => child.result?.kind ?? null), ['success', 'success'])
+  // 被取消时退出码不算证据（进程是被杀掉的）。
+  const cancelled = buildProgressTree(gradleBuildEvents({
+    output: ['> Task :a'].join('\n'), startedAt: 0, label: 'build', running: false, exitCode: 0, cancelled: true,
+  }))
+  assert.equal(cancelled.children[0].result, null, '取消不补结论')
+  // 成功收口：只有一条无后缀任务时，`BUILD SUCCESSFUL` 就是它的结论。
+  const successful = buildProgressTree(gradleBuildEvents({
+    output: ['> Task :a', 'BUILD SUCCESSFUL in 3s'].join('\n'), startedAt: 0, label: 'build', running: false,
+  }))
+  assert.equal(successful.children[0].result.kind, 'success')
+  // 失败收口：同样只有一条无后缀任务，但这里没有任何"它成功了"的证据 ⇒ 留白。
+  const failed = buildProgressTree(gradleBuildEvents({
+    output: ['> Task :a', 'FAILURE: Build failed with an exception.'].join('\n'), startedAt: 0, label: 'build', running: false,
+  }))
+  assert.equal(failed.children[0].result, null, '不把"没结论"当成成功')
+  assert.equal(failed.result.kind, 'failure')
+  // 已有结论的任务不被边界收口改写（FAILED 不能变成成功）。
+  const failedTask = buildProgressTree(gradleBuildEvents({
+    output: ['> Task :a FAILED', '> Task :b'].join('\n'), startedAt: 0, label: 'build', running: false,
+  }))
+  assert.equal(failedTask.children[0].result.kind, 'failure')
+})
+
+test('stripeProgressOf：total = 任务节点数，progress = 已有结论的节点数（本仓对 (total, progress) 的取数）', () => {
+  const running = gradleBuildEvents({
+    output: ['> Configure project :', '> Task :app:compileJava', '> Task :app:processResources'].join('\n'),
+    startedAt: 0, label: 'gradle projects tasks', running: true,
+  })
+  const runningTree = buildProgressTree(running)
+  // 三条深度 1 的节点：Configure 立刻有结论，compileJava 由下一条任务行反证收口，
+  // processResources 还在跑（`running: true` 不发总结果）⇒ 3 条里 2 条已有结论。
+  const runningCounts = stripeProgressOf(runningTree)
+  assert.deepEqual(runningCounts, { total: 3, progress: 2 })
+  assert.deepEqual(buildProgressStripe(runningCounts.total, runningCounts.progress), { loading: true, determinate: true, percent: 66 })
+
+  const done = buildProgressTree(gradleBuildEvents({
+    output: ['> Task :app:compileJava', '> Task :app:test FAILED'].join('\n'),
+    startedAt: 0, label: 'build', running: false,
+  }))
+  const doneCounts = stripeProgressOf(done)
+  // 结论要么来自任务行自己的后缀，要么来自下一条边界行（compileJava 那一档）。
+  assert.deepEqual(doneCounts, { total: 2, progress: 2 })
+  assert.deepEqual(buildProgressStripe(doneCounts.total, doneCounts.progress), { loading: false, determinate: true, percent: 100 })
+
+  // 折不出任务（空输出）⇒ total === progress === 0，按判定表是「收工 + 满格」，但那时模板整个不渲染。
+  const empty = stripeProgressOf(buildProgressTree(gradleBuildEvents({ output: '', startedAt: 0, label: 'sync', running: false })))
+  assert.deepEqual(empty, { total: 0, progress: 0 })
+})
+
+test('接线：GradlePanel 用判定表画进度条（import + 计算 + 模板里的 progressbar）', () => {
+  const vue = readFileSync(new URL('../src/components/GradlePanel.vue', import.meta.url), 'utf8')
+  assert.match(vue, /buildProgressStripe,/, '面板要引判定表')
+  assert.match(vue, /stripeProgressOf\(/, '面板要从进度树现算 (total, progress)')
+  assert.match(vue, /class="gradle-build-stripe" role="progressbar"/, '模板里要有进度条本体')
+  assert.match(vue, /\.gradle-build-stripe\b/, '进度条要有样式落点')
 })

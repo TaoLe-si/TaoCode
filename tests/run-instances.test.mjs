@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   activeRunInstance,
+  applyRunInstanceSnapshot,
   beginRun,
   closeRunView,
   endRun,
@@ -261,6 +262,25 @@ test('三句文案 + 动作文案都指得到上游那条 key', () => {
 test('显示名与标签条同一个规则（runInstanceDisplayName）', () => {
   assert.equal(runInstanceDisplayName({ label: '甲' }, 0), '甲')
   assert.equal(runInstanceDisplayName({ label: '' }, 2), '运行 3')
+})
+
+test('快照带回宿主那一位「正在结束」：重取快照后这一格仍是 kill', () => {
+  // `native/run_host.cpp` 的 `instances()` 每条带 `stopping`（= `Instance::stop_requested`，
+  // 那里写着「前端据此在重取快照后仍能把图标换成 kill」）。前端若把这一位丢掉，
+  // 宿主已经进入优雅结束的实例在控制台里就一直显示成「在跑」（StopAction.java:106-110 那一档）。
+  reset()
+  handleRunStarted({ instance: 11, label: '服务' })
+  assert.equal(runningListRows()[0].icon, 'run')
+  applyRunInstanceSnapshot([{ id: 11, pid: 100, stopping: true }])
+  assert.equal(runningListRows()[0].icon, 'kill', '宿主报 stopping ⇒ 这一格要换成 kill')
+  // 快照只是补充：它报 false / 没有这一位时，不能把前端已经记下的「正在结束」翻回去
+  // （记在请求那一刻，见 `markRunInstanceStopping` 的注释：宿主没有"开始结束"事件）。
+  reset()
+  handleRunStarted({ instance: 12, label: '服务二' })
+  markRunInstanceStopping(12)
+  applyRunInstanceSnapshot([{ id: 12, pid: 101, stopping: false }])
+  assert.equal(runningListRows()[0].icon, 'kill', '迟到的快照不能清掉已经记下的「正在结束」')
+  handleRunExit({ instance: 11, code: -1, aborted: true })
 })
 
 test('消费链：控制台真的把清单接上了（点击只切视图）', () => {

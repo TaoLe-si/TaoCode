@@ -19,7 +19,7 @@ import {
   type AgentAutomation,
 } from '../../agentAutomations'
 
-/** 这一节是什么：照 zh-CN `automations.description` 与节定义改写。 */
+/** 本节自管草稿：`reactive(normalize(load()))`，不塞进页面那份 draft（与别的分节同一约定）。 */
 const draft = reactive(normalizeAgentAutomations(loadAgentAutomations()))
 const problems = ref<string[]>([])
 const status = ref('')
@@ -101,15 +101,15 @@ function save() {
     : '本次会话仍生效，但没有存下来（本机存储不可用）。'
 }
 
-/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
-const SECTION_DESCRIPTION = '管理定时任务：调度摘要与下次运行时间。'
+// 这一节**没有 description**：上游有这一节的标题与 Beta 徽标键（`settings.automations.title`
+// / `betaBadge`），但没有节说明键 —— `automations.description`（`zh-CN.ts:6059`）是自动化**页**的
+// 页头，不是设置节说明。搬过来是改上游的位置，自己写一句是自造，所以不显示。
 </script>
 
 <template>
-  <AgentSettingsSectionShell title="自动化" :description="SECTION_DESCRIPTION">
-    <p class="auto-beta" role="note">
+  <AgentSettingsSectionShell title="自动化">
+    <p class="auto-beta">
       <span class="auto-beta-chip">{{ AGENT_AUTOMATIONS_BETA_BADGE }}</span>
-      <span>本节只保存配置：本仓还没有调度器去真的执行这些定时任务（`loadAgentAutomations` 之外没有消费方）。</span>
     </p>
     <fieldset class="settings-fields">
       <div class="auto-toolbar">
@@ -133,11 +133,16 @@ const SECTION_DESCRIPTION = '管理定时任务：调度摘要与下次运行时
           <Plus :size="iconSize.control" aria-hidden="true" />用模板
         </button>
       </div>
-      <p v-if="!draft.templates.length" class="field-hint">
-        模板目录是空的：本仓没有预置假模板，直接点「新建」自己写一条。
-      </p>
-
-      <p v-if="!visible.length" class="field-hint">没有符合条件的任务。</p>
+      <!-- 空态分两种，文案逐字取上游：一条都没有 → 上游空态标题/说明 +「手动创建」（`zh-CN.ts:6186-6188`，
+           动作接真出口 `addAutomation`）；有任务但被筛空 → 上游筛选空态（`zh-CN.ts:6089`）。 -->
+      <div v-if="!draft.automations.length" class="auto-empty">
+        <strong class="auto-empty-title">还没有定时任务</strong>
+        <p class="auto-empty-desc">创建一个任务，按周期自动运行你的指令。</p>
+        <button class="settings-button" type="button" @click="addAutomation">
+          <Plus :size="iconSize.control" aria-hidden="true" />手动创建
+        </button>
+      </div>
+      <p v-else-if="!visible.length" class="field-hint">没有符合条件的任务</p>
 
       <article v-for="(automation, index) in visible" :key="automation.id" class="auto-card">
         <div class="auto-card-head">
@@ -211,6 +216,9 @@ const SECTION_DESCRIPTION = '管理定时任务：调度摘要与下次运行时
 .auto-chip { padding: 0 var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--secondary); font-size: 12px; }
 .auto-chip-fail { border-color: var(--error); color: var(--error); }
 .auto-beta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.auto-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-4) var(--space-3); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
+.auto-empty-title { color: var(--text); font-size: 12px; font-weight: 600; }
+.auto-empty-desc { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.6; }
 .auto-beta-chip { display: inline-flex; align-items: center; min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); border: 1px solid var(--accent); border-radius: var(--radius-pill); color: var(--accent); font-size: 11px; font-weight: 600; line-height: 1; }
 .auto-form { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); }
 .auto-row-block { align-items: flex-start; }

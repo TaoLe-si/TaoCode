@@ -68,12 +68,14 @@ function save(): void {
     : '本次会话仍生效，但没有存下来（本机存储不可用）。'
 }
 
-/** 这一节的说明：交给共用外壳渲染（`AgentSettingsSectionShell.vue` 的 `description`）。 */
-const SECTION_DESCRIPTION = '管理已安装技能：启用、停用与查看注入状态。'
+// 这一节**没有 description**：上游 `settings.skills.description`（`zh-CN.ts:3474`）的第二句
+// 是「启用后可在聊天里通过 $skill-name 使用」—— 本仓没有技能运行时（`agentSkills.ts` 的
+// `injected` 恒为 null = 未接入，本节每行都如实标着「未接入」），照抄就是把不存在的运行时
+// 写进界面；只截前一句又是改上游文案。所以不显示。
 </script>
 
 <template>
-  <AgentSettingsSectionShell title="技能" :description="SECTION_DESCRIPTION">
+  <AgentSettingsSectionShell title="技能">
     <div class="skill-toolbar">
       <label class="skill-search">
         <Search :size="iconSize.dense" aria-hidden="true" />

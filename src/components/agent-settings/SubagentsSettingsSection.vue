@@ -3,14 +3,14 @@
 //
 // 本节只做**接线**：形状 / 能力投影 / 归一化 / 校验全在 `src/agentSubagents.ts`。
 // 同 id 冲突由 `validateAgentSubagentsSettings` 报出来（磁盘上两个文件），**不静默去重**。
-// `AGENT_SUBAGENT_ZCODE_TOOL_OPTIONS` 是 **ZCode 那边的工具档位对照**（Read/Grep/Glob/Bash/…），
-// **不是本仓可选的工具清单**。这里只作只读对照渲染并明确标注。
+// 模块里那份 `AGENT_SUBAGENT_ZCODE_TOOL_OPTIONS` 是 **ZCode 那边的工具档位对照**，
+// **不在本节渲染**：本仓没有「按子智能体挑工具」的持久化与执行链，画成清单（尤其带勾选记号）
+// 会被读成"本仓可选能力"。缺口只在 `docs/` 记录，不用界面文字解释。
 import { computed, reactive, ref } from 'vue'
 import { AlertTriangle, Save, Search } from 'lucide-vue-next'
 import AgentSettingsSectionShell from './AgentSettingsSectionShell.vue'
 import AgentSettingsSwitch from './AgentSettingsSwitch.vue'
 import { iconSize } from '../../uiIcons'
-import { IdeaCheckedIcon } from '../icons/toolWindowIcons'
 import {
   AGENT_SUBAGENT_GROUP_LABELS, AGENT_SUBAGENT_RISKY_TOOLS,
   AGENT_SUBAGENT_SCOPE_LABELS, AGENT_SUBAGENT_ZCODE_TOOL_OPTIONS,
@@ -150,13 +150,13 @@ const SECTION_DESCRIPTION = '管理用户级子智能体 Markdown 文件（ZCode
 
 
     <!-- ZCode 那边的工具档位对照（`AGENT_SUBAGENT_ZCODE_TOOL_OPTIONS`）——**只读清单**：
-         本仓没有"按子智能体挑工具"的执行路径，所以一列勾选框都没有（勾了也存不进任何东西）。
-         勾选记号用 IDEA 的 `checked` 副本（`AllIcons.Actions.Checked`），与菜单行同一种记号。 -->
+         本仓没有"按子智能体挑工具"的执行路径（勾了也存不进任何东西），所以既没有勾选框，
+         **也不画勾选记号** —— 勾出来的样子会被读成"这些能力本仓已具备"（2026-10-08 交接件口径）。 -->
     <section class="settings-box">
       <h4 class="settings-box-title">ZCode 那边可选的档位</h4>
       <ul class="sub-zcode-tools">
         <li v-for="tool in AGENT_SUBAGENT_ZCODE_TOOL_OPTIONS" :key="tool">
-          <IdeaCheckedIcon :size="iconSize.dense" aria-hidden="true" />{{ tool }}
+          {{ tool }}
         </li>
       </ul>
     </section>
