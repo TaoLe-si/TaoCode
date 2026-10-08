@@ -6,7 +6,7 @@ import { errorMessage } from './errors.ts'
 import { cloneRunConfig, discoverRunTargets, filesNeedingContent, rememberTemporary, runTargetConfiguration, stableRunConfig,
   type RunTarget, type RuntimeRunConfig } from './runTargets.ts'
 import { runtimeOutputPaths } from './projectBuild.ts'
-import { applyRunConfigSave, runConfigClosure, runConfigReferrers, type RunConfigSaveOrigin } from './runConfigTree.ts'
+import { applyRunConfigSave, planRunConfigRemoval, runConfigClosure, runConfigReferrers, type RunConfigSaveOrigin } from './runConfigTree.ts'
 import { normalizeRunConfigurations } from './runConfigurationSchema.ts'
 // 那两个「启动时打开/聚焦运行面板」开关的上游默认（缺键补默认走的也是同一个入口，见 src/runStartupFocus.ts）。
 import { ACTIVATE_TOOL_WINDOW_DEFAULT, FOCUS_TOOL_WINDOW_DEFAULT, runStartupFocusFlagsOf } from './runStartupFocus.ts'

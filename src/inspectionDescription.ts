@@ -82,6 +82,15 @@ export const LOCAL_INSPECTION_DESCRIPTIONS: Readonly<Record<string, InspectionDe
     content: 'JUnit 4 的 `@Parameters` 由框架在实例化之前调用，'
       + '所以提供数据的方法必须是 `public static`。改成静态方法即可。',
   },
+  // 上游显示名与问题描述：`plugins/junit/resources/messages/JUnitBundle.properties:107-108`
+  // （`JUnit 3 'super.tearDown()' is not called from 'finally' block` / `<code>#ref()</code> is not
+  // called from 'finally' block`）。正文按本仓口径写清「什么情况报、怎么修」。
+  JUnit3SuperTearDownInspection: {
+    displayName: "JUnit 3 的 super.tearDown() 没有从 finally 里调用",
+    content: '`tearDown` 里除了调用 `super.tearDown()` 还做了别的事时，'
+      + '前面一旦抛异常，基类的清理整段被跳过（`finally` 里调用才保证执行）。'
+      + '把 `super.tearDown()` 放进 `finally` 块。',
+  },
 }
 
 /**

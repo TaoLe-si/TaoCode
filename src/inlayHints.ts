@@ -82,8 +82,11 @@ export const INLAY_HINT_SETTING_KEYS: Record<InlayHintGroup, InlayHintSettingKey
  * 参数提示排除清单那把键的名字（**唯一**定义处：设置页与读侧都从这里取，不许现抄字符串）。
  * 它对应上游 `ParameterNameHintsSettings`（`@Storage("parameter.hints.xml")`，`:47`）里按语言存的
  * added/removed 差量；本仓没有"按语言"这一层（只有一个 LSP provider），所以是**一把全局清单键**。
- * 登记状态：见 `docs/batch-2026-10-06-inlayparams.md` §6（模型 + native 键表/默认值/校验 + 预览白名单
- * 那六处在别的 lane 的禁写文件里，本 lane 只写读侧与消费侧）。
+ * 登记状态（2026-10-08 lane lp-editor 收口，六处齐）：`EditorSettings` 类型 + `defaultEditorSettings`
+ * + native `EDITOR_SETTING_KEYS` 白名单 + `editor_defaults_impl()` 默认值 +
+ * `native/settings_editor_keys.hpp` 的形状校验分支 + 预览白名单（`src/previewSettings.ts`），
+ * 界面是 `src/components/InlayHintsSettingsPage.vue` 的清单编辑框，判据
+ * `tests/inlay-hints-settings.test.mjs` 与 `native/settings_editor_keys_test.cpp`。
  */
 export const INLAY_HINT_EXCLUDE_LIST_SETTING_KEY = 'parameterHintExcludeList' as const
 

@@ -372,6 +372,43 @@ export function runConfigReferrers(name: string, configs: readonly RunConfig[]):
   return configs.filter(config => config.type === 'compound' && config.configurations?.includes(name))
 }
 
+/** 删除一条配置时的依赖图结论（对话框/宿主在真正写盘之前用它）。 */
+export interface RunConfigRemovalPlan {
+  /** 依赖它的复合配置（按清单顺序）。 */
+  referrers: RunConfig[]
+  /** 摘掉引用之后的完整清单（引用者只改成员表、其余原样）；被拦下时 null。 */
+  configs: RunConfig[] | null
+  /** 拦下的原因（非 null 时 `configs` 为 null —— 不许写一份过不了 schema 的清单出去）。 */
+  problem: string | null
+}
+
+/**
+ * 删除一条配置的**依赖侧**处理。上游不需要这一步：成员按 `(type, name)` 记、解析不到就跳过那一条
+ * （`CompoundRunConfiguration.kt:93-98` 的 `continue`），删掉被引用的配置不会拦任何人
+ * —— 代价是引用者从此少跑一个成员，而 IDEA 只在日志里留痕。
+ * 本仓相反：schema 把「成员不存在」判成**整份坏档**（`normalizeRunConfigurations` 的
+ * 「复合配置引用了不存在的成员」，宿主侧同一条在 `native/settings_project_schema.cpp`），
+ * 所以删一条被引用的配置会让**整个项目的运行配置都存不下去** ⇒ 必须在删之前把引用摘掉，
+ * 或如实拦下（只剩一个成员的那种，摘了就变成空成员复合配置，schema 同样拒）。
+ *
+ * 与上游的共同点：**只承认显式引用**（`configurations` 成员表），不做文本/命令串扫描。
+ */
+export function planRunConfigRemoval(name: string, configs: readonly RunConfig[]): RunConfigRemovalPlan {
+  const target = name.trim()
+  const referrers = runConfigReferrers(target, configs)
+  const configsWithout = configs.filter(entry => entry.name !== target).map(entry => ({ ...entry }))
+  if (!referrers.length) return { referrers, configs: configsWithout, problem: null }
+  // 摘掉引用后会变成「零成员」的复合配置：拦下（`normalizeRunConfigurations` 与宿主都拒绝空成员）。
+  const emptied = referrers.find(entry => !(entry.configurations ?? []).some(member => member !== target))
+  if (emptied)
+    return { referrers, configs: null,
+      problem: `「${target}」是复合配置「${emptied.name}」的唯一成员：删掉它，这个复合配置就没有可运行的内容了。请先在成员里换一个配置，或连它一起删除。` }
+  for (const entry of configsWithout)
+    if (entry.type === 'compound' && entry.configurations?.includes(target))
+      entry.configurations = entry.configurations.filter(member => member !== target)
+  return { referrers, configs: configsWithout, problem: null }
+}
+
 /** 文件夹名校验：与原生 `runConfigs[].folder` 同规则（≤80 字节、单行）。 */
 export function validateFolderName(name: string): string | null {
   if (!name) return null

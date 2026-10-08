@@ -85,6 +85,12 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     // textDocument/inlayHint，按它的 kind 分三档（1 = Type，2 = Parameter，其余归第三档）。
     // 键名与分组的唯一定义处是 src/inlayHints.ts 的 INLAY_HINT_SETTING_KEYS。
     "showTypeInlayHints", "showParameterInlayHints", "showOtherInlayHints",
+    // 参数提示的排除清单（2026-10-08 lane lp-editor）：`ParameterHintsSettingsPanel.kt:18-22` 那个
+    // "Exclude list…" 入口的落点，一行一条 glob（模式文法与 `HintUtils.kt:44-53` 的坏行口径见
+    // src/inlayHintExcludeList.ts）。键名唯一定义处是 src/inlayHints.ts 的
+    // INLAY_HINT_EXCLUDE_LIST_SETTING_KEY，设置面 src/components/InlayHintsSettingsPage.vue。
+    // 非布尔键 ⇒ 校验分支在 native/settings_editor_keys.hpp（漏了它 = 存进去之后再读盘被判坏）。
+    "parameterHintExcludeList",
     // 保存时的两条 pass（IDEA Settings ▸ Editor ▸ General，控件在 EditorOptionsPanel.kt:147-157；
     // 字段与默认值 EditorSettingsExternalizable.java:73-74,142，三档字面值 :216-218）。
     // 消费方 src/editorSaveTransforms.ts 的 saveTrimOptionsFromSettings。

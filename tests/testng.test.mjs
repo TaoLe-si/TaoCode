@@ -5,7 +5,8 @@
 // `util/TestNGUtil.java:78/89/92/94-107`（框架名/Maven 坐标/主类/注解 FQN）、
 // `configuration/TestNGConfigurationType.java:28/39-41`（类型 id 与 tag）、
 // `model/TestType.java:21-27`（七种运行目标）、
-// `configuration/TestNGRunnableState.java:51-53`（`-d`/`-usedefaultlisteners`/`-listener`）。
+// `configuration/TestNGRunnableState.java:51-53,109-120`（`-d`/`-usedefaultlisteners`/`-listener`，
+// 默认值 `model/TestData.java:53`）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -16,6 +17,7 @@ const {
   TESTNG_TEST_TYPES, TESTNG_TEST_TYPE_LABELS, TESTNG_CONFIG_ANNOTATIONS,
   isTestngSource, isJunitSource, frameworkOfSource, discoverTestngTests, parseGroups,
   testngCommand, testngRerunCommand, testngSuiteLabel,
+  DEFAULT_USE_DEFAULT_LISTENERS, testngParameterArguments,
 } = await import('../src/testng.ts')
 const { discover } = await import('../src/testRunner.ts')
 
@@ -89,12 +91,34 @@ test('运行命令：Maven 走 -Dtest，直跑主类走 -testclass/-methods', ()
   assert.equal(testngCommand('mvn test', 'com.foo.Bar'), 'mvn test -Dtest=com.foo.Bar')
   assert.equal(testngCommand('mvn test', 'com.foo.Bar#adds'), 'mvn test -Dtest=com.foo.Bar#adds')
   assert.equal(testngCommand('mvn test', 'com.foo.Bar', { mainClass: true, classpath: 'out' }),
-    'java -cp "out" org.testng.TestNG -testclass com.foo.Bar')
+    'java -cp "out" org.testng.TestNG -testclass com.foo.Bar -usedefaultlisteners false')
   assert.equal(testngCommand('mvn test', 'com.foo.Bar#adds', { mainClass: true, classpath: 'out' }),
-    'java -cp "out" org.testng.TestNG -testclass com.foo.Bar -methods com.foo.Bar.adds')
+    'java -cp "out" org.testng.TestNG -testclass com.foo.Bar -methods com.foo.Bar.adds -usedefaultlisteners false')
   assert.equal(testngRerunCommand('mvn test', ['com.foo.Bar#a', 'com.foo.Bar#b']), 'mvn test -Dtest=com.foo.Bar#a,com.foo.Bar#b')
   assert.equal(testngRerunCommand('mvn test', []), 'mvn test')
   assert.equal(testngSuiteLabel(), 'TestNG')
+})
+
+test('三个 CLI 开关按上游的门控拼（TestNGRunnableState.java:109-120）', () => {
+  // `-usedefaultlisteners` 无条件加，值取 TestData.java:53 的默认 false。
+  assert.equal(DEFAULT_USE_DEFAULT_LISTENERS, false)
+  assert.deepEqual(testngParameterArguments(), ['-usedefaultlisteners false'])
+  // `-d` 只在目录非空时加（`:109-111` 的两道门：null 与 isEmpty 都挡住）。
+  assert.deepEqual(testngParameterArguments({ outputDirectory: '  ' }), ['-usedefaultlisteners false'])
+  assert.deepEqual(testngParameterArguments({ outputDirectory: 'build/reports/testng' }),
+    ['-d build/reports/testng', '-usedefaultlisteners false'])
+  // 监听器非空才加，多个用 `;` 连接（`:115-120`）；空串与空白项不算监听器。
+  assert.deepEqual(testngParameterArguments({ listeners: ['', '  '] }), ['-usedefaultlisteners false'])
+  assert.deepEqual(testngParameterArguments({ useDefaultListeners: true, listeners: ['com.foo.Report', 'com.foo.Metrics'] }),
+    ['-usedefaultlisteners true', '-listener com.foo.Report;com.foo.Metrics'])
+  // 三条一起：顺序与上游加参数的顺序一致（-d → -usedefaultlisteners → -listener）。
+  const command = testngCommand('mvn test', 'com.foo.Bar#adds', { mainClass: true, classpath: 'out',
+    parameters: { outputDirectory: 'out/tng', useDefaultListeners: true, listeners: ['com.foo.L'] } })
+  assert.equal(command, 'java -cp "out" org.testng.TestNG -testclass com.foo.Bar -methods com.foo.Bar.adds'
+    + ' -d out/tng -usedefaultlisteners true -listener com.foo.L')
+  // Maven 那支由 surefire 管这三条，传了参数也不拼（上游它们是主类那支的程序参数）。
+  assert.equal(testngCommand('mvn test', 'com.foo.Bar', { parameters: { outputDirectory: 'out/tng' } }),
+    'mvn test -Dtest=com.foo.Bar')
 })
 
 test('接线：testRunner.discover 与面板都按 TestNG 分派', () => {

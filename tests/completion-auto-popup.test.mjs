@@ -181,3 +181,26 @@ test('端到端：空结果之后继续打字不再重查；动过光标立刻�
 })
 
 test('端到端：`.` 触发成员补全（含服务端条目照常返回）', async () => {
+  const item = { label: 'println', kind: 'method', raw: { label: 'println', data: { id: 1 } } }
+  const h = completionSource('System.', async () => ({ available: true, items: [item] }))
+  const result = await h.source(new CompletionContext(h.view.state, 7, false))
+  assert.ok(result, '`.` 是触发字符（TypedAutoPopupImpl.java:31）')
+  assert.deepEqual(result.options.map(option => option.label), ['println'])
+})
+
+test('端到端：显式档的空结果**不**进 EmptyAutoPopup —— 随后自动档的第一下敲键照常重查', async () => {
+  // 上游这一格由 `CompletionProgressIndicator.isAutopopupCompletion()` 分开：显式档的空表走
+  // `:961-977` 的 `handleEmptyLookup`（弹「无建议」），**不进** `EmptyAutoPopup` 这条 phase；
+  // 只有自动档的 `count == 0`（`:762-776`）才建这条 phase。记错了会让一次 Ctrl+Space 的空结果
+  // 把后面自动档的第一下敲键吞掉（`EmptyAutoPopup` 只看文档/光标，分不出来源）。
+  const h = completionSource('foo.b', async () => ({ available: true, items: [] }), 5)
+  const explicitResult = await h.source(new CompletionContext(h.view.state, 5, true))
+  assert.ok(explicitResult, '显式档照常给占位行（`:961-977` 那一档，不是 EmptyAutoPopup）')
+  const afterExplicit = h.calls.length
+  assert.equal(afterExplicit, 1, '显式调用真发了补全请求')
+  // 继续敲一个字母（自动档）：因为上一拍是**显式**档，这一下必须重新问源。
+  h.view.dispatch({ changes: { from: 5, insert: 'a' } })
+  const auto = await h.source(new CompletionContext(h.view.state, 6, false))
+  assert.equal(h.calls.length, afterExplicit + 1, '显式档的空结果不该把自动档的第一下敲键吞掉（上游此时要重弹）')
+  assert.ok(auto, '自动档照常查（哪怕这一拍也查到空）')
+})

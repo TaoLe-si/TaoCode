@@ -17,8 +17,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { INLAY_HINT_SETTING_KEYS, inlayHintToggles, inlayHintTogglesKey, shouldShowInlayHint } from '../src/inlayHints.ts'
+import { INLAY_HINT_EXCLUDE_LIST_SETTING_KEY, INLAY_HINT_SETTING_KEYS, inlayHintToggles, inlayHintTogglesKey, shouldShowInlayHint } from '../src/inlayHints.ts'
 import { defaultEditorSettings } from '../src/settingsModel.ts'
+import { previewSettingsError } from '../src/previewSettings.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -325,7 +326,7 @@ test('消费链路：编辑器把三档交给提示控制器，按开关过滤�
   assert.match(editor, /watch\(\(\) => inlayHintTogglesKey\(inlayHintToggles\(props\.settings\)\), \(\) => inlayHints\.schedule\(\)\)/)
 })
 
-test('页面：三个复选框挂在编辑器下，且不渲染上游那些本仓没有对应物的入口', () => {
+test('页面：三个复选框挂在编辑器下，排除清单那一格本批是真控件，其余上游入口不渲染', () => {
   const page = read('src/components/InlayHintsSettingsPage.vue')
   assert.match(page, /:checked="settings\[INLAY_HINT_SETTING_KEYS\[group\.id\]\]"/, '复选框要绑到 INLAY_HINT_SETTING_KEYS 的那一格')
   // T-1（threecells 实测出的盲区）：删掉这一行 ⇒ 全门族 0 新增红，三格点了不记账。
@@ -333,9 +334,19 @@ test('页面：三个复选框挂在编辑器下，且不渲染上游那些本�
     '复选框的 change 必须把这一格写回同名设置键（键名取自 INLAY_HINT_SETTING_KEYS，不许在页面里现抄字符串）')
   assert.match(page, /function toggle\(key: InlayHintSettingKey, checked: boolean\)/)
   assert.match(page, /v-for="group in GROUPS"/)
-  // 上游有、本仓没有：不渲染（按语言分组的清单节点 / 逐 case 明细 / 排除清单入口）。
-  for (const label of ['排除', 'Exclude', '排除清单'])
-    assert.ok(!new RegExp(`<span>\\s*${label}`).test(page), `${label} 不该被渲染成控件`)
+  // 排除清单那一格（2026-10-08 lane lp-editor 从"刻意不渲染"改成真控件 —— 键在五处登记齐了，
+  // 见下面那两条：写回的是同名设置键，不是假格子）：
+  assert.match(page, /v-model="excludeText"/, '清单编辑框要绑本地文本')
+  assert.match(page, /invalidExcludePatternLines\(excludeText\.value\)/, '坏行要给反馈（上游 HintUtils.kt:44-53）')
+  assert.match(page, /:disabled="busy \|\| invalidLines\.length > 0 \|\| !excludeDirty"/, '坏行未改好不许应用（上游用它禁「确定」）')
+  assert.match(page, /props\.settings\[INLAY_HINT_EXCLUDE_LIST_SETTING_KEY\] = parseExcludeListText\(excludeText\.value\)/,
+    '「应用清单」必须把文本写回那一把真键（键名取自 inlayHints.ts，页面不现抄字符串）')
+  assert.match(page, /INLAY_HINT_EXCLUDE_LIST_SETTING_KEY\] = \[\]/, '「清空」也要写回同名键（出厂档）')
+  assert.match(page, /watch\(\(\) => props\.settings\[INLAY_HINT_EXCLUDE_LIST_SETTING_KEY\]/, '盘上那份变了编辑框要跟着走')
+  // 上游有、本仓**仍然没有对应物**的那两层：按 provider/语言的清单树、逐 `cases` 明细。
+  // （不是"还没做"—— 本仓只有一个 LSP provider，这一层不存在，所以不渲染任何控件。）
+  assert.ok(!/v-for="(provider|case)\b/.test(page), '按 provider / 逐 case 的清单节点不该被渲染')
+  assert.ok(!/cases\s*:/.test(page), '逐 case 明细不该被渲染')
   const tree = read('src/settingsTreeMeta.ts')
   assert.match(tree, /\{ key: 'inlay\.hints', label: '内联提示'[^}]*parent: 'editor'/, '上游是 parentId="editor"，要挂在编辑器下')
   const dialog = read('src/components/SettingsDialog.vue')
@@ -345,4 +356,88 @@ test('页面：三个复选框挂在编辑器下，且不渲染上游那些本�
   // 于是"三格写了但对话框根本没把编辑器档发给宿主"这件事以前无人报警。
   assert.match(dialog, /function applyEditor\(close = false\) \{[^\n]*\n\s*if \(!props\.busy && validEditor\.value && editorForm\.value\?\.reportValidity\(\)\) emit\('save', \{ \.\.\.editor\.value \}, close\)/,
     '「应用」必须把整份编辑器档（含内联提示那三格）发给宿主 settings.update；载荷是整本账，不是挑三把键发')
+})
+
+// ---------------------------------------------------------------- 排除清单那一格（2026-10-08 lane lp-editor）
+// 为什么这五处必须一起在：`ParameterHintsSettingsPanel.kt:18-22` 那个入口此前只活在读侧
+// （`src/inlayHints.ts` 的键常量 + `src/inlayHintExcludeList.ts` 的规则），页面刻意不放控件 ——
+// 键没登记，放上的输入框写进草稿后会被 `known_keys` 拒或 `prune_unknown` 剪掉（假控件）。
+test('parameterHintExcludeList 是真设置：模型 + native 键表/默认值 + 预览白名单都登记（五处）', () => {
+  const model = read('src/settingsModel.ts')
+  const fields = modelFieldDecls(model)
+  const frontDefaults = modelDefaultEntries(model)
+  const keyTables = nativeKeyTables(read('native/settings_schema.hpp'))
+  const nativeDefaults = nativeDefaultEntries(read('native/settings_schema.cpp'))
+  const preview = previewAcceptedKeys(read('src/previewSettings.ts'))
+  const KEY = 'parameterHintExcludeList'
+  assert.equal(INLAY_HINT_EXCLUDE_LIST_SETTING_KEY, KEY, '键名的唯一定义处（src/inlayHints.ts）漂了')
+
+  // ① 模型声明：`EditorSettings` 里恰好一次，类型 string[]（清单是数组，不是勾选框）。
+  const decls = fields.filter(f => f.name === KEY)
+  assert.equal(decls.length, 1, `${KEY} 在模型里该恰好一次，实得 ${decls.length}`)
+  assert.equal(decls[0].group, 'EditorSettings')
+  assert.equal(decls[0].type, 'string[]')
+  // ② 前端默认：[] —— 上游那份默认清单是方法 FQN 形态，本仓的匹配主题是提示 label（口径差 3）。
+  const fronts = frontDefaults.filter(f => f.name === KEY)
+  assert.equal(fronts.length, 1, `${KEY} 在默认值表里该恰好一次，实得 ${fronts.length}`)
+  assert.equal(fronts[0].group, 'defaultEditorSettings')
+  assert.equal(fronts[0].value, '[]')
+  assert.deepEqual(defaultEditorSettings[KEY], [])
+  // ③ native 键表白名单（漏了 ⇒ known_keys 拒掉整次 settings.update）。
+  const listed = keyTables.filter(k => k.name === KEY)
+  assert.equal(listed.length, 1, `${KEY} 在 native 键表里该恰好一次，实得 ${listed.length}`)
+  assert.equal(listed[0].group, 'EDITOR_SETTING_KEYS')
+  // ④ native 默认值（老 state 缺键只按这张表补洞）。
+  const native = nativeDefaults.filter(k => k.name === KEY)
+  assert.equal(native.length, 1, `${KEY} 在 native 默认值表里该恰好一次，实得 ${native.length}`)
+  assert.equal(native[0].group, 'editor_defaults_impl')
+  assert.equal(native[0].type, 'array')
+  assert.equal(native[0].value, 'Json::array()')
+  // ⑤ 预览态白名单 + 专属分支（挂到布尔兜底上会被整条拒掉）。
+  const pv = preview.filter(k => k.name === KEY)
+  assert.equal(pv.length, 1, `${KEY} 在预览白名单里该恰好一次，实得 ${pv.length}`)
+  assert.equal(pv[0].type, 'dedicated-branch', '预览态该有专属校验分支')
+})
+
+test('native 校验分支在布尔兜底之前：形状坏拒收，坏 glob 放行（上游对坏模式是静默作废）', () => {
+  const validator = read('native/settings_editor_keys.hpp')
+  assert.match(validator, /if \(key == "parameterHintExcludeList"\)/, 'settings_editor_keys.hpp 没有这一键的校验分支')
+  const cpp = read('native/settings_schema.cpp')
+  const call = cpp.indexOf('validate_editor_added_key(it.key(), value)')
+  const fallback = cpp.indexOf('Editor flags must be JSON booleans')
+  assert.ok(call >= 0 && fallback >= 0 && call < fallback, '新键校验必须在布尔兜底之前调用（写在后面是死代码）')
+  // 形状口径与前端 `previewSettings.ts` 那一支同形：32 条 / 200 字节。
+  const branch = validator.slice(validator.indexOf('if (key == "parameterHintExcludeList")'))
+  assert.match(branch, /value\.size\(\) > 32/, '条数上限与前端不一处')
+  assert.match(branch, /pattern\.size\(\) > 200/, '单条上限与前端不一处')
+  const preview = read('src/previewSettings.ts')
+  const slice = preview.slice(preview.indexOf(": key === 'parameterHintExcludeList' ?"))
+  assert.match(slice, /value\.length > 32/, '预览态条数上限漂了')
+  assert.match(slice, /pattern\.length > 200/, '预览态单条上限漂了')
+  // 原生那侧自己的判据（ctest，`native/settings_editor_keys_test.cpp`）真有用例。
+  assert.match(read('native/settings_editor_keys_test.cpp'), /one\("parameterHintExcludeList"/, '原生判据里没有这一键的用例')
+})
+
+test('预览态取值校验真的在管排除清单（不是只登记了名字）', () => {
+  const languages = ['java', 'cpp', 'typescript', 'other']
+  const KEY = 'parameterHintExcludeList'
+  for (const value of [[], ['println'], ['key', 'log*', '*Args*'], ['a*b*c']])
+    assert.equal(previewSettingsError(KEY, value, languages), null, `${JSON.stringify(value)} 该放行`)
+  // 形状坏的四档：不是数组 / 非字符串条目 / 空条目 / 单条超 200 / 超 32 条。
+  assert.equal(previewSettingsError(KEY, 'println', languages), `无效设置：${KEY}`)
+  assert.equal(previewSettingsError(KEY, [1], languages), `无效设置：${KEY}`)
+  assert.equal(previewSettingsError(KEY, [''], languages), `无效设置：${KEY}`)
+  assert.equal(previewSettingsError(KEY, ['x'.repeat(201)], languages), `无效设置：${KEY}`)
+  assert.equal(previewSettingsError(KEY, Array.from({ length: 33 }, (_, i) => `p${i}`), languages), `无效设置：${KEY}`)
+  // 编译不了的 glob（三个星号）**不是**形状坏 —— 上游静默作废，不该让整份设置存不下去。
+  assert.equal(previewSettingsError(KEY, ['a*b*c'], languages), null)
+})
+
+test('旧存档缺这一键：前端不许凭空造值，toggles 按出厂空清单走', async () => {
+  const { normalizeEditorSettings } = await import('../src/bridge.ts')
+  const legacy = structuredClone(defaultEditorSettings)
+  delete legacy[INLAY_HINT_EXCLUDE_LIST_SETTING_KEY]
+  const migrated = normalizeEditorSettings(legacy)
+  assert.equal(migrated[INLAY_HINT_EXCLUDE_LIST_SETTING_KEY], undefined, '补默认发生在原生 editor_defaults_impl 那一层')
+  assert.deepEqual(inlayHintToggles(migrated).parameterHintExcludeList, [], '缺键 ⇒ 不排除任何东西')
 })

@@ -3,9 +3,9 @@
 | 档 | 类数 |
 |---|---:|
 | [x] | 74 |
-| [~] | 917 |
+| [~] | 901 |
 | [ ] | 0 |
-| [-] | 617 |
+| [-] | 633 |
 | 合计 | 1608 |
 
 | 类 | 族 | 档 | 行数 | Swing | 平台 | 测试 | TaoCode |
@@ -1511,9 +1511,9 @@
 | `KotlinJUnitAssertEqualsOnArrayInspectionTest` | exec/junit-inspection | `[-]` | 53 |  |  | Y | 从未出现 |
 | `KotlinJUnitIgnoredTestInspectionTest` | exec/junit-inspection | `[-]` | 52 |  |  | Y | 从未出现 |
 | `KotlinJUnitMalformedDeclarationInspectionTest` | exec/junit-inspection | `[-]` | 2678 |  |  | Y | 从未出现 |
-| `KotlinJUnitMalformedDeclarationInspectionTestBase` | exec/junit-inspection | `[~]` | 15 |  |  |  | 从未出现 |
-| `KotlinJUnitMalformedDeclarationInspectionTestV57` | exec/junit-inspection | `[~]` | 25 |  |  |  | 从未出现 |
-| `KotlinJUnitMalformedDeclarationInspectionTestV6` | exec/junit-inspection | `[~]` | 73 |  |  |  | 从未出现 |
+| `KotlinJUnitMalformedDeclarationInspectionTestBase` | exec/junit-inspection | `[-]` | 15 |  |  |  | 从未出现 |
+| `KotlinJUnitMalformedDeclarationInspectionTestV57` | exec/junit-inspection | `[-]` | 25 |  |  |  | 从未出现 |
+| `KotlinJUnitMalformedDeclarationInspectionTestV6` | exec/junit-inspection | `[-]` | 73 |  |  |  | 从未出现 |
 | `KotlinJUnitMixedFrameworkInspectionTest` | exec/junit-inspection | `[-]` | 208 |  |  | Y | 从未出现 |
 | `KotlinJUnitParameterizedSourceGoToRelatedTest` | exec/junit-inspection | `[-]` | 114 |  |  | Y | 从未出现 |
 | `KotlinTestCaseWithMultipleRunnersInspectionTest` | exec/junit-inspection | `[-]` | 107 |  |  | Y | 从未出现 |
@@ -1566,33 +1566,33 @@
 | `JUnit6ExternalLibraryResolver` | exec/junit | `[~]` | 13 |  |  |  | 从未出现 |
 | `JUnitExternalLibraryResolver` | exec/junit | `[~]` | 40 |  |  |  | 从未出现 |
 | `JupiterExternalLibraryResolver` | exec/junit | `[~]` | 34 |  |  |  | 从未出现 |
-| `ExpectedExceptionNeverThrownInspection` | exec/junit-inspection | `[~]` | 83 |  |  |  | 从未出现 |
-| `HamcrestAssertionsConverterInspection` | exec/junit-inspection | `[~]` | 238 |  |  |  | 从未出现 |
-| `HamcrestCommonClassNames` | exec/junit-inspection | `[~]` | 10 |  |  |  | 从未出现 |
+| `ExpectedExceptionNeverThrownInspection` | exec/junit-inspection | `[-]` | 83 |  |  |  | 从未出现 |
+| `HamcrestAssertionsConverterInspection` | exec/junit-inspection | `[-]` | 238 |  |  |  | 从未出现 |
+| `HamcrestCommonClassNames` | exec/junit-inspection | `[-]` | 10 |  |  |  | 从未出现 |
 | `JUnit3StyleTestMethodInJUnit4ClassInspection` | exec/junit-inspection | `[~]` | 98 |  |  |  | 从未出现 |
 | `JUnit3SuperTearDownInspection` | exec/junit-inspection | `[~]` | 72 |  |  |  | 从未出现 |
 | `JUnit4ConverterInspection` | exec/junit-inspection | `[~]` | 45 |  |  |  | 从未出现 |
-| `JUnit4ConverterQuickfix` | exec/junit-inspection | `[~]` | 397 |  |  |  | 从未出现 |
-| `JUnit5AssertionsConverterInspection` | exec/junit-inspection | `[~]` | 167 |  |  |  | 从未出现 |
-| `JUnit5ConverterInspection` | exec/junit-inspection | `[~]` | 61 |  |  |  | 从未出现 |
-| `JUnit5ConverterQuickFix` | exec/junit-inspection | `[~]` | 155 |  |  |  | 从未出现 |
-| `JUnitAssertEqualsMayBeAssertSameInspection` | exec/junit-inspection | `[~]` | 63 |  |  |  | 从未出现 |
-| `JUnitAssertEqualsOnArrayInspection` | exec/junit-inspection | `[~]` | 50 |  |  |  | 从未出现 |
+| `JUnit4ConverterQuickfix` | exec/junit-inspection | `[-]` | 397 |  |  |  | 从未出现 |
+| `JUnit5AssertionsConverterInspection` | exec/junit-inspection | `[-]` | 167 |  |  |  | 从未出现 |
+| `JUnit5ConverterInspection` | exec/junit-inspection | `[-]` | 61 |  |  |  | 从未出现 |
+| `JUnit5ConverterQuickFix` | exec/junit-inspection | `[-]` | 155 |  |  |  | 从未出现 |
+| `JUnitAssertEqualsMayBeAssertSameInspection` | exec/junit-inspection | `[-]` | 63 |  |  |  | 从未出现 |
+| `JUnitAssertEqualsOnArrayInspection` | exec/junit-inspection | `[-]` | 50 |  |  |  | 从未出现 |
 | `JUnitIgnoredTestInspection` | exec/junit-inspection | `[~]` | 68 |  |  |  | 从未出现 |
 | `JUnitMalformedDeclarationInspection` | exec/junit-inspection | `[~]` | 1779 |  |  |  | 从未出现 |
-| `JUnitMalformedDeclarationInspectionMerger` | exec/junit-inspection | `[~]` | 40 |  |  |  | 从未出现 |
+| `JUnitMalformedDeclarationInspectionMerger` | exec/junit-inspection | `[-]` | 40 |  |  |  | 从未出现 |
 | `JUnitMixedFrameworkInspection` | exec/junit-inspection | `[~]` | 227 |  |  |  | 从未出现 |
-| `JUnitMixedFrameworkInspectionMerger` | exec/junit-inspection | `[~]` | 16 |  |  |  | 从未出现 |
+| `JUnitMixedFrameworkInspectionMerger` | exec/junit-inspection | `[-]` | 16 |  |  |  | 从未出现 |
 | `MultipleExceptionsDeclaredOnTestMethodInspection` | exec/junit-inspection | `[~]` | 98 |  |  |  | 从未出现 |
 | `ParameterizedParametersStaticCollectionInspection` | exec/junit-inspection | `[~]` | 163 |  |  |  | 从未出现 |
 | `TestCaseWithMultipleRunnersInspection` | exec/junit-inspection | `[-]` | 48 |  |  | Y | 从未出现 |
 | `UseOfObsoleteAssertInspection` | exec/junit-inspection | `[~]` | 255 |  |  |  | 从未出现 |
 | `JUnit5ImplicitUsageProvider` | exec/junit-inspection | `[~]` | 166 |  |  |  | 从未出现 |
-| `AbstractTestClassNamingConvention` | exec/junit-inspection | `[~]` | 56 |  |  |  | 从未出现 |
+| `AbstractTestClassNamingConvention` | exec/junit-inspection | `[-]` | 56 |  |  |  | 从未出现 |
 | `JUnit3MethodNamingConvention` | exec/junit-inspection | `[~]` | 35 |  |  |  | 从未出现 |
 | `JUnit4MethodNamingConvention` | exec/junit-inspection | `[~]` | 36 |  |  |  | 从未出现 |
 | `TestClassNamingConvention` | exec/junit-inspection | `[~]` | 66 |  |  |  | 从未出现 |
-| `TestSuiteNamingConvention` | exec/junit-inspection | `[~]` | 55 |  |  |  | 从未出现 |
+| `TestSuiteNamingConvention` | exec/junit-inspection | `[-]` | 55 |  |  |  | 从未出现 |
 | `junitLibrarySetup` | exec/junit | `[~]` | 93 |  |  |  | 从未出现 |
 | `BaseJunitAnnotationReference` | exec/junit | `[~]` | 238 |  |  |  | 从未出现 |
 | `DisabledIfEnabledIfReference` | exec/junit | `[~]` | 17 |  |  |  | 从未出现 |

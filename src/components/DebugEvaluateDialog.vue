@@ -6,16 +6,22 @@
 //   · 输入区（`mode`：单行表达式 / 多行代码片段，来自设置 `debuggerEvaluationMode`）；
 //   · 历史面板（上游 `XDebuggerTreeWithHistory` 的表达式历史）——最近求值过的表达式，
 //     点击回填、单条移除、清空。历史只由 DebugPanel 传入/回写，本组件不碰存储。
+//   · 历史面板下面挂**历史树**（`./debug/DebugHistoryTree.vue`，上游 `DebuggerTreeWithHistoryPanel`
+//     的等价物）：把历史条目变成可展开的树；取数它自己做（DAP 会话是全局的），
+//     这里只传历史表达式与求值所在帧（`frameId`，应当由 DebugPanel 的选中帧给）。
 import { ref, watch } from 'vue'
 import { X, History, Trash2 } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
 import { planMultilineEvaluate, type MultilineResultLine } from '../debugMultilineEvaluate'
+import DebugHistoryTree from './debug/DebugHistoryTree.vue'
 
 const props = defineProps<{
   mode: 'expression' | 'codeFragment'
   busy?: boolean
   results: MultilineResultLine[]
   history: string[]
+  /** 求值所在帧（DAP `evaluate` 的 frameId；不给走 0，与面板里 `?? 0` 的兜底同口径）。 */
+  frameId?: number
 }>()
 const emit = defineEmits<{
   (event: 'close'): void
@@ -82,6 +88,11 @@ function pick(expression: string) { text.value = expression; notice.value = '' }
             <button class="debug-evaluate-history-text" :title="entry" @click="pick(entry)">{{ entry }}</button>
             <button class="chip-x" :title="`移除 ${entry}`" :aria-label="`移除历史 ${entry}`" @click="emit('remove-history', entry)"><X :size="iconSize.chip" /></button>
           </div>
+          <DebugHistoryTree
+            v-if="history.length"
+            :expressions="history"
+            :frame-id="frameId ?? 0"
+          />
         </aside>
       </div>
     </section>

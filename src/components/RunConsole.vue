@@ -77,6 +77,11 @@ import { consoleLinkAction, consoleLinkMenuItems, consoleSegments, type ConsoleL
 import { consoleAnsiCss, consoleAnsiStyleAt, type ConsoleAnsiChunk } from '../consoleAnsi.ts'
 import { resolveTerminalThemeName, terminalPalette, type TerminalColorPalette } from '../terminalColors.ts'
 import { CONSOLE_ENCODINGS } from '../consoleEncoding.ts'
+import {
+  changeConsoleFontSize, CONSOLE_FONT_SIZE_STEP_DOWN, CONSOLE_FONT_SIZE_STEP_UP, consoleFontCss, consoleFontLabel,
+  consoleFontSizeForWheel, consoleFontSizeStep, consoleFontZoomApplies, readConsoleFontSettings,
+  resetConsoleFontSettings, saveConsoleFontSettings, type ConsoleFontSettings,
+} from '../consoleFont.ts'
 import { consoleScrollToEndPosition, consoleViewAtBottom } from '../consoleScroll.ts'
 import { copyToClipboard } from '../clipboard.ts'
 import { postProcessConsoleActions, type ConsoleActionLike } from '../executionExtensionPoints.ts'
@@ -119,6 +124,12 @@ const props = defineProps<{
    * `src/terminalColors.ts:70-72` 的 `pickColor` 丢弃 ⇒ 缺这一格就是不覆盖，行为与改造前一致。
    */
   ansiOverrides?: Record<string, string> | null
+  /**
+   * 「按 Ctrl+鼠标滚轮改变字号」总闸（上游 `EditorSettingsExternalizable.IS_WHEEL_FONTCHANGE_ENABLED`，
+   * `EditorSettingsExternalizable.java:124` **默认 false**）。与 `TerminalPanel.vue:124` 同一个设置项；
+   * 宿主不传时按上游缺省 false（不是本仓另造的门）。接线请求见报告 T1。
+   */
+  wheelFontChangeEnabled?: boolean
 }>()
 const emit = defineEmits<{
   select: [instance: number]
@@ -328,6 +339,55 @@ function copyLine(line: DisplayLine) {
 function onEncodingChange(event: Event) {
   const id = (event.target as HTMLSelectElement).value
   setRunConsoleEncoding(id)
+}
+
+// ── 控制台字体（上游配色方案里的 Console Font ⇄ ConsoleViewUtil） ────────────────────
+// 上游控制台正文就是编辑器，字号/行距取配色方案的 Console Font 那一档
+// （`ConsoleViewUtil.java:128-161` 把方案整片换成控制台档；页面 `ConsoleFontOptions.java:27-124`）。
+// 本仓落成 `src/consoleFont.ts` 的两档：
+//   ·「A−/A+」写**设置**（localStorage，等价于那个页面的 setConsoleFontSize/setCurrentLineSpacing）；
+//   · Ctrl+滚轮是**临时缩放**（会话内，点「复位」或改设置即回设置值）—— 上游编辑器那条滚轮分支持的就是
+//     「临时改当前编辑器的字号，不动设置」。判定全在 `src/consoleFont.ts`，这里只接线。
+const consoleFontSettings = ref<ConsoleFontSettings>(readConsoleFontSettings(
+  typeof localStorage !== 'undefined' ? localStorage : undefined))
+/** 临时缩放（Ctrl+滚轮）：只覆盖字号，不动设置、不写盘；null = 用设置里的字号。 */
+const consoleFontZoom = ref<number | null>(null)
+const consoleFontEffective = computed<ConsoleFontSettings>(() => consoleFontZoom.value === null
+  ? consoleFontSettings.value
+  : { ...consoleFontSettings.value, size: consoleFontZoom.value })
+/** 输出节点的内联样式：默认档是空对象 ⇒ `.run-log` 的 `font: 12px/1.6 var(--font-mono)` 照旧生效。 */
+const consoleFontStyle = computed<Record<string, string>>(() => consoleFontCss(consoleFontEffective.value))
+const consoleFontText = computed(() => consoleFontLabel(consoleFontEffective.value))
+/** 工具条两枚字号按钮能不能点（到界那一档点不动，理由写在 title 里）。 */
+const consoleFontBounds = computed(() => consoleFontSizeStep(consoleFontSettings.value.size))
+/** 改设置：写盘 + 清掉临时缩放（上游改 Console Font 页后，临时档自然回到设置值）。 */
+function consoleFontStore() {
+  return typeof localStorage !== 'undefined' ? localStorage : undefined
+}
+function stepConsoleFont(step: number) {
+  consoleFontZoom.value = null
+  consoleFontSettings.value = { ...consoleFontSettings.value, size: changeConsoleFontSize(consoleFontSettings.value.size, step) }
+  saveConsoleFontSettings(consoleFontStore(), consoleFontSettings.value)
+}
+function resetConsoleFont() {
+  consoleFontZoom.value = null
+  consoleFontSettings.value = resetConsoleFontSettings()
+  saveConsoleFontSettings(consoleFontStore(), consoleFontSettings.value)
+}
+/**
+ * 输出区的 Ctrl+滚轮缩放（编辑器语义：门=「Ctrl+滚轮改字号」设置 **且** Ctrl 按下）。
+ * 缩放时**不再滚缓冲区**（上游 `JBTerminalPanel.java:381-390` 那条分支同样 return 掉）；
+ * 门没开或没按 Ctrl ⇒ 什么都不做，照常滚。
+ * 门那一格的缺省是 **false** —— 上游 `EditorSettingsExternalizable.java:124`
+ * 的 `IS_WHEEL_FONTCHANGE_ENABLED` 默认就是 false（与 `TerminalPanel.vue:124` 同一个默认）；
+ * 宿主没把设置传下来时与上游缺省一致，**不假装门是开的**。接线见报告 T1。
+ */
+function onLogWheel(event: WheelEvent) {
+  if (!consoleFontZoomApplies(event, props.wheelFontChangeEnabled ?? false)) return
+  const next = consoleFontSizeForWheel(consoleFontEffective.value.size, event.deltaY)
+  if (next === consoleFontEffective.value.size) return
+  event.preventDefault()
+  consoleFontZoom.value = next
 }
 
 // ── 解释器那一档（上游 `ConsoleExecuteActionHandler.myUseProcessStdIn == false`） ──────────
@@ -566,6 +626,14 @@ watch([() => props.active, () => displayLines.value.length], async ([active, cou
           <option v-for="encoding in CONSOLE_ENCODINGS" :key="encoding.id" :value="encoding.id">{{ encoding.label }}</option>
         </select>
       </label>
+      <!-- 控制台字体（上游配色方案里的 Console Font 那一档，页面 ConsoleFontOptions.java:27-124）：
+           A−/A+ 写设置（localStorage），到界那一边点不动；「复位」回缺省 12px/1.6。
+           行距没有单独控件：它与字号同属那一页，本仓先只把字号做成按钮（见报告「仍缺」）。 -->
+      <span class="run-font" role="group" aria-label="控制台字体">
+        <button type="button" class="run-action" :disabled="!consoleFontBounds.canDecrease" :title="consoleFontText" aria-label="减小控制台字号" @click="stepConsoleFont(CONSOLE_FONT_SIZE_STEP_DOWN)">A−</button>
+        <button type="button" class="run-action" :disabled="!consoleFontBounds.canIncrease" :title="consoleFontText" aria-label="增大控制台字号" @click="stepConsoleFont(CONSOLE_FONT_SIZE_STEP_UP)">A+</button>
+        <button type="button" class="run-action" :title="consoleFontText" aria-label="复位控制台字体" @click="resetConsoleFont">复位</button>
+      </span>
       <!-- 控制台自己的工具条动作：Clear All（上游 `ClearConsoleAction`）。只清当前实例。 -->
       <button type="button" class="run-clear" title="清空控制台输出（当前实例）" aria-label="清空控制台输出" @click="clearRunOutput()">清空</button>
       <!-- 插件贡献的控制台动作（上游 `ConsoleActionsPostProcessor.postProcess` 加到
@@ -651,7 +719,7 @@ watch([() => props.active, () => displayLines.value.length], async ([active, cou
     <p v-if="consoleNote" class="run-console-note" role="status">{{ consoleNote }}</p>
     <!-- IDEA's build console: recognised compiler diagnostics are clickable and
          jump to the offending line instead of being read as plain text. -->
-    <div class="run-log" ref="logEl" aria-label="运行输出" @scroll.passive="onLogScroll">
+    <div class="run-log" ref="logEl" aria-label="运行输出" :style="consoleFontStyle" @scroll.passive="onLogScroll" @wheel="onLogWheel">
       <template v-if="displayLines.length">
         <div v-for="(line, index) in displayLines" :key="index" class="run-line" :class="{ 'run-issue': line.issue, 'run-fold-frames': line.foldedFrames !== undefined }" :title="line.links.length > 1 ? line.links.map(link => `${link.path}:${link.line}`).join('\n') : undefined" @contextmenu="openFoldMenu(line, $event)">
           <template v-if="line.hyperlinked">
@@ -743,6 +811,8 @@ watch([() => props.active, () => displayLines.value.length], async ([active, cou
 .run-action:hover:not(:disabled), .run-clear:hover { background: var(--hover); color: var(--bright); }
 .run-action:disabled { opacity: .5; cursor: default; }
 .run-encoding { display: inline-flex; align-items: center; gap: 2px; }
+/* 控制台字号三枚按钮（A−/A+/复位）同一条工具条，紧挨编码选择器。 */
+.run-font { display: inline-flex; align-items: center; gap: 2px; }
 .run-encoding select { height: var(--ctrl-height-sm); border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--editor); color: var(--text); font-size: 11px; padding: 0 var(--space-1); }
 .run-clear { margin-left: auto; }
 /* 视图动作弹层：hover / focus-within 展开（同 src/components/RunConfigurationsDialog.vue 的 .rc-add）。 */

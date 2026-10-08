@@ -336,6 +336,10 @@ Json editor_defaults_impl() {
             // 上游 `InlayProviderSettingsModel.isEnabled` 出厂为真（platform/lang-api/.../InlayProviderSettingsModel.kt:26），
             // 本仓按 LSP `kind` 分的三档默认也全开（键名见 src/inlayHints.ts 的 INLAY_HINT_SETTING_KEYS）。
             {"showTypeInlayHints", true}, {"showParameterInlayHints", true}, {"showOtherInlayHints", true},
+            // 参数提示的排除清单：出厂为空数组。上游那份默认清单全是方法 FQN 形态
+            // （JavaInlayParameterHintsProvider.kt:67-…），而本仓的匹配主题是提示 label，搬过来
+            // 只会变成"看着有默认值、实际恒不匹配"的假数据（src/inlayHintExcludeList.ts 口径差 3）。
+            {"parameterHintExcludeList", Json::array()},
             // UISettingsState.editorTabLimit defaults to 30 open tabs per group.
             {"tabLimit", 30},
             // UISettingsState.kt:123 `scrollTabLayoutInEditor` 默认 **true** ⇒ 标签排成一行；

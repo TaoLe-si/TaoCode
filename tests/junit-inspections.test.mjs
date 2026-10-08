@@ -145,3 +145,88 @@ test('本地检查通道：写进按文件存的诊断表，修好即删（问�
   assert.match(navigation, /refreshLocalInspections/)
   assert.match(navigation, /clearLocalInspections/)
 })
+
+// `JUnit3SuperTearDownInspection.kt:34-56`（`isJUnit3InScope` / 接收者 super / 方法名 tearDown /
+// 不在 finally / hasNonTrivialActivity）与文案 `JUnitBundle.properties:107-108`。
+test("JUnit3 的 super.tearDown()：不在 finally 且方法里还有别的调用才报", () => {
+  const reported = junitInspectionProblems('ATest.java', [
+    'import junit.framework.TestCase;',
+    'class ATest extends TestCase {',
+    '  protected void tearDown() {',
+    '    cleanup();',
+    '    super.tearDown();',
+    '  }',
+    '}',
+  ].join('\n')).filter(problem => problem.source === 'JUnit3SuperTearDownInspection')
+  assert.equal(reported.length, 1)
+  assert.equal(reported[0].line, 4, '报在 super.tearDown() 那一行')
+  assert.equal(reported[0].character, '    super.tearDown();'.indexOf('super'))
+  // 上游 `JUnitBundle.properties:108` 的描述：`<code>#ref()</code> is not called from 'finally' block`。
+  assert.match(reported[0].message, /^super\.tearDown\(\) is not called from 'finally' block/)
+})
+
+test('JUnit3 的 super.tearDown()：在 finally 里（含嵌套块）、无别的调用、非 TestCase 一律不报', () => {
+  const tail = '  }\n}'
+  const inFinally = [
+    'import junit.framework.TestCase;',
+    'class ATest extends TestCase {',
+    '  protected void tearDown() {',
+    '    cleanup();',
+    '    try { work(); } finally {',
+    '      if (ready) {',
+    '        super.tearDown();',
+    '      }',
+    '    }',
+    tail,
+  ].join('\n')
+  assert.equal(sources('A.java', inFinally).includes('JUnit3SuperTearDownInspection'), false,
+    'finally 的嵌套块里也算在 finally 里（上游沿父链找）')
+  // 除它之外没有别的调用（上游 hasNonTrivialActivity 为假）⇒ 不报。
+  const trivial = [
+    'import junit.framework.TestCase;',
+    'class ATest extends TestCase {',
+    '  protected void tearDown() {',
+    '    super.tearDown();',
+    tail,
+  ].join('\n')
+  assert.equal(sources('A.java', trivial).includes('JUnit3SuperTearDownInspection'), false)
+  // 不是 JUnit3 的类（上游 isJUnit3InScope 的降级点：按 extends TestCase 判）。
+  const plain = [
+    'class ATest {',
+    '  protected void tearDown() {',
+    '    cleanup();',
+    '    super.tearDown();',
+    tail,
+  ].join('\n')
+  assert.deepEqual(sources('A.java', plain), [])
+  // 方法名不是 tearDown（上游判「最近的 enclosing 方法是 tearDown」）。
+  const other = [
+    'import junit.framework.TestCase;',
+    'class ATest extends TestCase {',
+    '  protected void after() {',
+    '    cleanup();',
+    '    super.tearDown();',
+    tail,
+  ].join('\n')
+  assert.equal(sources('A.java', other).includes('JUnit3SuperTearDownInspection'), false)
+  // catch 里调用不算 finally ⇒ 报（列号指向那一行的 super）。
+  const inCatch = [
+    'import junit.framework.TestCase;',
+    'class ATest extends TestCase {',
+    '  protected void tearDown() {',
+    '    try { work(); } catch (Exception e) {',
+    '      super.tearDown();',
+    '    }',
+    tail,
+  ].join('\n')
+  assert.deepEqual(junitInspectionProblems('A.java', inCatch)
+    .filter(problem => problem.source === 'JUnit3SuperTearDownInspection').map(problem => [problem.line, problem.character]),
+    [[4, '      super.tearDown();'.indexOf('super')]])
+})
+
+test('检查器说明表里有 JUnit3SuperTearDownInspection 这条', async () => {
+  const { inspectionDescriptionFor } = await import('../src/inspectionDescription.ts')
+  const description = inspectionDescriptionFor('JUnit3SuperTearDownInspection')
+  assert.ok(description, '上游有那么一个 generateDoc 入口，本地说明表里不能缺这一条')
+  assert.match(description.content, /finally/)
+})

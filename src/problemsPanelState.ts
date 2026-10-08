@@ -17,6 +17,14 @@
 //   · `collapsedGroups`    → **本仓多出来的**：上游的展开态是 `JTree` 的运行时对象
 //     （`ProblemsViewPanel.java:212` `new Tree(new AsyncTreeModel(...))`）没有落进 `ProblemsViewState`，
 //     本仓的树要能跨会话记住谁折着，就得给它一个可序列化的家。
+// **每工程一份**（2026-10-08 lane daemon 补）：上游客是 `@Service(Service.Level.PROJECT)`
+// `ProblemsViewStateManager`、存档走 `Storage(StoragePathMacros.WORKSPACE_FILE)`
+// （`ProblemsViewState.kt:61-62`）⇒ 换工程看到的是**另一份**取向，不是把上一个工程的取向带过来。
+// 本仓的落点 = 存档键按工作区根分桶，复用 `src/agentSessions.ts:210` 的 `storageKeyForProject`
+// 归一化口径（与 `src/agentComposerDrafts.ts` 同一套键空间；没有工作区时退回裸键）。
+// 旧版只有一份全局存档：第一次按工程读时把它**过继**给当前工程（读走 + 删掉全局键），
+// 否则以后每开一个新工程都会继承上一个工程的取向（那正是上游没有的行为）。
+//
 // 没有承接的上游字段：`showPreview`（预览窗格在本仓没有消费面）、`proportion`（分隔比例归 App.vue
 // 的布局）、`selectedTabId`（只有一个面板），以及 **`autoscrollToSource`**（`:25` 默认 false；消息窗口
 // 同族的 `impl/ErrorTreeViewConfiguration.java:16,24,28` 是同一格的另一份）。这一条不是"做不到"而是
@@ -30,6 +38,9 @@
 // 非法/损坏的存档逐字段回默认，不让一个坏字符串把面板卡死；旧版存档里的单选 `severity`
 // 会在解析时迁移成隐藏集合（单选「只看警告」= 除警告外全藏）。
 import { PROBLEM_GROUPINGS, PROBLEM_SEVERITIES, type ProblemGrouping, hiddenSeveritiesFor } from './problemsView.ts'
+// 工作区存储键的归一化口径（`<base>.project.<encodeURIComponent(根路径)>`）：
+// 与 `src/agentComposerDrafts.ts` 共用同一份实现，不在本模块再写一遍编码规则。
+import { storageKeyForProject } from './agentSessions.ts'
 
 export interface ProblemsPanelState {
   /** 被隐藏的严重度（空 = 全显示）。上游 `hideBySeverity` 的形状。 */
@@ -53,6 +64,14 @@ const STORAGE_KEY = 'taocode.problemsPanel'
 // 分组档的白名单直接取 `src/problemsView.ts` 的 `PROBLEM_GROUPINGS`（面板下拉也只有这些值）。
 // 以前这里手写一份清单，漏一档就会让存档被 `includes` 判掉、静默退回 `none`（`code` 那档踩过）。
 const GROUPINGS: readonly ProblemGrouping[] = PROBLEM_GROUPINGS
+
+/**
+ * 这份状态在**哪个工程**下（上游是工程级服务实例，见文件头）：
+ * `projectRoot` 为空 = 没有打开工作区，退回裸键（旧行为逐字不变）。
+ */
+export function problemsPanelStorageKey(projectRoot?: string): string {
+  return storageKeyForProject(STORAGE_KEY, projectRoot)
+}
 
 /** 只收四档里的、去重排序后的严重度。 */
 function parseHiddenSeverities(raw: unknown): number[] {
@@ -87,18 +106,42 @@ export function parseProblemsPanelState(value: unknown): ProblemsPanelState {
   }
 }
 
-export function loadProblemsPanelState(): ProblemsPanelState {
+/** 读一个键：缺席与坏值都回 `null`（坏值不当成「有一份空的」）。 */
+function readStored(key: string): ProblemsPanelState | null {
   try {
-    const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(STORAGE_KEY)
-    return parseProblemsPanelState(raw ? JSON.parse(raw) : null)
+    const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(key)
+    return raw === null ? null : parseProblemsPanelState(JSON.parse(raw))
   } catch {
-    return { ...DEFAULT_PROBLEMS_PANEL_STATE }
+    return null
   }
 }
 
-export function saveProblemsPanelState(state: ProblemsPanelState): void {
+/**
+ * 读回**某个工程**的取向（上游 `ProblemsViewStateManager` 的工程级实例，见文件头）。
+ * 该工程还没有存档、而旧版那份**全局**存档还在时，把它过继给当前工程（一次性迁移）——
+ * 迁移只发生在真有工作区时，过继完就把全局键删掉，免得下一个工程再继承一次。
+ * 没有工作区（`projectRoot` 空）= 裸键，行为与本轮之前逐字一致。
+ */
+export function loadProblemsPanelState(projectRoot?: string): ProblemsPanelState {
+  const key = problemsPanelStorageKey(projectRoot)
+  const own = readStored(key)
+  if (own !== null) return own
+  if (key === STORAGE_KEY) return { ...DEFAULT_PROBLEMS_PANEL_STATE }
+  const legacy = readStored(STORAGE_KEY)
+  if (legacy === null) return { ...DEFAULT_PROBLEMS_PANEL_STATE }
+  saveProblemsPanelState(legacy, projectRoot)
   try {
-    if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEY, JSON.stringify(parseProblemsPanelState(state)))
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // 删不掉只影响"下一个工程不会再继承一次"这条，当前取向已经拿到，不因此报错。
+  }
+  return legacy
+}
+
+export function saveProblemsPanelState(state: ProblemsPanelState, projectRoot?: string): void {
+  try {
+    if (typeof localStorage !== 'undefined')
+      localStorage.setItem(problemsPanelStorageKey(projectRoot), JSON.stringify(parseProblemsPanelState(state)))
   } catch {
     // 存储不可用时只影响持久化，当前会话内的取向照常生效。
   }

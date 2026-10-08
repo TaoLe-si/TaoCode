@@ -80,7 +80,7 @@ import AnchoredMenu from './AnchoredMenu.vue'
 // 行菜单里那一份意图列表（修复 + 抑制两种行，档位顺序/分隔线/不可选三档都画在它里面）。
 import IntentionListMenu from './IntentionListMenu.vue'
 
-const props = defineProps<{ problems: ProblemRow[]; fixing: boolean; fixDisabled: boolean }>()
+const props = defineProps<{ problems: ProblemRow[]; fixing: boolean; fixDisabled: boolean; workspaceKey?: string }>()
 /**
  * `focusChange`：「只看某一组」的焦点态抛给宿主（状态栏）。
  * 上游把工具窗口的标题态画在别处（`ProblemsViewIconUpdater.java`，注册于

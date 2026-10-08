@@ -29,8 +29,11 @@ export function previewSettingsError(key: string, value: unknown, languages: rea
       key === 'showBreadcrumbs' || key === 'breadcrumbsPlacement' || key === 'breadcrumbsLanguages' || key === 'showMembersInNavigationBar' ||
       key === 'collapseImports' || key === 'collapseCustomRegions' || key === 'showStickyLines' || key === 'stickyLinesLimit' || key === 'diffContextLines' ||
       key === 'showDiagnostics' || key === 'showErrorStripe' || key === 'reformatOnPaste' || key === 'bidiTextDirection' || key === 'showGutterIcons' || key === 'fileColorsEnabled' || key === 'fileColorsForTabs' || key === 'fileColorsForProjectView' || // 文件颜色两层开关见 IDEA `FileColorManagerImpl`（FileColorsEnabled / FileColorsForTabsEnabled）
-      // InlaySettingsConfigurable（`inlay.hints`）：按 LSP `kind` 分的三档（Type / Parameter / 其它）。
+      // InlaySettingsConfigurable（`inlay.hints`）：按 LSP `kind` 分的三档（Type / Parameter / 其它），
+      // 外加参数提示的排除清单（`ParameterHintsSettingsPanel.kt:18-22` 那个 "Exclude list…" 入口，
+      // 键名唯一定义处 `src/inlayHints.ts` 的 `INLAY_HINT_EXCLUDE_LIST_SETTING_KEY`）。
       key === 'showTypeInlayHints' || key === 'showParameterInlayHints' || key === 'showOtherInlayHints' ||
+      key === 'parameterHintExcludeList' ||
       key === 'smoothScrolling' || key === 'showIconsInMenus' ||
       key === 'rememberSizeForEachToolWindow' || key === 'showToolWindowNames' || key === 'showToolWindowBars' ||
       key === 'leftSideBySide' || key === 'wideScreenSupport' || key === 'rightSideBySide' ||
@@ -85,6 +88,14 @@ export function previewSettingsError(key: string, value: unknown, languages: rea
       // 非字符串条目也要挡（原生 `settings_editor_keys.hpp` 那条 `entry.is_string()` 的等价物）。
       : key === 'codeVisionDisabledGroups' || key === 'codeVisionEnabledGroups' ? !Array.isArray(value) || value.length > 8 ||
         value.some(id => typeof id !== 'string' || !CODE_VISION_GROUP_IDS.includes(id))
+      // 参数提示排除清单（`ParameterNameHintsSettings` 的用户差量那半边）：形状与原生
+      // `settings_editor_keys.hpp` 的 `parameterHintExcludeList` 分支**逐条同形** ——
+      // 数组、≤32 条、每条是非空字符串且 ≤200 字符。**不在这里判 glob 能不能编译**：
+      // 上游对坏模式的口径是静默作废（`ParameterHintExcludeListService.kt:96` 的 `mapNotNull`），
+      // 「写盘前挡住坏行」是设置页那一格的事（`invalidExcludePatternLines`，`HintUtils.kt:44-53`），
+      // 盘上的坏行只会被编译器丢掉 —— 不该因为它让整份设置存不下去（那类事故见文件头）。
+      : key === 'parameterHintExcludeList' ? !Array.isArray(value) || value.length > 32 ||
+        value.some(pattern => typeof pattern !== 'string' || pattern === '' || pattern.length > 200)
       // 与原生 validate_language_flags 同一套规则：键必须是已知语言 id，值是布尔。
       : key === 'breadcrumbsLanguages' ? !value || typeof value !== 'object' || Array.isArray(value) ||
         Object.entries(value).some(([id, flag]) => !(languages as readonly string[]).includes(id) || typeof flag !== 'boolean')

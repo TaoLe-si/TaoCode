@@ -115,6 +115,28 @@ int main() {
         expect_code("INVALID_SETTINGS", [] { taocode::validate_editor_patch(one("stripTrailingSpaces", std::string("modified"))); });
     });
 
+    // 2026-10-08 lane lp-editor：参数提示的排除清单（`ParameterHintsSettingsPanel.kt:18-22` 那个入口，
+    // 键名唯一定义处 src/inlayHints.ts 的 INLAY_HINT_EXCLUDE_LIST_SETTING_KEY）。
+    run("parameterHintExcludeList：空数组与正常清单放行，形状坏的一律 INVALID_SETTINGS", [] {
+        // 出厂档是空数组（native 默认值与前端 defaultEditorSettings 都是 []）。
+        taocode::validate_editor_patch(one("parameterHintExcludeList", Json::array()));
+        taocode::validate_editor_patch(one("parameterHintExcludeList", Json::array({"println", "log*", "*Args*", "(key)"})));
+        // 上限 32 条（与前端 previewSettings.ts 那条同形；32 放行、33 拒）。
+        Json many = Json::array();
+        for (int index = 0; index < 32; ++index) many.push_back("p" + std::to_string(index));
+        taocode::validate_editor_patch(one("parameterHintExcludeList", many));
+        many.push_back("p32");
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_editor_patch(one("parameterHintExcludeList", many)); });
+        // 形状坏的四档：不是数组 / 非字符串条目 / 空条目 / 单条超 200 字节。
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_editor_patch(one("parameterHintExcludeList", std::string("println"))); });
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_editor_patch(one("parameterHintExcludeList", Json::array({1}))); });
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_editor_patch(one("parameterHintExcludeList", Json::array({""}))); });
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_editor_patch(one("parameterHintExcludeList", Json::array({std::string(201, 'x')}))); });
+        // 编译不了的模式（三个星号 / 星号在中间）**不算形状坏**：上游对坏模式的口径是静默作废
+        // （ParameterHintExcludeListService.kt:96 的 mapNotNull），盘上一条坏行不该让整份存档判坏。
+        taocode::validate_editor_patch(one("parameterHintExcludeList", Json::array({"a*b*c", "mid*star*here*more"})));
+    });
+
     std::cout << (failures == 0 ? "settings_editor_keys: all checks passed\n"
                                 : "settings_editor_keys: " + std::to_string(failures) + " check(s) failed\n");
     return failures == 0 ? 0 : 1;

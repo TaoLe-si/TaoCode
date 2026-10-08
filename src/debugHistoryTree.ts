@@ -5,7 +5,8 @@
 //
 // 本仓的分工（不重复任何一份已有规则）：
 //   · 历史的**容器语义**（初始 index=-1、设为根 splice 插入、HISTORY_SIZE=11、back/forward
-//     的可用性与 Alt+←/Alt+→）已经在 `src/debugValueHistory.ts`，本模块只 type-import 它；
+//     的可用性与 Alt+←/Alt+→）已经在 `src/debugValueHistory.ts` —— 本模块**不重复它**，
+//     组件（`src/components/debug/DebugHistoryTree.vue`）直接 import 那一份；
 //   · 一行值**长什么样**（分隔符 + `{类型}` + 值、不可见字符转义、`MAX_VALUE_LENGTH`）、
 //     动作清单与可用性判据已经在 `src/debugTypeGrouping.ts`（`valueLineText` / `xValueNodeActions`）；
 //   · 省略号节点（`{n} more items`）也在 `src/debugTypeGrouping.ts`（`pagedEllipsisNode`）；
@@ -38,12 +39,15 @@ export interface EvaluateHistoryEntry {
   page: VariablePageInfo
 }
 
-/** 一个孩子的形状 —— DAP `variables` 回的 `DapVariable` 的前四个字段（够画行与判断能不能展开）。 */
+/** 一个孩子的形状 —— DAP `variables` 回的那几个字段（够画行、判断能不能展开、报不报总量）。 */
 export interface HistoryTreeChild {
   name: string
   value: string
   type?: string
   reference: number
+  /** 适配器为这个容器报的子项规模（`native/dap_shaping.cpp` 的 `shape_one_variable` 按需带出）。 */
+  namedVariables?: number
+  indexedVariables?: number
 }
 
 /** 一行（根 / 孩子 / 省略号）。`text` 是行上要画的那段文本，`name` 是行名（省略号行没有名字）。 */
@@ -52,8 +56,12 @@ export interface HistoryTreeRow {
   key: string
   kind: 'root' | 'child' | 'ellipsis'
   name?: string
+  /** 值的**原文**（未加分隔符/类型前缀）——「设为根」把它变成新根的 `value`，行文本由它再算一次。 */
+  value: string
+  /** 值的类型（原文）。 */
+  type?: string
   text: string
-  /** 这一行指向的容器 reference（省略号行指向父容器）。 */
+  /** 这一行指向的容器 reference（省略号行是 0 —— 它不指向任何容器）。 */
   reference: number
   hasChildren: boolean
   /** 行动作（已按上游口径过滤掉不该画的；见 `historyRowActions`）。 */
@@ -83,6 +91,23 @@ export function evaluateHistoryEntry(
 }
 
 /**
+ * 把一个**值节点**（不是表达式）变成历史条目 —— 「设为根」把选中的孩子提成新根时用它。
+ * 规模只认适配器在这一行上报的两个字段（没报就是 `paged:false`，不假装知道还有多少）。
+ */
+export function historyValueEntry(
+  name: string, value: string, type: string | undefined, reference: number,
+  container?: { namedVariables?: number; indexedVariables?: number },
+): EvaluateHistoryEntry {
+  return {
+    expression: name,
+    value,
+    ...(type ? { type } : {}),
+    reference,
+    page: evaluateResultPageInfo(container),
+  }
+}
+
+/**
  * 树行的能力缺省 —— **没有通道的动作就报 false**（上游把这类动作按「隐藏」处理，
  * 不是画一个点不动的按钮）。这里的缺省刻意保守：
  *   · `hasName`/`computed` 真（历史条目就是一次已算出的求值的名字与值）；
@@ -91,7 +116,7 @@ export function evaluateHistoryEntry(
  *     / `XJumpToTypeSourceAction` 两条在行菜单里**证明性地不出现**；
  *   · `modifier` 假 —— `setVariable` 要的是**父容器** reference，根行没有父容器；
  *   · `watchesView`/`consoleExecutable`/`evaluator` 假 —— 这三条要有宿主处理函数才画得出来
- *     （见 `DebugHistoryTree.vue` 的 `handleAction`），纯规则不假装有。
+ *     （`src/components/debug/DebugHistoryTree.vue` 的 `delegate` 白名单：给了才画）。
  */
 export function historyRootCapabilities(over: Partial<XValueNodeCapabilities> = {}): XValueNodeCapabilities {
   return { ...emptyCapabilities(), hasName: true, computed: true, ...over }
@@ -108,11 +133,18 @@ export function historyRootRow(entry: EvaluateHistoryEntry, over?: Partial<XValu
     key: HISTORY_ROOT_KEY,
     kind: 'root',
     name: entry.expression,
+    value: entry.value,
+    ...(entry.type ? { type: entry.type } : {}),
     text: valueLineText(entry.value, entry.type),
     reference: entry.reference,
     hasChildren: entry.reference > 0,
     actions: historyRowActions(over),
   }
+}
+
+/** 一个孩子上报的规模（适配器没报时 `paged:false`）。 */
+export function historyChildPage(child: HistoryTreeChild): VariablePageInfo {
+  return evaluateResultPageInfo(child)
 }
 
 /**
@@ -128,6 +160,8 @@ export function historyChildRows(
     key: `child:${child.reference || index}`,
     kind: 'child',
     name: child.name,
+    value: child.value,
+    ...(child.type ? { type: child.type } : {}),
     text: valueLineText(child.value, child.type),
     reference: child.reference,
     hasChildren: child.reference > 0,
@@ -136,7 +170,8 @@ export function historyChildRows(
   const ellipsis = pagedEllipsisNode(loaded, info)
   if (ellipsis) {
     rows.push({
-      key: HISTORY_MORE_KEY, kind: 'ellipsis', text: ellipsis.text, reference: 0, hasChildren: false, actions: [],
+      key: HISTORY_MORE_KEY, kind: 'ellipsis', value: '', text: ellipsis.text, reference: 0,
+      hasChildren: false, actions: [],
     })
   }
   return rows

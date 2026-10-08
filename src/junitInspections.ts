@@ -14,14 +14,17 @@
 //   · `JUnitAssertEqualsOnArrayInspection` / `JUnitAssertEqualsMayBeAssertSameInspection`
 //     （要知道参数静态类型是不是数组 / 是否只有 Object.equals）；
 //   · `ExpectedExceptionNeverThrownInspection.java:40-53`（要看方法体是否真的抛出那个异常 ⇒ 数据流/调用图）；
-//   · `deadCode/JUnit5ImplicitUsageProvider.kt:54-68` 整个建立在 `ReferencesSearch` 上，且本仓
-//     没有「未使用符号」的本地检查 ⇒ 没有要抑制的误报，这条在本仓没有可见面。
+//   · **订正（2026-10-08）**：`deadCode/JUnit5ImplicitUsageProvider.kt:54-68` 那一句「本仓没有可见面」
+//     已不成立 —— 它的词法子集在 `src/junitImplicitUsage.ts`（`junit5ImplicitUsageProvider`，
+//     含 `@TempDir`/`@Nested`/`@ParameterizedTest`+`@MethodSource`/`@FieldSource` 四档判定），
+//     消费点是 `src/annotatorHighlights.ts:118` 的 `isImplicitUsage` 抑制（`unusedSymbol` 不报）
+//     与 `:262` 的 `registerImplicitUsageProvider`，判据 `tests/daemon-analysis-extension-points.test.mjs`。
 // 第二批规则（`JUnitMixedFramework` / `JUnitMalformedDeclaration` 的词法可判子集 /
 // `MultipleExceptionsDeclaredOnTestMethod` / naming 三条）在 `src/junitRules.ts` —— 原判定说它们
 // 「需要 PSI 做不了」，核实上游后订正：判据本身是词法的，PSI 只用于放宽，见该模块头的留痕。
 import { reactive } from 'vue'
 import { DirtyScopeTracker, HighlightPassRegistrar, runMainHighlightPasses, type DirtyLineRange } from './highlightPasses.ts'
-import { junitRuleProblems, type NamingOptions } from './junitRules.ts'
+import { junitRuleProblems, parseMethods, type NamingOptions } from './junitRules.ts'
 // 本地检查的 **EP 宿主**（上游 `com.intellij.localInspection`）：JUnit 规则集本身作为**一条 bundled
 // 工具**登记进 EP，pass 跑的是 `runLocalInspectionTools`（全部登记的工具）—— 第三方插件按同一个
 // EP id 挂的 localInspection 会跟着一起跑，不再是写死的一条通道。
@@ -271,6 +274,114 @@ function parameterizedProblems(path: string, code: string): JunitInspectionProbl
   return problems
 }
 
+// --- JUnit 3 的 `super.tearDown()` 必须从 finally 里调（`JUnit3SuperTearDownInspection`）----
+//
+// 上游依据（`plugins/junit/src/com/intellij/execution/junit/codeInspection/JUnit3SuperTearDownInspection.kt`）：
+//   · `:34` `shouldInspect` = `isJUnit3InScope(file)`（`junitLibrarySetup.kt:21-23`
+//     `hasInModuleScope(file, JUNIT_FRAMEWORK_TEST_CASE)` —— 判的是**依赖库在不在模块作用域**）；
+//   · `:40-56` 的判定逐条：接收者是 `super`、方法名是 `tearDown`（`:41`）、调用所在的最近方法是
+//     `tearDown`（`:42-45`）、所在类能追到 `junit.framework.TestCase`（`:46-47` InheritanceUtil）、
+//     调用**不在** finally 块里（`:48` `node.isInFinallyBlock()`）、且该方法里**除它之外还有别的调用**
+//     （`:49` + `:57-67` 的 `hasNonTrivialActivity`：任何其它 `UCallExpression`，含嵌套）；
+//   · 文案 `plugins/junit/resources/messages/JUnitBundle.properties:107-108`：
+//     显示名 `JUnit 3 'super.tearDown()' is not called from 'finally' block`、
+//     问题描述 `<code>#ref()</code> is not called from 'finally' block`（`#ref` 指那个调用本身）。
+//
+// 本仓的词法等价物与降级点（拿不准的一律不报）：
+//   · `isJUnit3InScope` 看依赖库，本仓看不到依赖 ⇒ 按文件里出现 `extends TestCase`
+//     （与 `junit3MigrationProblems` 的 `junit3Class` 同一条口径）；没有 JUnit3 基类的文件不报；
+//   · `isInFinallyBlock` 是 UAST 的；这里在掩码文本上做花括号配平 + 块头词跟踪
+//     （调用点**外层任何一层**未闭合块的块头是 `finally` 才算在里面 —— 上游 `:48` 就是沿父链找）；
+//   · `hasNonTrivialActivity` 数的是调用；这里按 `名字(` 近似，排掉控制关键字与注解名
+//     （`@SuppressWarnings(` 那种不是调用）；限定名后缀（`foo.bar()` 的 `bar`）仍算调用，与上游一致。
+const BLOCK_KEYWORDS = ['if', 'for', 'while', 'switch', 'catch', 'return', 'synchronized', 'do', 'try', 'else', 'assert', 'throw', 'new']
+
+/** 某 0 基行的起始字符偏移。 */
+function offsetOfLine(code: string, line: number): number {
+  let at = 0
+  for (let index = 0; index < line; ++index) {
+    const next = code.indexOf('\n', at)
+    if (next < 0) return code.length
+    at = next + 1
+  }
+  return at
+}
+
+/** 方法体的字符区间：签名行起找第一个**不在括号里**的 `{`，再按花括号配平到匹配的 `}`（掩码后字符串/注释不参与）。 */
+function methodBodyRange(code: string, headerLine: number): { start: number; end: number } | null {
+  const from = offsetOfLine(code, headerLine)
+  let open = -1
+  let parens = 0
+  for (let i = from; i < code.length; ++i) {
+    const ch = code[i]
+    if (ch === '(') parens++
+    else if (ch === ')') parens--
+    else if (ch === ';' && parens === 0) return null                  // 抽象/接口声明没有体
+    else if (ch === '{' && parens === 0) { open = i; break }
+    else if (ch === '}' && parens === 0) return null
+  }
+  if (open < 0) return null
+  let depth = 0
+  for (let i = open; i < code.length; ++i) {
+    if (code[i] === '{') depth++
+    else if (code[i] === '}') { depth--; if (depth === 0) return { start: open + 1, end: i } }
+  }
+  return null
+}
+
+/** 调用点外层**有没有**任何一层块头是 `finally`（上游 `:48` 的 `isInFinallyBlock()` 是沿父链找）。 */
+function inFinallyBlock(code: string, bodyStart: number, callIndex: number): boolean {
+  const open: string[] = []
+  let headerStart = bodyStart
+  for (let i = bodyStart; i < callIndex; ++i) {
+    const ch = code[i]
+    if (ch === '{') {
+      const word = /([A-Za-z_]\w*)\s*$/.exec(code.slice(headerStart, i).trim())
+      open.push(word ? word[1]! : '')
+      headerStart = i + 1
+    } else if (ch === '}' || ch === ';') {
+      if (ch === '}') open.pop()
+      headerStart = i + 1
+    }
+  }
+  return open.includes('finally')
+}
+
+/** 方法体里除 `[ignore.start, ignore.end)` 那一段之外还有没有调用（上游 `hasNonTrivialActivity`）。 */
+function hasOtherActivity(code: string, body: { start: number; end: number }, ignore: { start: number; end: number }): boolean {
+  for (const match of code.slice(body.start, body.end).matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
+    if (BLOCK_KEYWORDS.includes(match[1]!)) continue
+    const at = body.start + match.index!
+    if ((code[at - 1] ?? ' ') === '@') continue                  // 注解不是调用
+    if (at >= ignore.start && at < ignore.end) continue           // 被忽略的那个调用自己
+    return true
+  }
+  return false
+}
+
+export function superTearDownProblems(path: string, code: string): JunitInspectionProblem[] {
+  // 上游 `isJUnit3InScope`：本仓按「文件里有 JUnit3 的基类」判（降级点见上）。
+  if (!/\bextends\s+(?:junit\.framework\.)?TestCase\b/.test(code)) return []
+  const problems: JunitInspectionProblem[] = []
+  for (const method of parseMethods(code)) {
+    if (method.name !== 'tearDown') continue                      // 上游 `:42-45`
+    const body = methodBodyRange(code, method.line)
+    if (!body) continue
+    for (const match of code.slice(body.start, body.end).matchAll(/super\s*\.\s*tearDown\s*\(/g)) {
+      const at = body.start + match.index!
+      const close = code.indexOf(')', at)
+      if (close < 0) continue
+      if (inFinallyBlock(code, body.start, at)) continue           // 上游 `:48`
+      if (!hasOtherActivity(code, body, { start: at, end: close + 1 })) continue   // 上游 `:49`/`:57-67`
+      const line = code.slice(0, at).split('\n').length - 1
+      problems.push({ path, line, character: at - offsetOfLine(code, line), severity: WARNING,
+        source: 'JUnit3SuperTearDownInspection',
+        message: "super.tearDown() is not called from 'finally' block（上游 JUnit3SuperTearDownInspection）" })
+    }
+  }
+  return problems
+}
+
 /** 命名规范的用户覆盖（上游是 `NamingConventionBean` 存在检查条目里；本仓一张表，面板/设置写它）。 */
 export const junitNamingOptions: NamingOptions = reactive<Record<string, string>>({})
 
@@ -283,6 +394,7 @@ export function junitInspectionProblems(path: string, text: string): JunitInspec
     ...junit3MigrationProblems(path, text, code),
     ...ignoredWithoutReasonProblems(path, code),
     ...parameterizedProblems(path, code),
+    ...superTearDownProblems(path, code),
     // 第二批（混用两代 API / 声明不合法 / throws 冗余 / 命名规范），见 src/junitRules.ts。
     ...junitRuleProblems(path, code, junitNamingOptions),
 

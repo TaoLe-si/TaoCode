@@ -97,7 +97,25 @@ inline bool validate_editor_added_key(const std::string& key, const Json& value)
         }
         return true;
     }
+    // 参数提示排除清单（2026-10-08 lane lp-editor）：一行一条 glob，与前端
+    // `src/previewSettings.ts` 的 `parameterHintExcludeList` 分支**逐条同形**（数组、≤32 条、
+    // 每条非空且 ≤200 字节）。上游那一格的面板是 `ExcludeListPanel.kt`（`:117-123` 按行拆、
+    // 丢空行），坏行口径是 `HintUtils.kt:44-53` 的 `getExcludeListInvalidLineNumbers` ——
+    // 「写盘之前挡住坏行」由设置页那一格做（不合格就禁用「应用清单」）。
+    // **这里不判 glob 能不能编译**：上游对坏模式的口径是静默作废
+    // （`ParameterHintExcludeListService.kt:96` 的 `mapNotNull`），本仓同一口径在
+    // `compileExcludePatterns`；盘上一条坏行不该让整份存档被判成损坏（锁在项目外那一类事故）。
+    if (key == "parameterHintExcludeList") {
+        if (!value.is_array() || value.size() > 32)
+            fail("INVALID_SETTINGS", "parameterHintExcludeList must be an array of at most 32 patterns.");
+        for (const auto& entry : value) {
+            if (!entry.is_string()) fail("INVALID_SETTINGS", "parameterHintExcludeList 的条目必须是模式字符串。");
+            const auto& pattern = entry.get_ref<const std::string&>();
+            if (pattern.empty()) fail("INVALID_SETTINGS", "parameterHintExcludeList 里不许有空模式（空行在读侧就被丢掉）。");
+            if (pattern.size() > 200) fail("INVALID_SETTINGS", "parameterHintExcludeList 的单条模式过长（上限 200 字节）。");
+        }
+        return true;
+    }
     return false;
 }
-
 } // namespace taocode

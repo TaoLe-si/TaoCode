@@ -73,8 +73,9 @@ import TargetEnvironmentsDialog from './TargetEnvironmentsDialog.vue'
 import type { RuntimeRunConfig as RunConfig } from '../runTargets.ts'
 import {
   RUN_CONFIG_TYPES as TYPES, RUN_CONFIG_UNNAMED_NAME, buildRunConfigTree, formatRunArguments, parseRunArguments,
-  nodeKey, runConfigNameProblem, uniqueRunConfigName, validateFolderName, type RunConfigSaveOrigin,
+  nodeKey, runConfigNameProblem, runConfigReferrers, uniqueRunConfigName, validateFolderName, type RunConfigSaveOrigin,
 } from '../runConfigTree'
+import EnvironmentVariablesEditor from './EnvironmentVariablesEditor.vue'
 import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
@@ -204,10 +205,13 @@ const templateTargetExecutable = computed(() => {
   if (!target?.runtime) return ''
   return runtimeExecutable(target.runtime, target.platform ?? (id.startsWith('jdk:') ? targetPlatformOfPath(target.runtime.homePath) : currentTargetPlatform()))
 })
-const templateEnvText = computed({
-  get: () => (templateForm.value.env ?? []).join('\n'),
-  set: (value: string) => { templateForm.value = { ...templateForm.value, env: value.split('\n').map(line => line.trim()).filter(Boolean) } },
-})
+/** 把编辑器发回的行数组写回表单（`env` 的持久形状不变：`KEY=VALUE` 行）。 */
+function setFormEnv(lines: string[]) {
+  form.value = { ...form.value, env: lines }
+}
+function setTemplateEnv(lines: string[]) {
+  templateForm.value = { ...templateForm.value, env: lines }
+}
 const templateBeforeText = computed({
   get: () => (templateForm.value.beforeLaunch ?? []).map(step => `${step.name}|${step.command}`).join('\n'),
   set: (value: string) => {
@@ -291,10 +295,6 @@ function toggleNode(key: string) {
   collapsed.value = next
 }
 
-const envText = computed({
-  get: () => (form.value.env ?? []).join('\n'),
-  set: (value: string) => { form.value = { ...form.value, env: value.split('\n').map(line => line.trim()).filter(Boolean) } },
-})
 const beforeText = computed({
   get: () => (form.value.beforeLaunch ?? []).map(step => `${step.name}|${step.command}`).join('\n'),
   set: (value: string) => {
@@ -341,6 +341,18 @@ const hasField = (id: RunConfigFieldId) => configFields.value.some(field => fiel
 const configProblem = computed(() => checkRunConfiguration(form.value, props.configs))
 
 const uniqueName = (base: string) => uniqueRunConfigName(props.configs, base)
+/**
+ * 依赖这条配置的复合配置（「任务依赖」图里的入边）。上游成员按 `(type, name)` 记
+ * （`CompoundRunConfiguration.kt:160`），本仓用名字当键 ⇒ 查的是**盘上那个名字**
+ * （正在改名时表单里的新名字还没写回去，拿它查不到引用者）。
+ * 两个真实消费点：改名时成员引用一起回写（`src/runConfigTree.ts` 的 `applyRunConfigSave`）、
+ * 删除时把成员一起摘掉或如实拦下（`planRunConfigRemoval`）—— 本仓的 schema 把「成员不存在」
+ * 判成整份坏档（`src/runConfigurationSchema.ts` 的整组校验），所以删除必须处理这张图。
+ */
+const referrers = computed(() => {
+  const stored = originName.value || form.value.name.trim()
+  return stored ? runConfigReferrers(stored, props.configs) : []
+})
 /** IDEA 的 add 按钮：在**选中的类型**下新建（`RunConfigurable` 用类型节点决定工厂）。 */
 function addConfig(type: RunConfig['type']) {
   const folder = selected.value.startsWith('folder:') ? selected.value.slice(7).split('\u0000')[1] ?? '' : ''
@@ -537,7 +549,13 @@ function save() {
                 <input type="checkbox" :checked="targetsEnabled" aria-label="启用多运行目标" @change="toggleTargetsEnabled(($event.target as HTMLInputElement).checked)" />
                 <span>启用多运行目标（RunTargetsEnabled 注册表开关；关掉只留本机）</span>
               </label>
-              <label class="field-row field-row-block"><span>环境变量</span><textarea v-model="templateEnvText" rows="3" aria-label="模板环境变量" placeholder="KEY=value（每行一个）" /></label>
+              <!-- 模板的环境变量用同一套行编辑器（模板记录的 `env` 形状与配置记录一致，
+                   新建配置时由 `applyTemplate` 拷初值）。上游的「包含系统环境变量」勾选不渲染：
+                   本仓运行通道永远在继承来的环境之上叠（native/runner.hpp:30）。 -->
+              <div class="field-row field-row-block">
+                <span>环境变量</span>
+                <EnvironmentVariablesEditor :model-value="templateForm.env ?? []" :busy="busy" label-prefix="模板环境变量" @update:model-value="setTemplateEnv" />
+              </div>
               <label class="field-row field-row-block"><span>启动前</span><textarea v-model="templateBeforeText" rows="3" aria-label="模板启动前步骤" placeholder="构建|cmake --build build（每行 name|command）" /></label>
               <label class="checkbox-row">
                 <input v-model="templateForm.allowRunningInParallel" type="checkbox" />
@@ -579,6 +597,11 @@ function save() {
               </label>
               <label class="field-row"><span>文件夹</span><input v-model="form.folder" list="rc-folders" aria-label="配置所在文件夹" placeholder="留空表示直接在类型节点下" /></label>
               <datalist id="rc-folders"><option v-for="name in folderNames" :key="name" :value="name.split(' / ')[1]" /></datalist>
+              <!-- 「谁依赖这条配置」——复合成员那条依赖边在界面上的投影（不是新状态：真源是
+                   `props.configs` 里的成员表；改名回写与删除摘链都以它为准）。 -->
+              <p v-if="referrers.length" class="field-hint rc-referrers" role="status">
+                依赖它的配置：{{ referrers.map(entry => entry.name).join('、') }}（改名会一起回写成员引用；删除会把它从这些成员里移除）。
+              </p>
               <!-- 逐类型的字段（上游 `getConfigurationEditor()`：每种类型一套编辑器，
                    ConfigurationSettingsEditor.java:59-88 + CompoundRunConfiguration.kt:113）。
                    字段集合/顺序来自 src/runConfigEditors.ts 的 RUN_CONFIG_EDITORS，
@@ -589,7 +612,13 @@ function save() {
                 <label v-else-if="field.id === 'args'" class="field-row"><span>参数</span><input v-model="argsText" aria-label="程序参数" :placeholder="field.placeholder" /></label>
                 <label v-else-if="field.id === 'cwd'" class="field-row"><span>工作目录</span><input v-model="form.cwd" aria-label="工作目录" :placeholder="field.placeholder" /></label>
                 <label v-else-if="field.id === 'adapter'" class="field-row"><span>适配器</span><input v-model="form.adapter" aria-label="调试适配器" :placeholder="field.placeholder" /></label>
-                <label v-else-if="field.id === 'env'" class="field-row field-row-block"><span>环境变量</span><textarea v-model="envText" :rows="field.rows ?? 3" aria-label="环境变量" :placeholder="field.placeholder" /></label>
+                <!-- 环境变量：行编辑器（上游用户变量表的 DOM 形式，规则/文案在
+                     src/runEnvironmentVariables.ts）。替代原来的整块文本框 —— 逐行可改、
+                     非法行当场点名，持久形状仍是 `KEY=VALUE` 行（宿主按同一形状收）。 -->
+                <div v-else-if="field.id === 'env'" class="field-row field-row-block">
+                  <span>环境变量</span>
+                  <EnvironmentVariablesEditor :model-value="form.env ?? []" :busy="busy" label-prefix="环境变量" @update:model-value="setFormEnv" />
+                </div>
                 <!-- CompoundRunConfiguration 的编辑器：只列成员，命令/参数/工作目录都在成员自己身上
                      （`CompositeSettingsEditor` + `RunConfigurationBase` 的 WithoutOwnBeforeRunSteps）。 -->
                 <fieldset v-else-if="field.id === 'members'" class="rc-members">

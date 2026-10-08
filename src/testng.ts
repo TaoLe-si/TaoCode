@@ -155,14 +155,47 @@ export function parseGroups(attributes: string): string[] {
 }
 
 /**
+ * TestNG 配置页那三格落到 CLI 上的三个开关 —— 上游 `TestNGRunnableState.java:109-120` 的
+ * 加参数顺序与门控逐条照抄（`TestNGConfigurationEditor` 的「Parameters / Properties file /
+ * Listeners」是三页，落到命令行上就是这三条）：
+ *   · `-d <目录>`：只在该目录**非空**时加（`:109-111` 的两道门 `!= null && !isEmpty()`）；
+ *   · `-usedefaultlisteners <true|false>`：**无条件**加（`:113`），值取 `USE_DEFAULT_REPORTERS`
+ *     （`model/TestData.java:53` 默认 **false**）；
+ *   · `-listener a;b`：监听器表非空时加，多个用 `;` 连接（`:115-120`）。上游 `:119` 还会把
+ *     `IDEATestNGListener` EP 的贡献并进同一个串；本仓没有那条 EP，如实只拼配置里的表。
+ *
+ * 适用面同上游：这三条是**直跑主类**那支的程序参数（`RemoteTestNGStarter`），
+ * Maven/surefire 那支由 surefire 自己管，不在这里拼。
+ */
+export interface TestngRunParameters {
+  outputDirectory?: string | null
+  useDefaultListeners?: boolean
+  listeners?: readonly string[]
+}
+
+/** 上游 `model/TestData.java:53`。 */
+export const DEFAULT_USE_DEFAULT_LISTENERS = false
+
+export function testngParameterArguments(parameters: TestngRunParameters = {}): string[] {
+  const args: string[] = []
+  const directory = (parameters.outputDirectory ?? '').trim()
+  if (directory) args.push(`-d ${directory}`)                                     // :109-111
+  args.push(`-usedefaultlisteners ${parameters.useDefaultListeners ?? DEFAULT_USE_DEFAULT_LISTENERS}`)  // :113
+  const listeners = (parameters.listeners ?? []).map(entry => entry.trim()).filter(Boolean)
+  if (listeners.length) args.push(`-listener ${listeners.join(';')}`)             // :115-120
+  return args
+}
+
+/**
  * TestNG 的运行命令。
  *   · 走 Maven（`mvn test`）时用 `-Dtest=<类或方法>` 选目标（与 JUnit 同一形状）；
  *   · 直接跑主类时 `java -cp <cp> org.testng.TestNG -testclass <类> [-methods <方法>]`
- *     （上游 `TestNGRunnableState` 的 `-d`/`-usedefaultlisteners`/`-listener` 三个开关；
- *     本仓只拼最小的 `-testclass`/`-methods`，不编输出目录与监听器）。
+ *     再跟上 `testngParameterArguments(options.parameters)` 的三条
+ *     （上游 `TestNGRunnableState.java:51-53` 的三个开关常量）。
  * `target` 是 `com.foo.Bar` 或 `com.foo.Bar#method`（`#` 分隔类与方法，本仓约定）。
  */
-export function testngCommand(base: string, target: string, options: { mainClass?: boolean; classpath?: string } = {}): string {
+export function testngCommand(base: string, target: string,
+  options: { mainClass?: boolean; classpath?: string; parameters?: TestngRunParameters } = {}): string {
   const [className = '', method = ''] = target.split('#')
   if (!options.mainClass) {
     // Maven 的 surefire 用 `-Dtest=`（与 JUnit 同一条），类#方法也认。
@@ -171,6 +204,7 @@ export function testngCommand(base: string, target: string, options: { mainClass
   const classpath = options.classpath ?? '.'
   const args = [`-testclass ${className}`]
   if (method) args.push(`-methods ${className}.${method}`)
+  args.push(...testngParameterArguments(options.parameters))
   return `java -cp "${classpath}" ${TESTNG_MAIN_CLASS} ${args.join(' ')}`
 }
 
